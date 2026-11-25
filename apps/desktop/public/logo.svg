@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none">
+  <defs>
+    <!-- Obsidian Squircle Background -->
+    <linearGradient id="bg-squircle" x1="256" y1="24" x2="256" y2="488" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#222B3B" />
+      <stop offset="52%" stop-color="#151B26" />
+      <stop offset="100%" stop-color="#0D1119" />
+    </linearGradient>
+
+    <!-- Subtle Top-Lit Rim Bevel -->
+    <linearGradient id="rim-stroke" x1="256" y1="24" x2="256" y2="488" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.22" />
+      <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.35" />
+    </linearGradient>
+
+    <!-- Ambient Cobalt Glow -->
+    <radialGradient id="ambient-glow" cx="256" cy="240" r="196" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3B93FF" stop-opacity="0.42" />
+      <stop offset="65%" stop-color="#0572EC" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#0572EC" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Brushed Titanium Outer Vault Dial -->
+    <linearGradient id="titanium-ring" x1="112" y1="112" x2="400" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E5ECF6" />
+      <stop offset="45%" stop-color="#B0BCCF" />
+      <stop offset="100%" stop-color="#768399" />
+    </linearGradient>
+
+    <!-- Inner Vault Core (1Password Cobalt Blue) -->
+    <linearGradient id="cobalt-core" x1="256" y1="154" x2="256" y2="358" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4CA0FF" />
+      <stop offset="55%" stop-color="#0572EC" />
+      <stop offset="100%" stop-color="#034EA6" />
+    </linearGradient>
+
+    <!-- Forged Platinum Key -->
+    <linearGradient id="platinum-key" x1="256" y1="184" x2="256" y2="334" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="70%" stop-color="#EEF4FC" />
+      <stop offset="100%" stop-color="#CBD8EA" />
+    </linearGradient>
+
+    <filter id="drop-shadow" x="100" y="100" width="312" height="320" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#040812" flood-opacity="0.55" />
+    </filter>
+
+    <filter id="key-shadow" x="190" y="165" width="132" height="190" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#022354" flood-opacity="0.45" />
+    </filter>
+  </defs>
+
+  <!-- macOS Squircle Base -->
+  <rect x="24" y="24" width="464" height="464" rx="108" fill="url(#bg-squircle)" />
+  <rect x="25.5" y="25.5" width="461" height="461" rx="106.5" stroke="url(#rim-stroke)" stroke-width="3" />
+
+  <!-- Subtle Radial Cobalt Aura -->
+  <circle cx="256" cy="248" r="196" fill="url(#ambient-glow)" />
+
+  <!-- Brushed Titanium Vault Dial Ring -->
+  <g filter="url(#drop-shadow)">
+    <circle cx="256" cy="256" r="144" fill="#1C2433" />
+    <circle cx="256" cy="256" r="144" stroke="url(#titanium-ring)" stroke-width="18" />
+    <circle cx="256" cy="256" r="127" stroke="#0B101A" stroke-width="4" stroke-opacity="0.7" />
+  </g>
+
+  <!-- 4 Precision Locksmith Calibration Ticks (0°, 90°, 180°, 270°) -->
+  <g stroke="#E9F0FA" stroke-width="5" stroke-linecap="round" opacity="0.88">
+    <line x1="256" y1="100" x2="256" y2="122" />
+    <line x1="256" y1="390" x2="256" y2="412" />
+    <line x1="100" y1="256" x2="122" y2="256" />
+    <line x1="390" y1="256" x2="412" y2="256" />
+  </g>
+
+  <!-- Cobalt Blue Vault Core -->
+  <circle cx="256" cy="256" r="102" fill="url(#cobalt-core)" />
+  <circle cx="256" cy="256" r="100.5" stroke="#85C1FF" stroke-width="3" stroke-opacity="0.45" />
+  <path
+    d="M178 214 A 88 88 0 0 1 334 214"
+    stroke="#FFFFFF"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-opacity="0.24"
+  />
+
+  <!-- Forged Platinum Key Emblem -->
+  <g filter="url(#key-shadow)">
+    <path
+      fill-rule="evenodd"
+      clip-rule="evenodd"
+      fill="url(#platinum-key)"
+      d="M256 184C236.118 184 220 200.118 220 220C220 235.915 230.326 249.417 244.636 254.172L244.636 322C244.636 327.523 249.113 332 254.636 332H257.364C262.887 332 267.364 327.523 267.364 322V312H286C290.418 312 294 308.418 294 304V299C294 294.582 290.418 291 286 291H267.364V279H281C285.418 279 289 275.418 289 271V266C289 261.582 285.418 258 281 258H267.364V254.172C281.674 249.417 292 235.915 292 220C292 200.118 275.882 184 256 184ZM256 205C247.716 205 241 211.716 241 220C241 228.284 247.716 235 256 235C264.284 235 271 228.284 271 220C271 211.716 264.284 205 256 205Z"
+    />
+  </g>
+</svg>

@@ -1,0 +1,12 @@
+{
+  "name": "keysmith-workspace",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace=@keysmith/desktop run dev",
+    "build": "npm --workspace=@keysmith/desktop run build",
+    "typecheck": "npm --workspace=@keysmith/desktop run typecheck"
+  }
+}

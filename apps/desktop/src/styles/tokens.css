@@ -1,0 +1,510 @@
+/* Keysmith Design System & Modern Web Platform Primitives */
+
+:root {
+  color-scheme: light dark;
+
+  &:has(> head > meta[name="color-scheme"][content="dark"]) {
+    color-scheme: dark;
+  }
+
+  &:has(> head > meta[name="color-scheme"][content="light"]) {
+    color-scheme: light;
+  }
+
+  /* Raw Light Tokens (docs/03-ui-and-interaction.md §1.1) */
+  --bg-sidebar-light: #eef0f3;
+  --bg-list-light: #f8f9fa;
+  --bg-detail-light: #ffffff;
+  --bg-card-light: #f3f5f8;
+  --bg-elevated-light: #ffffff;
+  --bg-input-light: #ffffff;
+  --bg-hover-light: rgba(0, 0, 0, 0.045);
+  --bg-selected-light: rgba(5, 114, 236, 0.12);
+  --border-subtle-light: rgba(0, 0, 0, 0.08);
+  --border-strong-light: rgba(0, 0, 0, 0.14);
+  --text-primary-light: #181a1f;
+  --text-secondary-light: #5c6470;
+  --text-muted-light: #868e96;
+  --accent-primary-light: #0572ec;
+  --accent-hover-light: #0461ca;
+  --pw-letter-light: #181a1f;
+  --pw-digit-light: #0572ec;
+  --pw-symbol-light: #d9480f;
+  --status-danger-light: #e03131;
+  --status-warning-light: #d97706;
+  --status-caution-light: #ca8a04;
+  --status-success-light: #16a34a;
+  --status-info-light: #0572ec;
+  --scrollbar-thumb-light: rgba(24, 26, 31, 0.28);
+
+  /* Raw Dark Tokens */
+  --bg-sidebar-dark: #1a1d21;
+  --bg-list-dark: #202328;
+  --bg-detail-dark: #262a30;
+  --bg-card-dark: #2e333b;
+  --bg-elevated-dark: #2c313a;
+  --bg-input-dark: #1e2228;
+  --bg-hover-dark: rgba(255, 255, 255, 0.06);
+  --bg-selected-dark: rgba(59, 147, 255, 0.18);
+  --border-subtle-dark: rgba(255, 255, 255, 0.09);
+  --border-strong-dark: rgba(255, 255, 255, 0.16);
+  --text-primary-dark: #f1f3f5;
+  --text-secondary-dark: #9ba3b0;
+  --text-muted-dark: #6f7785;
+  --accent-primary-dark: #3b93ff;
+  --accent-hover-dark: #54a3ff;
+  --pw-letter-dark: #f1f3f5;
+  --pw-digit-dark: #58a6ff;
+  --pw-symbol-dark: #ff7a59;
+  --status-danger-dark: #ff6b6b;
+  --status-warning-dark: #fbbf24;
+  --status-caution-dark: #facc15;
+  --status-success-dark: #4ade80;
+  --status-info-dark: #60a5fa;
+  --scrollbar-thumb-dark: rgba(241, 243, 245, 0.28);
+
+  /* Default (Light) fallback before @supports(light-dark) */
+  --bg-sidebar: var(--bg-sidebar-light);
+  --bg-list: var(--bg-list-light);
+  --bg-detail: var(--bg-detail-light);
+  --bg-card: var(--bg-card-light);
+  --bg-elevated: var(--bg-elevated-light);
+  --bg-input: var(--bg-input-light);
+  --bg-hover: var(--bg-hover-light);
+  --bg-selected: var(--bg-selected-light);
+  --border-subtle: var(--border-subtle-light);
+  --border-strong: var(--border-strong-light);
+  --text-primary: var(--text-primary-light);
+  --text-secondary: var(--text-secondary-light);
+  --text-muted: var(--text-muted-light);
+  --accent-primary: var(--accent-primary-light);
+  --accent-hover: var(--accent-hover-light);
+  --pw-letter: var(--pw-letter-light);
+  --pw-digit: var(--pw-digit-light);
+  --pw-symbol: var(--pw-symbol-light);
+  --status-danger: var(--status-danger-light);
+  --status-warning: var(--status-warning-light);
+  --status-caution: var(--status-caution-light);
+  --status-success: var(--status-success-light);
+  --status-info: var(--status-info-light);
+  --scrollbar-thumb: var(--scrollbar-thumb-light);
+  --scrollbar-track: transparent;
+
+  @media (prefers-color-scheme: dark) {
+    --bg-sidebar: var(--bg-sidebar-dark);
+    --bg-list: var(--bg-list-dark);
+    --bg-detail: var(--bg-detail-dark);
+    --bg-card: var(--bg-card-dark);
+    --bg-elevated: var(--bg-elevated-dark);
+    --bg-input: var(--bg-input-dark);
+    --bg-hover: var(--bg-hover-dark);
+    --bg-selected: var(--bg-selected-dark);
+    --border-subtle: var(--border-subtle-dark);
+    --border-strong: var(--border-strong-dark);
+    --text-primary: var(--text-primary-dark);
+    --text-secondary: var(--text-secondary-dark);
+    --text-muted: var(--text-muted-dark);
+    --accent-primary: var(--accent-primary-dark);
+    --accent-hover: var(--accent-hover-dark);
+    --pw-letter: var(--pw-letter-dark);
+    --pw-digit: var(--pw-digit-dark);
+    --pw-symbol: var(--pw-symbol-dark);
+    --status-danger: var(--status-danger-dark);
+    --status-warning: var(--status-warning-dark);
+    --status-caution: var(--status-caution-dark);
+    --status-success: var(--status-success-dark);
+    --status-info: var(--status-info-dark);
+    --scrollbar-thumb: var(--scrollbar-thumb-dark);
+  }
+
+  @supports (color: light-dark(white, black)) {
+    --bg-sidebar: light-dark(var(--bg-sidebar-light), var(--bg-sidebar-dark));
+    --bg-list: light-dark(var(--bg-list-light), var(--bg-list-dark));
+    --bg-detail: light-dark(var(--bg-detail-light), var(--bg-detail-dark));
+    --bg-card: light-dark(var(--bg-card-light), var(--bg-card-dark));
+    --bg-elevated: light-dark(var(--bg-elevated-light), var(--bg-elevated-dark));
+    --bg-input: light-dark(var(--bg-input-light), var(--bg-input-dark));
+    --bg-hover: light-dark(var(--bg-hover-light), var(--bg-hover-dark));
+    --bg-selected: light-dark(var(--bg-selected-light), var(--bg-selected-dark));
+    --border-subtle: light-dark(var(--border-subtle-light), var(--border-subtle-dark));
+    --border-strong: light-dark(var(--border-strong-light), var(--border-strong-dark));
+    --text-primary: light-dark(var(--text-primary-light), var(--text-primary-dark));
+    --text-secondary: light-dark(var(--text-secondary-light), var(--text-secondary-dark));
+    --text-muted: light-dark(var(--text-muted-light), var(--text-muted-dark));
+    --accent-primary: light-dark(var(--accent-primary-light), var(--accent-primary-dark));
+    --accent-hover: light-dark(var(--accent-hover-light), var(--accent-hover-dark));
+    --pw-letter: light-dark(var(--pw-letter-light), var(--pw-letter-dark));
+    --pw-digit: light-dark(var(--pw-digit-light), var(--pw-digit-dark));
+    --pw-symbol: light-dark(var(--pw-symbol-light), var(--pw-symbol-dark));
+    --status-danger: light-dark(var(--status-danger-light), var(--status-danger-dark));
+    --status-warning: light-dark(var(--status-warning-light), var(--status-warning-dark));
+    --status-caution: light-dark(var(--status-caution-light), var(--status-caution-dark));
+    --status-success: light-dark(var(--status-success-light), var(--status-success-dark));
+    --status-info: light-dark(var(--status-info-light), var(--status-info-dark));
+    --scrollbar-thumb: light-dark(var(--scrollbar-thumb-light), var(--scrollbar-thumb-dark));
+  }
+}
+
+/* Fallback for manual override when light-dark() is unsupported */
+@supports not (color: light-dark(white, black)) {
+  :root:has(> head > meta[name="color-scheme"][content="dark"]) {
+    --bg-sidebar: var(--bg-sidebar-dark);
+    --bg-list: var(--bg-list-dark);
+    --bg-detail: var(--bg-detail-dark);
+    --bg-card: var(--bg-card-dark);
+    --bg-elevated: var(--bg-elevated-dark);
+    --bg-input: var(--bg-input-dark);
+    --bg-hover: var(--bg-hover-dark);
+    --bg-selected: var(--bg-selected-dark);
+    --border-subtle: var(--border-subtle-dark);
+    --border-strong: var(--border-strong-dark);
+    --text-primary: var(--text-primary-dark);
+    --text-secondary: var(--text-secondary-dark);
+    --text-muted: var(--text-muted-dark);
+    --accent-primary: var(--accent-primary-dark);
+    --accent-hover: var(--accent-hover-dark);
+    --pw-letter: var(--pw-letter-dark);
+    --pw-digit: var(--pw-digit-dark);
+    --pw-symbol: var(--pw-symbol-dark);
+    --status-danger: var(--status-danger-dark);
+    --status-warning: var(--status-warning-dark);
+    --status-caution: var(--status-caution-dark);
+    --status-success: var(--status-success-dark);
+    --status-info: var(--status-info-dark);
+    --scrollbar-thumb: var(--scrollbar-thumb-dark);
+  }
+
+  :root:has(> head > meta[name="color-scheme"][content="light"]) {
+    --bg-sidebar: var(--bg-sidebar-light);
+    --bg-list: var(--bg-list-light);
+    --bg-detail: var(--bg-detail-light);
+    --bg-card: var(--bg-card-light);
+    --bg-elevated: var(--bg-elevated-light);
+    --bg-input: var(--bg-input-light);
+    --bg-hover: var(--bg-hover-light);
+    --bg-selected: var(--bg-selected-light);
+    --border-subtle: var(--border-subtle-light);
+    --border-strong: var(--border-strong-light);
+    --text-primary: var(--text-primary-light);
+    --text-secondary: var(--text-secondary-light);
+    --text-muted: var(--text-muted-light);
+    --accent-primary: var(--accent-primary-light);
+    --accent-hover: var(--accent-hover-light);
+    --pw-letter: var(--pw-letter-light);
+    --pw-digit: var(--pw-digit-light);
+    --pw-symbol: var(--pw-symbol-light);
+    --status-danger: var(--status-danger-light);
+    --status-warning: var(--status-warning-light);
+    --status-caution: var(--status-caution-light);
+    --status-success: var(--status-success-light);
+    --status-info: var(--status-info-light);
+    --scrollbar-thumb: var(--scrollbar-thumb-light);
+  }
+}
+
+html {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", sans-serif;
+  background-color: var(--bg-detail);
+  color: var(--text-primary);
+  accent-color: var(--accent-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  height: 100dvh;
+  overflow: hidden;
+  user-select: none;
+}
+
+input,
+textarea,
+[data-selectable="true"] {
+  user-select: text;
+}
+
+.font-mono-tabular {
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom form fallback for environments without accent-color */
+@supports not (accent-color: auto) {
+  input[type="checkbox"].ks-checkbox {
+    accent-color: auto;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1.5px solid var(--border-strong);
+    background-color: var(--bg-input);
+    display: inline-grid;
+    place-content: center;
+    cursor: pointer;
+  }
+
+  input[type="checkbox"].ks-checkbox:checked {
+    background-color: var(--accent-primary);
+    border-color: var(--accent-primary);
+  }
+
+  input[type="checkbox"].ks-checkbox:checked::after {
+    content: "✓";
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  input[type="range"].ks-range {
+    appearance: none;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--border-strong);
+  }
+
+  input[type="range"].ks-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    cursor: pointer;
+  }
+}
+
+/* Custom Scrollbar (customize-scrollbar-color-and-thickness) */
+.ks-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+@supports not (scrollbar-color: auto) {
+  .ks-scroll {
+    scrollbar-width: auto;
+  }
+
+  .ks-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .ks-scroll::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+
+  .ks-scroll::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+}
+
+/* Accessible Focus Rings */
+:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Modal & Top-Layer Dialog Rules (dialog + animate-to-from-top-layer) */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: rgba(10, 12, 16, 0);
+  transition-property: background-color, backdrop-filter, display, overlay;
+  transition-duration: 0.2s;
+  transition-timing-function: ease-out;
+  transition-behavior: allow-discrete;
+}
+
+dialog.ks-dialog,
+[popover].ks-popover {
+  opacity: 0;
+  transition-property: opacity, transform, display, overlay;
+  transition-duration: 0.18s;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  transition-behavior: allow-discrete;
+
+  @media (prefers-reduced-motion: no-preference) {
+    transform: scale(0.96) translateY(4px);
+  }
+}
+
+dialog.ks-dialog {
+  margin: auto;
+  border: 1px solid var(--border-strong);
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 0;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+}
+
+/* Component-specific dark mode for Large Type frosted stage */
+dialog.ks-dialog-dark {
+  color-scheme: dark;
+  background-color: rgba(18, 20, 25, 0.94);
+  color: #f1f3f5;
+  border-color: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(24px);
+}
+
+:is(dialog.ks-dialog[open], [popover].ks-popover:is(:popover-open, .\:popover-open)):where(:not([data-closing])) {
+  opacity: 1;
+
+  @starting-style {
+    opacity: 0;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    transform: scale(1) translateY(0);
+
+    @starting-style {
+      transform: scale(0.96) translateY(4px);
+    }
+  }
+}
+
+dialog.ks-dialog[open]:where(:not([data-closing]))::backdrop {
+  background-color: rgba(10, 12, 16, 0.45);
+  backdrop-filter: blur(4px);
+
+  @starting-style {
+    background-color: rgba(10, 12, 16, 0);
+  }
+}
+
+dialog.ks-dialog-dark[open]:where(:not([data-closing]))::backdrop {
+  background-color: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(8px);
+
+  @starting-style {
+    background-color: rgba(0, 0, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  dialog.ks-dialog,
+  [popover].ks-popover,
+  dialog::backdrop {
+    transition-duration: 0.08s;
+  }
+}
+
+/* Polyfilled popover pre-load guard & open display */
+[popover].ks-popover:is(:popover-open, .\:popover-open) {
+  display: block;
+}
+
+@supports not selector(:popover-open) {
+  [popover]:not(.\:popover-open) {
+    display: none;
+  }
+}
+
+/* Viewport-Aware Anchored Popovers (viewport-aware-dropdowns) */
+[popover].ks-anchored-popover,
+[popover].ks-anchored-popover-end {
+  border: 1px solid var(--border-strong);
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 0;
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.08);
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+}
+
+@supports (position-area: block-end) {
+  [popover].ks-anchored-popover {
+    inset: auto;
+    margin: 6px 0 0 0;
+    position-area: block-end span-inline-end;
+    position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+  }
+
+  [popover].ks-anchored-popover-end {
+    inset: auto;
+    margin: 6px 0 0 0;
+    position-area: block-end span-inline-start;
+    position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+  }
+}
+
+@supports not (position-area: block-end) {
+  [popover].ks-anchored-popover,
+  [popover].ks-anchored-popover-end {
+    position: fixed;
+    inset: 50% auto auto 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
+  }
+}
+
+/* Persistent Toast Container in Top Layer */
+[popover].ks-toast-popover {
+  inset: auto 0 22px 0;
+  margin: 0 auto;
+  width: fit-content;
+  max-width: calc(100vw - 32px);
+  border: 1px solid var(--border-strong);
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 0;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+}
+
+/* Visually hidden helper */
+.inclusively-hidden {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+}
+
+/* Micro-animations */
+@keyframes ks-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(7px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(5px); }
+}
+
+.ks-shake {
+  animation: ks-shake 0.34s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ks-shake {
+    animation: none;
+  }
+}
+
+@keyframes ks-pulse-danger {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+.ks-pulse-danger {
+  animation: ks-pulse-danger 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ks-pulse-danger {
+    animation: none;
+  }
+}
