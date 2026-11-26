@@ -38,6 +38,8 @@ pub struct PasskeyCreateParams {
     pub pub_key_cred_params: Vec<i32>,
     #[serde(default = "default_true")]
     pub discoverable: bool,
+    #[serde(default)]
+    pub cross_origin: bool,
 }
 
 fn default_true() -> bool {
@@ -56,6 +58,8 @@ pub struct PasskeyAssertParams {
     pub origin: String,
     pub rp_id: String,
     pub challenge_b64u: String,
+    #[serde(default)]
+    pub cross_origin: bool,
 }
 
 pub fn encode_b64u(bytes: &[u8]) -> String {
@@ -79,18 +83,25 @@ pub fn decode_b64u_or_b64(input: &str) -> Result<Vec<u8>, CoreError> {
         .map_err(|e| CoreError::Validation(format!("Base64 解码失败: {e}")))
 }
 
-/// Bitwarden stores UUID credential IDs as string UUIDs (16 raw bytes) or Base64URL.
+/// Normalize a WebAuthn RP ID by trimming whitespace and trailing dots and lowercasing.
+pub fn normalize_rp_id(rp_id: &str) -> String {
+    rp_id.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+/// Bitwarden stores UUID credential IDs as hyphenated 36-char UUIDs (16 raw bytes) or Base64URL.
 pub fn decode_credential_id_bytes(cred_id: &str) -> Result<Vec<u8>, CoreError> {
     let trimmed = cred_id.trim();
-    if let Ok(parsed) = Uuid::parse_str(trimmed) {
-        return Ok(parsed.as_bytes().to_vec());
+    if trimmed.len() == 36 && trimmed.contains('-') {
+        if let Ok(parsed) = Uuid::parse_str(trimmed) {
+            return Ok(parsed.as_bytes().to_vec());
+        }
     }
     decode_b64u_or_b64(trimmed)
 }
 
 /// Validate WebAuthn RP ID against caller origin (exact host or subdomain suffix, HTTPS or localhost).
 pub fn rp_id_matches_origin(rp_id: &str, origin: &str) -> bool {
-    let rp = rp_id.trim().trim_end_matches('.').to_ascii_lowercase();
+    let rp = normalize_rp_id(rp_id);
     if rp.is_empty() {
         return false;
     }
@@ -115,13 +126,17 @@ pub fn passkey_matches_credential_list(
     passkey: &PasskeyCredential,
     candidate_ids: &[String],
 ) -> bool {
-    let Ok(pk_bytes) = decode_credential_id_bytes(&passkey.credential_id) else {
-        return false;
-    };
+    let pk_trimmed = passkey.credential_id.trim();
+    let pk_bytes = decode_credential_id_bytes(pk_trimmed).ok();
     candidate_ids.iter().any(|cand| {
-        decode_credential_id_bytes(cand)
-            .map(|c_bytes| c_bytes == pk_bytes)
-            .unwrap_or(false)
+        let cand_trimmed = cand.trim();
+        if !pk_trimmed.is_empty() && cand_trimmed == pk_trimmed {
+            return true;
+        }
+        match (&pk_bytes, decode_credential_id_bytes(cand_trimmed)) {
+            (Some(a), Ok(b)) => !a.is_empty() && *a == b,
+            _ => false,
+        }
     })
 }
 
@@ -132,10 +147,12 @@ fn decode_pkcs8_signing_key(encoded: &str) -> Result<SigningKey, CoreError> {
     }
     let secret = if trimmed.starts_with("-----BEGIN") {
         p256::SecretKey::from_pkcs8_pem(trimmed)
+            .or_else(|_| p256::SecretKey::from_sec1_pem(trimmed))
             .map_err(|e| CoreError::Crypto(format!("解析 PKCS#8 PEM 私钥失败: {e}")))?
     } else {
         let der = decode_b64u_or_b64(trimmed)?;
         p256::SecretKey::from_pkcs8_der(&der)
+            .or_else(|_| p256::SecretKey::from_sec1_der(&der))
             .map_err(|e| CoreError::Crypto(format!("解析 PKCS#8 DER 私钥失败: {e}")))?
     };
     Ok(SigningKey::from(&secret))
@@ -213,7 +230,12 @@ pub fn encode_none_attestation_object(auth_data: &[u8]) -> Vec<u8> {
     out
 }
 
-fn build_client_data_json(kind: &str, challenge_b64u: &str, origin: &str) -> Result<Vec<u8>, CoreError> {
+fn build_client_data_json(
+    kind: &str,
+    challenge_b64u: &str,
+    origin: &str,
+    cross_origin: bool,
+) -> Result<Vec<u8>, CoreError> {
     let challenge = challenge_b64u.trim();
     if challenge.is_empty() {
         return Err(CoreError::Validation("缺少 WebAuthn challenge".to_string()));
@@ -222,7 +244,7 @@ fn build_client_data_json(kind: &str, challenge_b64u: &str, origin: &str) -> Res
         "type": kind,
         "challenge": challenge,
         "origin": origin.trim(),
-        "crossOrigin": false,
+        "crossOrigin": cross_origin,
     });
     serde_json::to_vec(&val)
         .map_err(|e| CoreError::Internal(format!("序列化 clientDataJSON 失败: {e}")))
@@ -232,7 +254,7 @@ fn build_client_data_json(kind: &str, challenge_b64u: &str, origin: &str) -> Res
 pub fn create_passkey_credential(
     params: &PasskeyCreateParams,
 ) -> Result<PasskeyCreateOutput, CoreError> {
-    let rp_id = params.rp_id.trim().to_ascii_lowercase();
+    let rp_id = normalize_rp_id(&params.rp_id);
     let origin = params.origin.trim().to_string();
     if !rp_id_matches_origin(&rp_id, &origin) {
         return Err(CoreError::Validation(format!(
@@ -297,7 +319,12 @@ pub fn create_passkey_credential(
     auth_data.extend_from_slice(&cose_key);
 
     let attestation_object = encode_none_attestation_object(&auth_data);
-    let client_data_json = build_client_data_json("webauthn.create", &params.challenge_b64u, &origin)?;
+    let client_data_json = build_client_data_json(
+        "webauthn.create",
+        &params.challenge_b64u,
+        &origin,
+        params.cross_origin,
+    )?;
 
     let transports = vec!["internal".to_string(), "hybrid".to_string()];
     let rp_name = if params.rp_name.trim().is_empty() {
@@ -363,14 +390,14 @@ pub fn assert_passkey_credential(
     passkey: &PasskeyCredential,
     params: &PasskeyAssertParams,
 ) -> Result<(u32, Value), CoreError> {
-    let rp_id = params.rp_id.trim().to_ascii_lowercase();
+    let rp_id = normalize_rp_id(&params.rp_id);
     let origin = params.origin.trim().to_string();
     if !rp_id_matches_origin(&rp_id, &origin) {
         return Err(CoreError::Validation(format!(
             "Passkey RP ID ({rp_id}) 与页面源 ({origin}) 不匹配"
         )));
     }
-    if !passkey.rp_id.eq_ignore_ascii_case(&rp_id) {
+    if normalize_rp_id(&passkey.rp_id) != rp_id {
         return Err(CoreError::Validation(format!(
             "Passkey 所属域名 ({}) 与请求 RP ID ({rp_id}) 不一致",
             passkey.rp_id
@@ -386,7 +413,12 @@ pub fn assert_passkey_credential(
     let signing_key = decode_pkcs8_signing_key(&passkey.private_key_pkcs8)?;
     let next_sign_count = passkey.sign_count.saturating_add(1);
 
-    let client_data_json = build_client_data_json("webauthn.get", &params.challenge_b64u, &origin)?;
+    let client_data_json = build_client_data_json(
+        "webauthn.get",
+        &params.challenge_b64u,
+        &origin,
+        params.cross_origin,
+    )?;
     let client_data_hash = Sha256::digest(&client_data_json);
     let rp_hash = Sha256::digest(rp_id.as_bytes());
 

@@ -695,11 +695,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse(
           await rpcRaw('passkey_list_for_rp', {
             rpId: message.rpId || '',
+            rpIdExplicit: message.rpIdExplicit !== false,
             origin: message.origin || '',
             allowCredentials: message.allowCredentials || [],
             excludeCredentials: message.excludeCredentials || []
           })
         );
+        break;
+      }
+      case 'PASSKEY_SHOW_TOP_MODAL': {
+        if (!sender?.tab?.id) {
+          sendResponse({ handled: false, fallback: true });
+          break;
+        }
+        try {
+          const reply = await new Promise((resolve) => {
+            chrome.tabs.sendMessage(
+              sender.tab.id,
+              {
+                type: 'PASSKEY_RENDER_MODAL',
+                modalKind: message.modalKind,
+                options: message.options,
+                origin: message.origin,
+                info: message.info,
+                passkeys: message.passkeys,
+                listPayload: message.listPayload
+              },
+              { frameId: 0 },
+              (resp) => {
+                if (chrome.runtime.lastError) {
+                  resolve({ handled: false, fallback: true });
+                  return;
+                }
+                resolve(resp || { handled: false, fallback: true });
+              }
+            );
+          });
+          sendResponse(reply);
+        } catch {
+          sendResponse({ handled: false, fallback: true });
+        }
         break;
       }
       case 'PASSKEY_CREATE': {

@@ -97,11 +97,13 @@
     if (!(el instanceof HTMLInputElement)) return null;
     const type = (el.type || 'text').toLowerCase();
     const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+    const acTokens = ac.split(/\s+/).filter(Boolean);
+    const hasAc = (token) => acTokens.includes(token);
     const hints = fieldHints(el);
 
     if (type === 'password') {
       const isNew =
-        ac.includes('new-password') ||
+        hasAc('new-password') ||
         /(new.?pass|confirm|repeat|retype|verify|signup|register|create.?pass|新密码|确认密码)/.test(
           hints
         );
@@ -110,7 +112,7 @@
 
     if (
       ['text', 'tel', 'number'].includes(type) &&
-      (ac === 'one-time-code' ||
+      (hasAc('one-time-code') ||
         /(totp|2fa|mfa|otp|auth.?code|verif.?code|验证码|动态口令|安全码)/.test(hints)) &&
       !/(card|cvv|csc|zip|postal)/.test(hints)
     ) {
@@ -119,8 +121,9 @@
 
     if (['email', 'text', 'tel'].includes(type)) {
       if (
-        ac === 'username' ||
-        ac === 'email' ||
+        hasAc('username') ||
+        hasAc('email') ||
+        hasAc('webauthn') ||
         type === 'email' ||
         /(user|username|email|e-mail|login|account|member|uid|phone|mobile|手机|邮箱|账号|用户名)/.test(
           hints
@@ -569,7 +572,9 @@
     }
     .ks-modal {
       width: 100%;
-      max-width: 400px;
+      max-width: min(400px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      overflow-y: auto;
       background: var(--ks-bg);
       color: var(--ks-text);
       border: 1px solid var(--ks-border);
@@ -711,6 +716,7 @@
   let cachedPageData = { connected: false, status: 'Disconnected', matches: [], fetchedAt: 0 };
   let activeDropdownInput = null;
   let activeDropdownKind = null;
+  let activeConditionalPasskey = null;
   const trackedInputs = new Set();
   let rafScheduled = false;
 
@@ -773,6 +779,45 @@
           : t('statusDisconnected');
     head.append(hostSpan, stSpan);
     dd.appendChild(head);
+
+    if (
+      kind !== 'new-password' &&
+      activeConditionalPasskey &&
+      Array.isArray(activeConditionalPasskey.passkeys) &&
+      activeConditionalPasskey.passkeys.length > 0
+    ) {
+      for (const pk of activeConditionalPasskey.passkeys) {
+        const pkBtn = document.createElement('button');
+        pkBtn.type = 'button';
+        pkBtn.className = 'ks-dd-row';
+
+        const meta = document.createElement('div');
+        meta.className = 'ks-dd-meta';
+        const tEl = document.createElement('div');
+        tEl.className = 'ks-dd-title';
+        tEl.textContent = pk.itemTitle || pk.rpName || pk.rpId;
+        const s = document.createElement('div');
+        s.className = 'ks-dd-sub';
+        s.textContent = pk.userName || pk.userDisplayName || pk.rpId;
+        meta.append(tEl, s);
+        pkBtn.appendChild(meta);
+
+        const pill = document.createElement('span');
+        pill.className = 'ks-pill';
+        pill.textContent = pk.reprompt ? t('repromptBadge') : `Passkey · ${t('pkDropdownAction')}`;
+        pkBtn.appendChild(pill);
+
+        pkBtn.addEventListener('mousedown', (e) => e.preventDefault());
+        pkBtn.addEventListener('click', async () => {
+          pill.textContent = t('pkPillSigning');
+          const ok = await assertConditionalPasskey(pk);
+          if (!ok) {
+            pill.textContent = pk.reprompt ? t('repromptBadge') : `Passkey · ${t('pkDropdownAction')}`;
+          }
+        });
+        dd.appendChild(pkBtn);
+      }
+    }
 
     if (kind === 'new-password' || kind === 'password') {
       const genBtn = document.createElement('button');
@@ -948,7 +993,11 @@
             }
           });
           inp.addEventListener('focus', () => {
-            if (cachedPageData.status === 'Unlocked' && cachedPageData.matches.length > 0) {
+            const hasConditionalPk = Boolean(activeConditionalPasskey?.passkeys?.length);
+            if (
+              (cachedPageData.status === 'Unlocked' && cachedPageData.matches.length > 0) ||
+              hasConditionalPk
+            ) {
               openDropdownForInput(inp, kind);
             }
           });
@@ -1180,10 +1229,258 @@
 
   // ==================== In-Page WebAuthn Passkey Modals ====================
 
+  function postToPage(payload) {
+    const targetOrigin =
+      window.location.origin && window.location.origin !== 'null'
+        ? window.location.origin
+        : '*';
+    window.postMessage(
+      {
+        source: 'keysmith-content',
+        ...payload
+      },
+      targetOrigin
+    );
+  }
+
   function closeModal() {
     if (modalContainer) {
       modalContainer.textContent = '';
     }
+  }
+
+  function isConstrainedSubframe() {
+    return window !== window.top && (window.innerWidth < 320 || window.innerHeight < 220);
+  }
+
+  function clearConditionalBanner() {
+    if (bannerContainer && bannerContainer.dataset.mode === 'conditional') {
+      bannerContainer.textContent = '';
+      delete bannerContainer.dataset.mode;
+    }
+  }
+
+  async function assertConditionalPasskey(pk) {
+    if (!activeConditionalPasskey) return false;
+    const req = activeConditionalPasskey;
+    if (pk.reprompt) {
+      showToast(t('pkErrRepromptAssert'), 'warn');
+      return false;
+    }
+    const res = await sendMsg({
+      type: 'PASSKEY_ASSERT',
+      origin: req.origin,
+      itemId: pk.itemId,
+      credentialId: pk.credentialId,
+      options: req.options
+    });
+    if (res.ok && res.result?.handled && res.result?.credential) {
+      clearConditionalBanner();
+      closeDropdown();
+      activeConditionalPasskey = null;
+      showToast(t('pkToastSignedIn', { rpId: pk.rpId }), 'success');
+      postToPage({
+        type: 'PASSKEY_CONDITIONAL_RESOLVE',
+        nonce: req.nonce,
+        handled: true,
+        credential: res.result.credential
+      });
+      return true;
+    }
+    showToast(res.error || t('pkErrSign'), 'warn');
+    return false;
+  }
+
+  function showConditionalPasskeyBanner(passkeys, options) {
+    if (!ensureOverlay() || !bannerContainer || !Array.isArray(passkeys) || passkeys.length === 0) {
+      return;
+    }
+    if (bannerContainer.firstChild && bannerContainer.dataset.mode !== 'conditional') {
+      return;
+    }
+    bannerContainer.textContent = '';
+    bannerContainer.dataset.mode = 'conditional';
+
+    const card = document.createElement('div');
+    card.className = 'ks-banner';
+
+    const head = document.createElement('div');
+    head.className = 'ks-banner-head';
+    const titleWrap = document.createElement('span');
+    titleWrap.style.display = 'inline-flex';
+    titleWrap.style.alignItems = 'center';
+    titleWrap.style.gap = '6px';
+    titleWrap.appendChild(createKeySvg(15));
+    const titleSpan = document.createElement('span');
+    titleSpan.textContent = t('pkConditionalTitle');
+    titleWrap.appendChild(titleSpan);
+
+    const closeX = document.createElement('button');
+    closeX.type = 'button';
+    closeX.className = 'ks-btn ks-btn-ghost';
+    closeX.textContent = '✕';
+    closeX.addEventListener('click', () => {
+      clearConditionalBanner();
+    });
+    head.append(titleWrap, closeX);
+    card.appendChild(head);
+
+    const rpId = passkeys[0]?.rpId || options?.rpId || window.location.hostname;
+    const sub = document.createElement('div');
+    sub.className = 'ks-modal-sub';
+    sub.style.marginBottom = '8px';
+    sub.textContent = t('pkConditionalSub', { rpId });
+    card.appendChild(sub);
+
+    const listEl = document.createElement('div');
+    listEl.className = 'ks-pk-list';
+    listEl.style.marginBottom = '0';
+
+    for (const pk of passkeys.slice(0, 4)) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ks-pk-item';
+
+      const meta = document.createElement('div');
+      meta.className = 'ks-dd-meta';
+      const tEl = document.createElement('div');
+      tEl.className = 'ks-dd-title';
+      tEl.textContent = pk.itemTitle || pk.rpName || pk.rpId;
+      const s = document.createElement('div');
+      s.className = 'ks-dd-sub';
+      s.textContent = pk.userName || pk.userDisplayName || pk.rpId;
+      meta.append(tEl, s);
+      btn.appendChild(meta);
+
+      const pill = document.createElement('span');
+      pill.className = 'ks-pill';
+      pill.textContent = pk.reprompt ? t('repromptBadge') : t('pkDropdownAction');
+      btn.appendChild(pill);
+
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        pill.textContent = t('pkPillSigning');
+        const ok = await assertConditionalPasskey(pk);
+        if (!ok) {
+          btn.disabled = false;
+          pill.textContent = pk.reprompt ? t('repromptBadge') : t('pkDropdownAction');
+        }
+      });
+      listEl.appendChild(btn);
+    }
+
+    card.appendChild(listEl);
+    bannerContainer.appendChild(card);
+  }
+
+  function showPasskeyLockedModal(modalKind, options, listPayload) {
+    return new Promise((resolve) => {
+      if (!ensureOverlay() || !modalContainer) {
+        resolve({ handled: false, fallback: true });
+        return;
+      }
+      modalContainer.textContent = '';
+
+      let done = false;
+      let pollTimer = null;
+      const finish = (result) => {
+        if (done) return;
+        done = true;
+        if (pollTimer) clearInterval(pollTimer);
+        closeModal();
+        resolve(result);
+      };
+
+      const checkUnlocked = async () => {
+        if (done) return;
+        const res = await sendMsg({ type: 'PASSKEY_LIST_FOR_RP', ...listPayload });
+        if (!done && res && res.connected && res.ok && res.result && !res.result.locked) {
+          finish({ unlocked: true, info: res.result });
+        }
+      };
+
+      const backdrop = document.createElement('div');
+      backdrop.className = 'ks-modal-backdrop';
+      const modal = document.createElement('div');
+      modal.className = 'ks-modal';
+
+      const title = document.createElement('div');
+      title.className = 'ks-modal-title';
+      title.appendChild(createKeySvg(18));
+      const titleText = document.createElement('span');
+      titleText.textContent =
+        modalKind === 'create-locked' ? t('pkSaveModalTitle') : t('pkSelectModalTitle');
+      title.appendChild(titleText);
+
+      const rpId = options?.rpId || options?.rp?.id || window.location.hostname;
+      const sub = document.createElement('div');
+      sub.className = 'ks-modal-sub';
+      sub.textContent =
+        modalKind === 'create-locked'
+          ? t('pkModalSubSiteAccount', { rpId, user: options?.user?.name || 'Passkey User' })
+          : t('pkSelectModalSub', { rpId });
+      modal.append(title, sub);
+
+      const lockNote = document.createElement('div');
+      lockNote.className = 'ks-dd-empty';
+      lockNote.textContent = t('pkLockedWaiting');
+      modal.appendChild(lockNote);
+
+      const row = document.createElement('div');
+      row.className = 'ks-btn-row';
+      const unlockBtn = document.createElement('button');
+      unlockBtn.type = 'button';
+      unlockBtn.className = 'ks-btn ks-btn-primary';
+      unlockBtn.textContent = t('pkBtnUnlockDesktop');
+      unlockBtn.addEventListener('click', async () => {
+        await sendMsg({ type: 'OPEN_DESKTOP' });
+        setTimeout(checkUnlocked, 500);
+      });
+
+      const retryBtn = document.createElement('button');
+      retryBtn.type = 'button';
+      retryBtn.className = 'ks-btn ks-btn-sec';
+      retryBtn.textContent = t('pkBtnRetry');
+      retryBtn.addEventListener('click', checkUnlocked);
+
+      const fbBtn = document.createElement('button');
+      fbBtn.type = 'button';
+      fbBtn.className = 'ks-btn ks-btn-sec';
+      fbBtn.textContent = t('pkBtnBrowserDevice');
+      fbBtn.addEventListener('click', () => finish({ handled: false, fallback: true }));
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'ks-btn ks-btn-ghost';
+      cancelBtn.textContent = t('btnCancel');
+      cancelBtn.addEventListener('click', () =>
+        finish({ handled: false, cancelled: true, errorName: 'NotAllowedError' })
+      );
+
+      row.append(unlockBtn, retryBtn, fbBtn, cancelBtn);
+      modal.appendChild(row);
+      backdrop.appendChild(modal);
+      modalContainer.appendChild(backdrop);
+
+      pollTimer = setInterval(checkUnlocked, 1200);
+    });
+  }
+
+  async function presentPasskeyModal(modalKind, payload) {
+    if (isConstrainedSubframe()) {
+      return sendMsg({
+        type: 'PASSKEY_SHOW_TOP_MODAL',
+        modalKind,
+        ...payload
+      });
+    }
+    if (modalKind === 'create-locked' || modalKind === 'get-locked') {
+      return showPasskeyLockedModal(modalKind, payload.options, payload.listPayload);
+    }
+    if (modalKind === 'create') {
+      return showPasskeyCreateModal(payload.options, payload.origin, payload.info);
+    }
+    return showPasskeySelectModal(payload.options, payload.origin, payload.passkeys);
   }
 
   function showPasskeyCreateModal(options, origin, listInfo) {
@@ -1469,33 +1766,98 @@
     if (event.source !== window) return;
     const data = event.data;
     if (!data || data.source !== 'keysmith-page') return;
+
+    if (data.type === 'PASSKEY_CONDITIONAL_CANCEL') {
+      if (activeConditionalPasskey && (!data.nonce || activeConditionalPasskey.nonce === data.nonce)) {
+        activeConditionalPasskey = null;
+        clearConditionalBanner();
+      }
+      return;
+    }
+
+    if (data.type === 'PASSKEY_CONDITIONAL_START') {
+      const origin = data.origin || window.location.origin;
+      const listPayload = {
+        rpId: data.options?.rpId || window.location.hostname,
+        rpIdExplicit: data.options?.rpIdExplicit !== false,
+        origin,
+        allowCredentials: (data.options?.allowCredentials || []).map((c) => c.id),
+        excludeCredentials: []
+      };
+      try {
+        const listRes = await sendMsg({ type: 'PASSKEY_LIST_FOR_RP', ...listPayload });
+        if (!listRes || !listRes.connected || !listRes.ok) {
+          postToPage({
+            type: 'PASSKEY_CONDITIONAL_STATUS',
+            nonce: data.nonce,
+            available: false
+          });
+          return;
+        }
+        const info = listRes.result || {};
+        const passkeys = Array.isArray(info.passkeys) ? info.passkeys : [];
+        if (info.locked || passkeys.length === 0) {
+          postToPage({
+            type: 'PASSKEY_CONDITIONAL_STATUS',
+            nonce: data.nonce,
+            available: false
+          });
+          return;
+        }
+        activeConditionalPasskey = {
+          nonce: data.nonce,
+          origin,
+          options: data.options,
+          passkeys
+        };
+        postToPage({
+          type: 'PASSKEY_CONDITIONAL_STATUS',
+          nonce: data.nonce,
+          available: true
+        });
+        showConditionalPasskeyBanner(passkeys, data.options);
+        if (activeDropdownInput) {
+          openDropdownForInput(activeDropdownInput, activeDropdownKind || 'username');
+        }
+      } catch {
+        postToPage({
+          type: 'PASSKEY_CONDITIONAL_STATUS',
+          nonce: data.nonce,
+          available: false
+        });
+      }
+      return;
+    }
+
     if (data.type !== 'PASSKEY_CREATE_REQUEST' && data.type !== 'PASSKEY_GET_REQUEST') {
       return;
     }
 
     const reply = (payload) => {
-      window.postMessage(
-        {
-          source: 'keysmith-content',
-          nonce: data.nonce,
-          ...payload
-        },
-        window.location.origin
-      );
+      postToPage({
+        nonce: data.nonce,
+        ...payload
+      });
     };
 
     try {
+      const origin = data.origin || window.location.origin;
       const rpId =
         data.type === 'PASSKEY_CREATE_REQUEST'
           ? data.options?.rp?.id || window.location.hostname
           : data.options?.rpId || window.location.hostname;
+      const listPayload = {
+        rpId,
+        rpIdExplicit:
+          data.type === 'PASSKEY_CREATE_REQUEST' ? true : data.options?.rpIdExplicit !== false,
+        origin,
+        allowCredentials: (data.options?.allowCredentials || []).map((c) => c.id),
+        excludeCredentials: (data.options?.excludeCredentials || []).map((c) => c.id)
+      };
 
       const listRes = await sendMsg({
         type: 'PASSKEY_LIST_FOR_RP',
-        rpId,
-        origin: data.origin || window.location.origin,
-        allowCredentials: (data.options?.allowCredentials || []).map((c) => c.id),
-        excludeCredentials: (data.options?.excludeCredentials || []).map((c) => c.id)
+        ...listPayload
       });
 
       if (!listRes || !listRes.connected || !listRes.ok) {
@@ -1503,7 +1865,7 @@
         return;
       }
 
-      const info = listRes.result || {};
+      let info = listRes.result || {};
       if (data.type === 'PASSKEY_CREATE_REQUEST') {
         if (info.excluded) {
           reply({
@@ -1513,27 +1875,60 @@
           });
           return;
         }
-        const modalReply = await showPasskeyCreateModal(
-          data.options,
-          data.origin || window.location.origin,
+        if (info.locked && !info.signedOut) {
+          const lockReply = await presentPasskeyModal('create-locked', {
+            options: data.options,
+            origin,
+            listPayload
+          });
+          if (!lockReply?.unlocked) {
+            reply(lockReply || { handled: false, fallback: true });
+            return;
+          }
+          info = lockReply.info || {};
+          if (info.excluded) {
+            reply({
+              handled: false,
+              errorName: 'InvalidStateError',
+              error: t('pkErrDuplicate')
+            });
+            return;
+          }
+        }
+        const modalReply = await presentPasskeyModal('create', {
+          options: data.options,
+          origin,
           info
-        );
+        });
         reply(modalReply);
         return;
       }
 
       // PASSKEY_GET_REQUEST
+      if (info.locked && !info.signedOut) {
+        const lockReply = await presentPasskeyModal('get-locked', {
+          options: data.options,
+          origin,
+          listPayload
+        });
+        if (!lockReply?.unlocked) {
+          reply(lockReply || { handled: false, fallback: true });
+          return;
+        }
+        info = lockReply.info || {};
+      }
+
       const passkeys = Array.isArray(info.passkeys) ? info.passkeys : [];
       if (info.locked || passkeys.length === 0) {
         reply({ handled: false, fallback: true });
         return;
       }
 
-      const modalReply = await showPasskeySelectModal(
-        data.options,
-        data.origin || window.location.origin,
+      const modalReply = await presentPasskeyModal('get-select', {
+        options: data.options,
+        origin,
         passkeys
-      );
+      });
       reply(modalReply);
     } catch {
       reply({ handled: false, fallback: true });
@@ -1541,6 +1936,12 @@
   });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'PASSKEY_RENDER_MODAL') {
+      presentPasskeyModal(message.modalKind, message)
+        .then((res) => sendResponse(res))
+        .catch(() => sendResponse({ handled: false, fallback: true }));
+      return true;
+    }
     if (message?.type === 'FILL_CREDENTIALS') {
       sendResponse(
         autofillLogin(

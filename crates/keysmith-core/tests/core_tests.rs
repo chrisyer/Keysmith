@@ -1714,6 +1714,7 @@ fn passkey_create_and_assert_es256_webauthn_valid() {
         challenge_b64u: encode_b64u(b"create-challenge-123"),
         pub_key_cred_params: vec![-7, -257],
         discoverable: true,
+        cross_origin: false,
     })
     .unwrap();
 
@@ -1756,6 +1757,7 @@ fn passkey_create_and_assert_es256_webauthn_valid() {
             origin: "https://app.example.com".to_string(),
             rp_id: "example.com".to_string(),
             challenge_b64u: encode_b64u(b"assert-challenge-999"),
+            cross_origin: false,
         },
     )
     .unwrap();
@@ -1841,6 +1843,7 @@ fn bitwarden_login_fido2_credentials_roundtrip_and_assert() {
         challenge_b64u: encode_b64u(b"chal-1"),
         pub_key_cred_params: vec![-7],
         discoverable: true,
+        cross_origin: false,
     })
     .unwrap();
 
@@ -1865,8 +1868,97 @@ fn bitwarden_login_fido2_credentials_roundtrip_and_assert() {
             origin: "https://example.com".to_string(),
             rp_id: "example.com".to_string(),
             challenge_b64u: encode_b64u(b"chal-2"),
+            cross_origin: false,
         },
     )
     .unwrap();
     assert_eq!(count, 1);
+}
+
+#[test]
+fn passkey_normalization_credential_id_variants_and_cross_origin_assert() {
+    use keysmith_core::domain::PasskeyCredential;
+    use keysmith_core::passkey::{
+        assert_passkey_credential, create_passkey_credential, decode_b64u_or_b64,
+        decode_credential_id_bytes, encode_b64u, normalize_rp_id, passkey_matches_credential_list,
+        rp_id_matches_origin, PasskeyAssertParams, PasskeyCreateParams,
+    };
+    use sha2::{Digest, Sha256};
+
+    assert_eq!(normalize_rp_id(" PayPal.COM. "), "paypal.com");
+    assert!(rp_id_matches_origin(" PayPal.COM. ", "https://www.paypal.com"));
+
+    let created = create_passkey_credential(&PasskeyCreateParams {
+        origin: "https://www.paypal.com".to_string(),
+        rp_id: "paypal.com".to_string(),
+        rp_name: "PayPal".to_string(),
+        user_id_b64u: encode_b64u(b"paypal-user"),
+        user_name: "buyer@example.com".to_string(),
+        user_display_name: "Buyer".to_string(),
+        challenge_b64u: encode_b64u(b"paypal-create-chal"),
+        pub_key_cred_params: vec![-7],
+        discoverable: true,
+        cross_origin: false,
+    })
+    .unwrap();
+
+    // Hyphenated UUID credential_id matches Base64URL and padded standard Base64 allowCredentials
+    let raw_id_bytes = decode_credential_id_bytes(&created.credential.credential_id).unwrap();
+    assert_eq!(raw_id_bytes.len(), 16);
+    let b64_std_padded = B64.encode(&raw_id_bytes);
+    let b64u = encode_b64u(&raw_id_bytes);
+    assert!(passkey_matches_credential_list(
+        &created.credential,
+        std::slice::from_ref(&b64_std_padded)
+    ));
+    assert!(passkey_matches_credential_list(
+        &created.credential,
+        std::slice::from_ref(&b64u)
+    ));
+
+    // A 32-char hex-looking Base64URL string (without hyphens) must NOT be misparsed as UUID bytes
+    let hex_like_b64u = "0123456789abcdef0123456789abcdef";
+    let decoded_hex_like = decode_credential_id_bytes(hex_like_b64u).unwrap();
+    assert_eq!(decoded_hex_like.len(), 24);
+    let hex_like_pk = PasskeyCredential {
+        credential_id: hex_like_b64u.to_string(),
+        rp_id: "PayPal.COM.".to_string(),
+        ..created.credential.clone()
+    };
+    assert!(passkey_matches_credential_list(
+        &hex_like_pk,
+        &[hex_like_b64u.to_string()]
+    ));
+
+    // Cross-origin assertion sets crossOrigin: true in clientDataJSON and normalizes stored rp_id
+    let mut stored_upper_rp = created.credential;
+    stored_upper_rp.rp_id = " PayPal.COM. ".to_string();
+    let (next_count, assert_json) = assert_passkey_credential(
+        &stored_upper_rp,
+        &PasskeyAssertParams {
+            origin: "https://www.paypal.com".to_string(),
+            rp_id: "paypal.com".to_string(),
+            challenge_b64u: encode_b64u(b"paypal-assert-chal"),
+            cross_origin: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(next_count, 1);
+
+    let client_json_b64 = assert_json["response"]["clientDataJSON"]
+        .as_str()
+        .unwrap();
+    let client_json: serde_json::Value =
+        serde_json::from_slice(&decode_b64u_or_b64(client_json_b64).unwrap()).unwrap();
+    assert_eq!(client_json["type"], "webauthn.get");
+    assert_eq!(client_json["origin"], "https://www.paypal.com");
+    assert_eq!(client_json["crossOrigin"], true);
+
+    let auth_data = decode_b64u_or_b64(
+        assert_json["response"]["authenticatorData"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(&auth_data[..32], Sha256::digest(b"paypal.com").as_slice());
 }

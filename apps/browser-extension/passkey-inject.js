@@ -10,19 +10,82 @@
     // Ignore if document is not ready for CustomEvent
   }
 
-  if (!navigator.credentials || typeof navigator.credentials.create !== 'function' || typeof navigator.credentials.get !== 'function') {
+  const credsObj = navigator.credentials;
+  const proto =
+    typeof CredentialsContainer !== 'undefined' && CredentialsContainer.prototype
+      ? CredentialsContainer.prototype
+      : null;
+
+  const nativeCreate =
+    (proto && typeof proto.create === 'function' ? proto.create : null) ||
+    (credsObj && typeof credsObj.create === 'function' ? credsObj.create : null);
+  const nativeGet =
+    (proto && typeof proto.get === 'function' ? proto.get : null) ||
+    (credsObj && typeof credsObj.get === 'function' ? credsObj.get : null);
+
+  if (typeof nativeCreate !== 'function' || typeof nativeGet !== 'function') {
     return;
   }
 
-  const nativeCreate = navigator.credentials.create.bind(navigator.credentials);
-  const nativeGet = navigator.credentials.get.bind(navigator.credentials);
   const BRIDGE_TIMEOUT_MS = 120000;
+  const HOOKED_FLAG = '__keysmithWrappedWebAuthn';
+
+  function callNativeCreate(ctx, options) {
+    return nativeCreate.call(ctx || navigator.credentials, options);
+  }
+
+  function callNativeGet(ctx, options) {
+    return nativeGet.call(ctx || navigator.credentials, options);
+  }
+
+  function postTargetOrigin() {
+    const orig = window.location.origin;
+    return orig && orig !== 'null' ? orig : '*';
+  }
+
+  function detectCrossOrigin() {
+    if (window === window.top) {
+      return false;
+    }
+    try {
+      return window.top.location.origin !== window.location.origin;
+    } catch {
+      return true;
+    }
+  }
 
   if (typeof PublicKeyCredential !== 'undefined') {
     try {
       PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = async () => true;
     } catch {
       // Ignore if non-writable
+    }
+    try {
+      PublicKeyCredential.isConditionalMediationAvailable = async () => true;
+    } catch {
+      // Ignore if non-writable
+    }
+    if (typeof PublicKeyCredential.getClientCapabilities === 'function') {
+      const nativeGetCaps = PublicKeyCredential.getClientCapabilities.bind(PublicKeyCredential);
+      try {
+        PublicKeyCredential.getClientCapabilities = async () => {
+          let base = {};
+          try {
+            base = (await nativeGetCaps()) || {};
+          } catch {
+            base = {};
+          }
+          return {
+            ...base,
+            conditionalGet: true,
+            userVerifyingPlatformAuthenticator: true,
+            passkeyPlatformAuthenticator: true,
+            hybridTransport: true
+          };
+        };
+      } catch {
+        // Ignore if non-writable
+      }
     }
   }
 
@@ -35,12 +98,13 @@
   function bufferToBase64Url(input) {
     if (!input) return null;
     let bytes;
-    if (input instanceof ArrayBuffer) {
+    const tag = Object.prototype.toString.call(input);
+    if (input instanceof ArrayBuffer || tag === '[object ArrayBuffer]') {
       bytes = new Uint8Array(input);
     } else if (ArrayBuffer.isView(input)) {
       bytes = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
     } else if (typeof input === 'string') {
-      return input;
+      return input.trim().replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     } else {
       return null;
     }
@@ -79,9 +143,10 @@
   }
 
   function serializeCreateOptions(pk) {
+    const rawRpId = pk.rp?.id && String(pk.rp.id).trim() ? String(pk.rp.id).trim() : '';
     return {
       rp: pk.rp
-        ? { id: pk.rp.id || window.location.hostname, name: pk.rp.name || '' }
+        ? { id: rawRpId || window.location.hostname, name: pk.rp.name || '' }
         : { id: window.location.hostname, name: '' },
       user: pk.user
         ? {
@@ -96,14 +161,18 @@
       excludeCredentials: serializeDescriptorList(pk.excludeCredentials),
       authenticatorSelection: pk.authenticatorSelection || undefined,
       attestation: pk.attestation || 'none',
+      crossOrigin: detectCrossOrigin(),
       extensions: pk.extensions || undefined
     };
   }
 
   function serializeGetOptions(pk, mediation) {
+    const rawRpId = pk.rpId && String(pk.rpId).trim() ? String(pk.rpId).trim() : '';
     return {
       challenge: bufferToBase64Url(pk.challenge),
-      rpId: pk.rpId || window.location.hostname,
+      rpId: rawRpId || window.location.hostname,
+      rpIdExplicit: Boolean(rawRpId),
+      crossOrigin: detectCrossOrigin(),
       timeout: pk.timeout,
       allowCredentials: serializeDescriptorList(pk.allowCredentials),
       userVerification: pk.userVerification || 'preferred',
@@ -185,7 +254,7 @@
       authenticatorAttachment: rawCred.authenticatorAttachment || 'platform',
       response: responseObj,
       getClientExtensionResults: () => extResults,
-      toJSON: () => rawCred
+      toJSON: () => JSON.parse(JSON.stringify(rawCred))
     };
 
     if (typeof PublicKeyCredential !== 'undefined') {
@@ -196,6 +265,16 @@
       }
     }
     return cred;
+  }
+
+  function postToContent(payload) {
+    window.postMessage(
+      {
+        source: 'keysmith-page',
+        ...payload
+      },
+      postTargetOrigin()
+    );
   }
 
   function requestBridge(type, serializedOptions, signal) {
@@ -244,22 +323,131 @@
         signal.addEventListener('abort', onAbort, { once: true });
       }
       window.addEventListener('message', onMessage);
-      window.postMessage(
-        {
-          source: 'keysmith-page',
-          type,
-          nonce,
-          origin: window.location.origin,
-          options: serializedOptions
-        },
-        window.location.origin
-      );
+      postToContent({
+        type,
+        nonce,
+        origin: window.location.origin,
+        options: serializedOptions
+      });
     });
   }
 
-  navigator.credentials.create = async function keysmithCredentialsCreate(options) {
+  function handleConditionalGet(ctx, options) {
+    const signal = options.signal;
+    if (signal?.aborted) {
+      return Promise.reject(
+        signal.reason || new DOMException('The operation was aborted.', 'AbortError')
+      );
+    }
+
+    const nonce = randomNonce();
+    const serialized = serializeGetOptions(options.publicKey, 'conditional');
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let keysmithAvailable = null;
+      let nativeSettledError = null;
+
+      function cleanup() {
+        window.removeEventListener('message', onMessage);
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+        }
+      }
+
+      function onAbort() {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        postToContent({
+          type: 'PASSKEY_CONDITIONAL_CANCEL',
+          nonce,
+          origin: window.location.origin
+        });
+        reject(signal?.reason || new DOMException('The operation was aborted.', 'AbortError'));
+      }
+
+      function onMessage(event) {
+        if (settled || event.source !== window) return;
+        const data = event.data;
+        if (!data || data.source !== 'keysmith-content' || data.nonce !== nonce) {
+          return;
+        }
+        if (data.type === 'PASSKEY_CONDITIONAL_STATUS') {
+          keysmithAvailable = Boolean(data.available);
+          if (!keysmithAvailable && nativeSettledError !== null && !settled) {
+            settled = true;
+            cleanup();
+            reject(nativeSettledError);
+          }
+          return;
+        }
+        if (data.type === 'PASSKEY_CONDITIONAL_RESOLVE') {
+          if (data.handled && data.credential) {
+            const cred = buildCredentialObject(data.credential, false);
+            if (cred) {
+              settled = true;
+              cleanup();
+              resolve(cred);
+            }
+          } else if (data.errorName) {
+            settled = true;
+            cleanup();
+            reject(
+              new DOMException(
+                data.error || 'The operation either timed out or was not allowed.',
+                data.errorName
+              )
+            );
+          }
+        }
+      }
+
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+      window.addEventListener('message', onMessage);
+      postToContent({
+        type: 'PASSKEY_CONDITIONAL_START',
+        nonce,
+        origin: window.location.origin,
+        options: serialized
+      });
+
+      Promise.resolve()
+        .then(() => callNativeGet(ctx, options))
+        .then(
+          (cred) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            postToContent({
+              type: 'PASSKEY_CONDITIONAL_CANCEL',
+              nonce,
+              origin: window.location.origin
+            });
+            resolve(cred);
+          },
+          (err) => {
+            if (settled) return;
+            nativeSettledError = err;
+            if (signal?.aborted) {
+              onAbort();
+              return;
+            }
+            if (keysmithAvailable === false) {
+              settled = true;
+              cleanup();
+              reject(err);
+            }
+          }
+        );
+    });
+  }
+
+  async function keysmithCredentialsCreate(options) {
     if (!options || !options.publicKey) {
-      return nativeCreate(options);
+      return callNativeCreate(this, options);
     }
 
     try {
@@ -269,7 +457,7 @@
         options.signal
       );
       if (reply && reply.aborted) {
-        return nativeCreate(options);
+        return callNativeCreate(this, options);
       }
       if (reply && reply.handled && reply.credential) {
         const cred = buildCredentialObject(reply.credential, true);
@@ -294,17 +482,21 @@
         throw err;
       }
     }
-    return nativeCreate(options);
-  };
+    return callNativeCreate(this, options);
+  }
+  keysmithCredentialsCreate[HOOKED_FLAG] = true;
 
-  navigator.credentials.get = async function keysmithCredentialsGet(options) {
+  async function keysmithCredentialsGet(options) {
     if (!options || !options.publicKey) {
-      return nativeGet(options);
+      return callNativeGet(this, options);
     }
 
     const mediation = options.mediation || 'optional';
-    if (mediation === 'conditional' || mediation === 'silent') {
-      return nativeGet(options);
+    if (mediation === 'silent') {
+      return callNativeGet(this, options);
+    }
+    if (mediation === 'conditional') {
+      return handleConditionalGet(this, options);
     }
 
     try {
@@ -314,7 +506,7 @@
         options.signal
       );
       if (reply && reply.aborted) {
-        return nativeGet(options);
+        return callNativeGet(this, options);
       }
       if (reply && reply.handled && reply.credential) {
         const cred = buildCredentialObject(reply.credential, false);
@@ -339,6 +531,49 @@
         throw err;
       }
     }
-    return nativeGet(options);
-  };
+    return callNativeGet(this, options);
+  }
+  keysmithCredentialsGet[HOOKED_FLAG] = true;
+
+  function installMethod(target, prop, fn) {
+    if (!target) return false;
+    try {
+      if (target[prop] && target[prop][HOOKED_FLAG]) {
+        return true;
+      }
+    } catch {
+      // Ignore read failures
+    }
+    try {
+      const desc = Object.getOwnPropertyDescriptor(target, prop);
+      if (!desc || desc.writable) {
+        target[prop] = fn;
+        if (target[prop] === fn) return true;
+      }
+      if (!desc || desc.configurable) {
+        Object.defineProperty(target, prop, {
+          value: fn,
+          configurable: true,
+          writable: true
+        });
+        return true;
+      }
+    } catch {
+      // Ignore if non-configurable
+    }
+    return false;
+  }
+
+  if (proto) {
+    installMethod(proto, 'create', keysmithCredentialsCreate);
+    installMethod(proto, 'get', keysmithCredentialsGet);
+  }
+  if (credsObj) {
+    if (Object.prototype.hasOwnProperty.call(credsObj, 'create') || credsObj.create !== keysmithCredentialsCreate) {
+      installMethod(credsObj, 'create', keysmithCredentialsCreate);
+    }
+    if (Object.prototype.hasOwnProperty.call(credsObj, 'get') || credsObj.get !== keysmithCredentialsGet) {
+      installMethod(credsObj, 'get', keysmithCredentialsGet);
+    }
+  }
 })();

@@ -9,7 +9,7 @@ use keysmith_core::domain::{
     ItemSection, ItemUrl, UrlMatchRule, WatchtowerFlags, DEFAULT_PERSONAL_VAULT_ID,
 };
 use keysmith_core::passkey::{
-    assert_passkey_credential, create_passkey_credential, now_rfc3339,
+    assert_passkey_credential, create_passkey_credential, normalize_rp_id, now_rfc3339,
     passkey_matches_credential_list, rp_id_matches_origin, PasskeyAssertParams,
     PasskeyCreateParams,
 };
@@ -1137,28 +1137,34 @@ fn extract_str_array(val: Option<&Value>) -> Vec<String> {
 }
 
 fn rpc_passkey_list_for_rp(core: &AppCore, params: &Value) -> Result<Value, String> {
-    let rp_id = params
+    let rp_id_raw = params
         .get("rpId")
         .and_then(|v| v.as_str())
-        .map(str::trim)
-        .unwrap_or("")
-        .to_ascii_lowercase();
+        .map(normalize_rp_id)
+        .unwrap_or_default();
+    let rp_id_explicit = params
+        .get("rpIdExplicit")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(!rp_id_raw.is_empty());
     let origin = params
         .get("origin")
         .and_then(|v| v.as_str())
         .map(str::trim)
         .unwrap_or("");
 
-    let resolved_rp_id = if rp_id.is_empty() {
-        parse_url_host(origin).map(|(_, h)| h).unwrap_or_default()
+    let resolved_rp_id = if rp_id_raw.is_empty() {
+        parse_url_host(origin)
+            .map(|(_, h)| normalize_rp_id(&h))
+            .unwrap_or_default()
     } else {
-        rp_id
+        rp_id_raw
     };
 
     let state = core.session_get_state();
     if state.status != AuthStatus::Unlocked {
         return Ok(json!({
             "locked": true,
+            "signedOut": state.status == AuthStatus::Unauthenticated,
             "rpId": resolved_rp_id,
             "excluded": false,
             "passkeys": [],
@@ -1204,8 +1210,14 @@ fn rpc_passkey_list_for_rp(core: &AppCore, params: &Value) -> Result<Value, Stri
         };
 
         for pk in &item.payload.passkeys {
-            if !pk.rp_id.eq_ignore_ascii_case(&resolved_rp_id) || pk.private_key_pkcs8.trim().is_empty()
-            {
+            if pk.private_key_pkcs8.trim().is_empty() {
+                continue;
+            }
+            let pk_rp = normalize_rp_id(&pk.rp_id);
+            let rp_matches = !pk_rp.is_empty()
+                && (pk_rp == resolved_rp_id
+                    || (!rp_id_explicit && !origin.is_empty() && rp_id_matches_origin(&pk_rp, origin)));
+            if !rp_matches {
                 continue;
             }
             if !exclude_ids.is_empty() && passkey_matches_credential_list(pk, &exclude_ids) {
@@ -1218,7 +1230,7 @@ fn rpc_passkey_list_for_rp(core: &AppCore, params: &Value) -> Result<Value, Stri
                 "itemId": item.id,
                 "itemTitle": item.title,
                 "credentialId": pk.credential_id,
-                "rpId": pk.rp_id,
+                "rpId": pk_rp,
                 "rpName": pk.rp_name,
                 "userName": pk.user_name,
                 "userDisplayName": pk.user_display_name,
@@ -1364,6 +1376,11 @@ async fn rpc_passkey_create(
             _ => true,
         })
         .unwrap_or(true);
+    let cross_origin = params
+        .get("crossOrigin")
+        .and_then(|v| v.as_bool())
+        .or_else(|| options.get("crossOrigin").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
 
     let created = create_passkey_credential(&PasskeyCreateParams {
         origin: origin.clone(),
@@ -1375,6 +1392,7 @@ async fn rpc_passkey_create(
         challenge_b64u,
         pub_key_cred_params,
         discoverable,
+        cross_origin,
     })
     .map_err(|e| e.to_string())?;
 
@@ -1528,13 +1546,25 @@ async fn rpc_passkey_assert(
         .ok_or_else(|| "未找到匹配的 Passkey 凭据".to_string())?;
 
     let pk = &item.payload.passkeys[pk_idx];
-    let rp_id = options
-        .get("rpId")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_ascii_lowercase())
-        .unwrap_or_else(|| pk.rp_id.to_ascii_lowercase());
+    let rp_id_explicit = options
+        .get("rpIdExplicit")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let rp_id = if rp_id_explicit {
+        options
+            .get("rpId")
+            .and_then(|v| v.as_str())
+            .map(normalize_rp_id)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| normalize_rp_id(&pk.rp_id))
+    } else {
+        normalize_rp_id(&pk.rp_id)
+    };
+    let cross_origin = params
+        .get("crossOrigin")
+        .and_then(|v| v.as_bool())
+        .or_else(|| options.get("crossOrigin").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
 
     let (next_sign_count, response_json) = assert_passkey_credential(
         pk,
@@ -1542,6 +1572,7 @@ async fn rpc_passkey_assert(
             origin,
             rp_id,
             challenge_b64u,
+            cross_origin,
         },
     )
     .map_err(|e| e.to_string())?;
