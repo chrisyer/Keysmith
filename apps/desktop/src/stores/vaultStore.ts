@@ -60,6 +60,7 @@ interface VaultStore {
   createVault: (name: string, color: string) => Promise<Vault>;
   renameVault: (id: string, name: string) => Promise<void>;
   deleteVault: (id: string, filter: ItemFilter) => Promise<void>;
+  setVaultTravelSafe: (id: string, travelSafe: boolean, filter: ItemFilter) => Promise<void>;
   setSendCount: (count: number) => void;
   setSyncStatus: (status: SyncStatus) => void;
   clearOnLock: () => void;
@@ -277,6 +278,11 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
 
   deleteVault: async (id, filter) => {
     await tauriClient.vaultDelete(id);
+    await get().refreshAll(filter);
+  },
+
+  setVaultTravelSafe: async (id, travelSafe, filter) => {
+    await tauriClient.vaultSetTravelSafe(id, travelSafe);
     await get().refreshAll(filter);
   },
 

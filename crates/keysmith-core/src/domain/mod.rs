@@ -1,4 +1,10 @@
 pub mod codec;
+pub mod equivalents;
+
+pub use equivalents::{
+    domains_are_equivalent, expand_equivalent_domains, is_domain_autofill_disabled, normalize_host,
+    registrable_domain, DEFAULT_EQUIVALENT_DOMAIN_GROUPS,
+};
 
 use std::collections::HashMap;
 
@@ -128,6 +134,10 @@ pub struct WatchtowerFlags {
     pub ignore_missing_2fa: bool,
     #[serde(default)]
     pub ignore_unsecured_url: bool,
+    #[serde(default)]
+    pub ignore_expiring: bool,
+    #[serde(default)]
+    pub ignore_passkey_available: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,6 +147,8 @@ pub struct WatchtowerFlagsPatch {
     pub ignore_reused: Option<bool>,
     pub ignore_missing_2fa: Option<bool>,
     pub ignore_unsecured_url: Option<bool>,
+    pub ignore_expiring: Option<bool>,
+    pub ignore_passkey_available: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,6 +262,10 @@ pub struct ItemPayload {
     pub archived: bool,
     #[serde(default)]
     pub reprompt: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sso_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_item_ids: Vec<String>,
     #[serde(default)]
     pub attachments: Vec<ItemAttachment>,
     pub created_at: String,
@@ -263,9 +279,11 @@ pub struct VaultMetaJson {
     pub name: String,
     pub icon: String,
     pub color: String,
+    #[serde(default)]
+    pub travel_safe: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Vault {
     pub id: String,
@@ -275,6 +293,8 @@ pub struct Vault {
     pub is_default: bool,
     #[serde(default)]
     pub is_organization: bool,
+    #[serde(default)]
+    pub travel_safe: bool,
     pub item_count: usize,
 }
 
@@ -321,6 +341,8 @@ pub enum WatchtowerIssueType {
     UnsecuredUrl,
     Expiring,
     Breached,
+    #[serde(rename = "passkey_available", alias = "passkeyAvailable")]
+    PasskeyAvailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -346,6 +368,10 @@ pub struct ItemSummary {
     pub archived: bool,
     #[serde(default)]
     pub reprompt: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sso_provider: Option<String>,
+    #[serde(default)]
+    pub linked_item_count: usize,
     #[serde(default)]
     pub attachment_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -387,6 +413,8 @@ impl ItemDetail {
             watchtower: self.payload.watchtower,
             archived: self.payload.archived,
             reprompt: self.payload.reprompt,
+            sso_provider: self.payload.sso_provider.clone(),
+            linked_item_ids: self.payload.linked_item_ids.clone(),
         }
     }
 }
@@ -423,6 +451,35 @@ pub struct ItemDraft {
     pub archived: bool,
     #[serde(default)]
     pub reprompt: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sso_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_item_ids: Vec<String>,
+}
+
+impl Default for ItemDraft {
+    fn default() -> Self {
+        Self {
+            id: None,
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: String::new(),
+            favorite: false,
+            category: ItemCategory::Login,
+            subtitle: None,
+            icon: None,
+            tags: Vec::new(),
+            urls: Vec::new(),
+            sections: Vec::new(),
+            passkeys: Vec::new(),
+            notes: String::new(),
+            password_history: Vec::new(),
+            watchtower: WatchtowerFlags::default(),
+            archived: false,
+            reprompt: false,
+            sso_provider: None,
+            linked_item_ids: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -486,6 +543,10 @@ pub enum AuthStatus {
     Unlocked,
 }
 
+fn default_trash_purge_days() -> u32 {
+    30
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionState {
@@ -507,6 +568,12 @@ pub struct SessionState {
     pub quick_access_shortcut: String,
     pub biometric_max_days: u32,
     pub launch_at_login: bool,
+    #[serde(default)]
+    pub travel_mode: bool,
+    #[serde(default = "default_trash_purge_days")]
+    pub trash_auto_purge_days: u32,
+    #[serde(default)]
+    pub ssh_biometric_confirm: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -523,6 +590,9 @@ pub struct SessionPreferencesPatch {
     pub quick_access_shortcut: Option<String>,
     pub biometric_max_days: Option<u32>,
     pub launch_at_login: Option<bool>,
+    pub travel_mode: Option<bool>,
+    pub trash_auto_purge_days: Option<u32>,
+    pub ssh_biometric_confirm: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -680,6 +750,58 @@ pub struct WatchtowerReport {
     pub hibp_checked_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskedEmailProvider {
+    CatchAll,
+    SimpleLogin,
+    AddyIo,
+    Fastmail,
+    DuckDuckGo,
+}
+
+impl Default for MaskedEmailProvider {
+    fn default() -> Self {
+        Self::CatchAll
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaskedEmailConfig {
+    #[serde(default)]
+    pub provider: MaskedEmailProvider,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub domain: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSnapshotInfo {
+    pub id: String,
+    pub file_name: String,
+    pub created_at: String,
+    pub size_bytes: u64,
+    pub item_count: usize,
+    pub vault_count: usize,
+}
+
+fn default_true_val() -> bool {
+    true
+}
+
+fn default_snapshot_interval() -> u32 {
+    1
+}
+
+fn default_snapshot_keep() -> usize {
+    5
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -689,6 +811,18 @@ pub struct AppSettings {
     pub custom_shortcuts: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_server_url: Option<String>,
+    #[serde(default)]
+    pub masked_email: MaskedEmailConfig,
+    #[serde(default)]
+    pub custom_equivalent_domains: Vec<Vec<String>>,
+    #[serde(default)]
+    pub disabled_autofill_domains: Vec<String>,
+    #[serde(default = "default_true_val")]
+    pub auto_copy_totp_on_fill: bool,
+    #[serde(default = "default_snapshot_interval")]
+    pub snapshot_interval_days: u32,
+    #[serde(default = "default_snapshot_keep")]
+    pub snapshot_keep_count: usize,
 }
 
 impl Default for AppSettings {
@@ -698,6 +832,12 @@ impl Default for AppSettings {
             theme: "system".to_string(),
             custom_shortcuts: HashMap::new(),
             last_server_url: None,
+            masked_email: MaskedEmailConfig::default(),
+            custom_equivalent_domains: Vec::new(),
+            disabled_autofill_domains: Vec::new(),
+            auto_copy_totp_on_fill: true,
+            snapshot_interval_days: 1,
+            snapshot_keep_count: 5,
         }
     }
 }
@@ -709,6 +849,12 @@ pub struct AppSettingsPatch {
     pub theme: Option<String>,
     pub custom_shortcuts: Option<HashMap<String, String>>,
     pub last_server_url: Option<String>,
+    pub masked_email: Option<MaskedEmailConfig>,
+    pub custom_equivalent_domains: Option<Vec<Vec<String>>>,
+    pub disabled_autofill_domains: Option<Vec<String>>,
+    pub auto_copy_totp_on_fill: Option<bool>,
+    pub snapshot_interval_days: Option<u32>,
+    pub snapshot_keep_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -945,6 +1091,8 @@ pub fn item_to_summary(item: &ItemDetail, issues: Vec<WatchtowerIssueType>) -> I
         has_password,
         archived: item.payload.archived,
         reprompt: item.payload.reprompt,
+        sso_provider: item.payload.sso_provider.clone(),
+        linked_item_count: item.payload.linked_item_ids.len(),
         attachment_count: item.payload.attachments.len(),
         deleted_at: item.deleted_at.clone(),
         updated_at: item.payload.updated_at.clone(),

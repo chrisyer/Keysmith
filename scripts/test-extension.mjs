@@ -49,6 +49,11 @@ const testKeys = [
   'ddCardsTitle',
   'pkConditionalTitle',
   'pkLockedWaiting',
+  'modeMaskedEmail',
+  'genMaskedBadge',
+  'ddGenMaskedTitle',
+  'ddCopiedFilledAlias',
+  'ssoBadgePrefix',
 ];
 await i18nSandbox.KeysmithI18n.ready();
 for (const loc of locales) {
@@ -150,6 +155,7 @@ assert.equal(
 );
 const caps = await env.sandbox.PublicKeyCredential.getClientCapabilities();
 assert.equal(caps.conditionalGet, true);
+assert.equal(caps.relatedOrigins, true);
 assert.equal(caps.existingFlag, true);
 
 env.sandbox.__onPost = (msg, target) => {
@@ -312,5 +318,183 @@ assert.equal(createdRes.response.getPublicKeyAlgorithm(), -7);
 assert.deepEqual(JSON.parse(JSON.stringify(createdRes.toJSON().clientExtensionResults)), {
   credProps: { rk: true },
 });
+
+// 5. Verify WebAuthn PRF getClientExtensionResults() hydrates Base64URL into ArrayBuffer while toJSON() stays JSON-safe
+const prfSecretBytes = Buffer.alloc(32, 0x5a);
+const prfSecretB64u = prfSecretBytes.toString('base64url');
+env.sandbox.__onPost = (msg) => {
+  if (msg.type === 'PASSKEY_GET_REQUEST') {
+    setTimeout(() => {
+      env.emitMessage({
+        source: 'keysmith-content',
+        nonce: msg.nonce,
+        handled: true,
+        credential: {
+          id: 'PRFCRED',
+          rawId: 'PRFCRED',
+          type: 'public-key',
+          authenticatorAttachment: 'platform',
+          response: {
+            clientDataJSON: Buffer.from('{}').toString('base64url'),
+            authenticatorData: Buffer.alloc(37).toString('base64url'),
+            signature: Buffer.alloc(64).toString('base64url'),
+            userHandle: null,
+          },
+          clientExtensionResults: {
+            prf: {
+              results: {
+                first: prfSecretB64u,
+              },
+            },
+          },
+        },
+      });
+    }, 2);
+  }
+};
+
+const prfAssertRes = await env.sandbox.navigator.credentials.get({
+  publicKey: {
+    challenge: new Uint8Array([7, 7, 7, 7]).buffer,
+    rpId: 'paypal.com',
+    extensions: { prf: { eval: { first: new Uint8Array([1, 2, 3, 4]) } } },
+  },
+});
+const prfExt = prfAssertRes.getClientExtensionResults();
+assert.ok(prfExt.prf?.results?.first instanceof env.sandbox.ArrayBuffer, 'PRF first output must be ArrayBuffer');
+assert.equal(prfExt.prf.results.first.byteLength, 32);
+assert.equal(prfAssertRes.toJSON().clientExtensionResults.prf.results.first, prfSecretB64u);
+
+// 6. Verify content.js split-fills 6-box segmented OTP inputs (`maxlength="1"`)
+const contentCode = fs.readFileSync('apps/browser-extension/content.js', 'utf8');
+{
+  let runtimeMessageListener = null;
+  class FakeHTMLInputElement {
+    constructor(idx) {
+      this.tagName = 'INPUT';
+      this.type = 'text';
+      this.maxLength = 1;
+      this.size = 1;
+      this.value = '';
+      this.disabled = false;
+      this.readOnly = false;
+      this.isConnected = true;
+      this.parentElement = null;
+      this.form = null;
+      this.events = [];
+      this._idx = idx;
+    }
+    getAttribute(attr) {
+      if (attr === 'maxlength') return '1';
+      if (attr === 'inputmode') return 'numeric';
+      return '';
+    }
+    getBoundingClientRect() {
+      return {
+        left: 20 + this._idx * 38,
+        right: 20 + this._idx * 38 + 32,
+        top: 100,
+        bottom: 140,
+        width: 32,
+        height: 40,
+      };
+    }
+    dispatchEvent(ev) {
+      this.events.push(ev.type);
+      return true;
+    }
+    addEventListener() {}
+  }
+
+  const otpContainer = {
+    parentElement: null,
+    boxes: Array.from({ length: 6 }, (_, idx) => new FakeHTMLInputElement(idx)),
+    querySelectorAll(sel) {
+      return sel.includes('input') ? this.boxes : [];
+    },
+  };
+  for (const box of otpContainer.boxes) {
+    box.parentElement = otpContainer;
+  }
+
+  const contentSandbox = {
+    window: null,
+    globalThis: null,
+    KeysmithI18n: i18nSandbox.KeysmithI18n,
+    HTMLInputElement: FakeHTMLInputElement,
+    HTMLSelectElement: class {},
+    HTMLTextAreaElement: class {},
+    Event: class {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    KeyboardEvent: class {
+      constructor(type, opts) {
+        this.type = type;
+        this.key = opts?.key;
+      }
+    },
+    MutationObserver: class {
+      observe() {}
+    },
+    WeakMap,
+    Set,
+    Array,
+    URL,
+    setTimeout,
+    clearTimeout,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    postMessage: () => {},
+    requestAnimationFrame: () => {},
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    innerWidth: 1024,
+    innerHeight: 768,
+    location: {
+      protocol: 'https:',
+      href: 'https://github.com/sessions/two-factor',
+      origin: 'https://github.com',
+      hostname: 'github.com',
+    },
+    document: {
+      readyState: 'complete',
+      title: 'Two-Factor',
+      documentElement: null,
+      body: {},
+      addEventListener: () => {},
+      querySelectorAll: (sel) => (sel.includes('input') ? otpContainer.boxes : []),
+    },
+    chrome: {
+      runtime: {
+        lastError: null,
+        sendMessage: (_msg, cb) => cb && cb({ connected: false, status: 'Disconnected', matches: [] }),
+        onMessage: {
+          addListener: (fn) => {
+            runtimeMessageListener = fn;
+          },
+        },
+      },
+    },
+  };
+  contentSandbox.window = contentSandbox;
+  contentSandbox.globalThis = contentSandbox;
+  vm.runInNewContext(contentCode, contentSandbox);
+  assert.ok(runtimeMessageListener, 'Expected content.js runtime.onMessage listener');
+
+  let fillResponse = null;
+  runtimeMessageListener(
+    { type: 'FILL_CREDENTIALS', username: '', password: '', totp: '482 917' },
+    {},
+    (resp) => {
+      fillResponse = resp;
+    },
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(fillResponse)), { ok: true, filled: 6 });
+  assert.deepEqual(
+    otpContainer.boxes.map((b) => b.value),
+    ['4', '8', '2', '9', '1', '7'],
+  );
+}
 
 console.log('Extension test suite passed successfully.');

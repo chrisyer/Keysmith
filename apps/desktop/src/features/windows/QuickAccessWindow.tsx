@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Copy, ExternalLink, Lock, Maximize2, Search, X } from 'lucide-react';
+import { ArrowRight, Check, Copy, ExternalLink, Keyboard, Lock, Maximize2, Search, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ColoredPassword } from '../../components/ColoredPassword';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
@@ -190,7 +190,26 @@ export function QuickAccessWindow() {
     hideWindow();
   };
 
+  const triggerAutoType = async () => {
+    if (!activeSummary) return;
+    const detail =
+      previewDetail && previewDetail.id === activeSummary.id
+        ? previewDetail
+        : await tauriClient.itemGet(activeSummary.id).catch(() => null);
+    if (detail?.reprompt) {
+      setInlineMsg(dict.quickAccess.repromptRequired);
+      await openInMain();
+      return;
+    }
+    try {
+      await tauriClient.autofillAutoType(activeSummary.id, 'credentials', true);
+    } catch (err) {
+      setInlineMsg(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       hideWindow();
@@ -215,7 +234,9 @@ export function QuickAccessWindow() {
       void openInMain();
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (e.altKey) {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+        void triggerAutoType();
+      } else if (e.altKey) {
         void copyFieldAndHide('totp');
       } else if (e.shiftKey) {
         void copyFieldAndHide('username');
@@ -482,6 +503,15 @@ export function QuickAccessWindow() {
                   >
                     {dict.quickAccess.copyUser}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => void triggerAutoType()}
+                    title="⌘⇧⏎"
+                    className="py-1.5 px-2.5 rounded-lg border border-[var(--border-strong)] text-xs text-[var(--text-primary)] hover:bg-[var(--bg-hover)] inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Keyboard size={12} />
+                    {dict.quickAccess.autoTypeBtn}
+                  </button>
                 </div>
               </div>
             )}
@@ -493,6 +523,7 @@ export function QuickAccessWindow() {
               <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⏎</kbd> {dict.quickAccess.legendCopyPw}</span>
               <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⇧⏎</kbd> {dict.quickAccess.legendCopyUser}</span>
               <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⌥⏎</kbd> {dict.quickAccess.legendCopyTotp}</span>
+              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⌘⇧⏎</kbd> {dict.quickAccess.legendAutoType}</span>
               <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⌘O</kbd> {dict.quickAccess.legendOpenMain}</span>
             </div>
             <span>{dict.quickAccess.legendEscHide}</span>

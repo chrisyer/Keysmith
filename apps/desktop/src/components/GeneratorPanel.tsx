@@ -26,7 +26,7 @@ const USERNAME_NOUNS = [
 ];
 
 type PanelMode = GeneratorMode | 'username';
-type UsernameStyle = 'plus_alias' | 'catchall' | 'random_word';
+type UsernameStyle = 'plus_alias' | 'catchall' | 'random_word' | 'masked_email';
 
 function randomToken(len: number): string {
   const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
@@ -90,6 +90,8 @@ export function GeneratorPanel({ onUseValue, onClose, compact = false }: Generat
   const [usernameStyle, setUsernameStyle] = useState<UsernameStyle>('plus_alias');
   const [baseEmail, setBaseEmail] = useState(() => accountEmail || 'name@example.com');
   const [catchallDomain, setCatchallDomain] = useState('example.com');
+  const [maskedHint, setMaskedHint] = useState('');
+  const [maskedBusy, setMaskedBusy] = useState(false);
   const [usernameValue, setUsernameValue] = useState(() =>
     buildUsername('plus_alias', accountEmail || 'name@example.com', 'example.com'),
   );
@@ -109,9 +111,21 @@ export function GeneratorPanel({ onUseValue, onClose, compact = false }: Generat
     setResult(res);
   }, []);
 
-  const regenerateUsername = useCallback(() => {
+  const regenerateUsername = useCallback(async () => {
+    if (usernameStyle === 'masked_email') {
+      setMaskedBusy(true);
+      try {
+        const alias = await tauriClient.generatorGenerateMaskedEmail(maskedHint);
+        setUsernameValue(alias);
+      } catch (err) {
+        setUsernameValue(err instanceof Error ? err.message : 'Error');
+      } finally {
+        setMaskedBusy(false);
+      }
+      return;
+    }
     setUsernameValue(buildUsername(usernameStyle, baseEmail, catchallDomain));
-  }, [usernameStyle, baseEmail, catchallDomain]);
+  }, [usernameStyle, baseEmail, catchallDomain, maskedHint]);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -128,7 +142,7 @@ export function GeneratorPanel({ onUseValue, onClose, compact = false }: Generat
 
   useEffect(() => {
     if (mode === 'username') {
-      regenerateUsername();
+      void regenerateUsername();
     }
   }, [mode, regenerateUsername]);
 
@@ -146,12 +160,14 @@ export function GeneratorPanel({ onUseValue, onClose, compact = false }: Generat
   };
 
   const recordCurrent = async (source: string) => {
-    if (mode === 'username' || !result.value) return;
+    const val = mode === 'username' ? usernameValue : result.value;
+    if (!val) return;
+    if (mode === 'username' && usernameStyle !== 'masked_email') return;
     try {
       await tauriClient.generatorHistoryRecord(
-        result.value,
-        options.mode,
-        result.strength.entropyBits,
+        val,
+        mode === 'username' ? 'masked_email' : options.mode,
+        mode === 'username' ? 64 : result.strength.entropyBits,
         source,
       );
       if (panelTab === 'history') {
@@ -262,14 +278,15 @@ export function GeneratorPanel({ onUseValue, onClose, compact = false }: Generat
               </div>
               <button
                 type="button"
+                disabled={maskedBusy}
                 onClick={() =>
-                  mode === 'username' ? regenerateUsername() : void regenerateSecret(options)
+                  mode === 'username' ? void regenerateUsername() : void regenerateSecret(options)
                 }
                 title={dict.generator.regenerate}
                 aria-label={dict.generator.regenerate}
                 className="p-1 rounded-md hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer shrink-0"
               >
-                <RefreshCw size={14} />
+                <RefreshCw size={14} className={maskedBusy ? 'animate-spin' : ''} />
               </button>
             </div>
             {mode !== 'username' && (
@@ -422,11 +439,12 @@ export function GeneratorPanel({ onUseValue, onClose, compact = false }: Generat
 
           {mode === 'username' && (
             <div className="flex flex-col gap-2.5 text-xs">
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {(
                   [
                     { id: 'plus_alias', label: dict.generator.usernameStylePlus },
                     { id: 'catchall', label: dict.generator.usernameStyleCatchall },
+                    { id: 'masked_email', label: dict.generator.usernameStyleMasked },
                     { id: 'random_word', label: dict.generator.usernameStyleRandom },
                   ] as const
                 ).map((s) => (
@@ -471,6 +489,20 @@ export function GeneratorPanel({ onUseValue, onClose, compact = false }: Generat
                     value={catchallDomain}
                     onChange={(e) => setCatchallDomain(e.target.value)}
                     placeholder="example.com"
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] text-xs font-mono-tabular text-[var(--text-primary)]"
+                  />
+                </label>
+              )}
+              {usernameStyle === 'masked_email' && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-[var(--text-secondary)]">
+                    {dict.generator.domainLabel}
+                  </span>
+                  <input
+                    type="text"
+                    value={maskedHint}
+                    onChange={(e) => setMaskedHint(e.target.value)}
+                    placeholder={dict.generator.maskedHintPlaceholder}
                     className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] text-xs font-mono-tabular text-[var(--text-primary)]"
                   />
                 </label>

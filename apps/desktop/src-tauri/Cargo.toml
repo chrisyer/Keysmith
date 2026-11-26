@@ -29,7 +29,7 @@ zeroize = { version = "1.8", features = ["derive"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSBitmapImageRep", "NSColor", "NSImage", "NSImageRep", "NSPasteboard", "NSResponder", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSBitmapImageRep", "NSColor", "NSImage", "NSImageRep", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSDistributedNotificationCenter", "NSError", "NSLocale", "NSNotification", "NSOperation", "NSString", "block2"] }
 objc2-local-authentication = { version = "0.3", default-features = false, features = ["std", "LABase", "LABiometryType", "LAContext", "LAError", "block2"] }
 security-framework = "3.7"
@@ -47,5 +47,6 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_DataExchange",
     "Win32_System_Memory",
     "Win32_System_RemoteDesktop",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }

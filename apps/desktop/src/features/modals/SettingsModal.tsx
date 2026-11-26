@@ -3,16 +3,20 @@ import {
   ArrowUpFromLine,
   Check,
   Copy,
+  FileText,
   Fingerprint,
   FolderOpen,
   Globe,
+  History,
   Info,
   Keyboard,
   LogOut,
+  Mail,
   Monitor,
   Moon,
   Palette,
   Pencil,
+  Plane,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -44,7 +48,10 @@ import type {
   ExportFormat,
   ImportFormat,
   ImportSummary,
+  LocalSnapshotInfo,
+  MaskedEmailProvider,
 } from '../../types/domain';
+import { formatDateTime } from '../../utils/format';
 import { openExternalUrl } from '../../utils/opener';
 import {
   DEFAULT_GLOBAL_QUICK_ACCESS_SHORTCUT,
@@ -91,8 +98,13 @@ export function SettingsModal() {
   const quickAccessShortcut = useSessionStore((s) => s.quickAccessShortcut);
   const biometricMaxDays = useSessionStore((s) => s.biometricMaxDays);
   const launchAtLogin = useSessionStore((s) => s.launchAtLogin);
+  const travelMode = useSessionStore((s) => Boolean(s.travelMode));
+  const trashAutoPurgeDays = useSessionStore((s) => s.trashAutoPurgeDays ?? 30);
+  const sshBiometricConfirm = useSessionStore((s) => Boolean(s.sshBiometricConfirm));
+  const appSettings = useSessionStore((s) => s.appSettings);
 
   const updatePreferences = useSessionStore((s) => s.updatePreferences);
+  const updateAppSettings = useSessionStore((s) => s.updateAppSettings);
   const updateProfile = useSessionStore((s) => s.updateProfile);
   const switchAccount = useSessionStore((s) => s.switchAccount);
   const startAddingAccount = useSessionStore((s) => s.startAddingAccount);
@@ -102,6 +114,7 @@ export function SettingsModal() {
   const syncStatus = useVaultStore((s) => s.syncStatus);
   const syncNow = useVaultStore((s) => s.syncNow);
   const refreshAll = useVaultStore((s) => s.refreshAll);
+  const setVaultTravelSafe = useVaultStore((s) => s.setVaultTravelSafe);
 
   const [tab, setTab] = useState<
     'appearance' | 'security' | 'passkeys' | 'browser' | 'import_export' | 'sync' | 'shortcuts' | 'about'
@@ -128,6 +141,7 @@ export function SettingsModal() {
 
   const [importFormat, setImportFormat] = useState<ImportFormat>('bitwarden_json');
   const [importTargetVaultId, setImportTargetVaultId] = useState('');
+  const [importPassphrase, setImportPassphrase] = useState('');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportSummary | null>(null);
 
@@ -135,6 +149,43 @@ export function SettingsModal() {
   const [exportMasterPw, setExportMasterPw] = useState('');
   const [exportPassphrase, setExportPassphrase] = useState('');
   const [exporting, setExporting] = useState(false);
+
+  const [snapshots, setSnapshots] = useState<LocalSnapshotInfo[]>([]);
+  const [snapshotBusy, setSnapshotBusy] = useState(false);
+  const [emergencyBusy, setEmergencyBusy] = useState(false);
+
+  const [maskedProvider, setMaskedProvider] = useState<MaskedEmailProvider>('catch_all');
+  const [maskedDomain, setMaskedDomain] = useState('');
+  const [maskedApiKey, setMaskedApiKey] = useState('');
+  const [maskedBusy, setMaskedBusy] = useState(false);
+  const [equivDomainsDraft, setEquivDomainsDraft] = useState('');
+  const [disabledDomainsDraft, setDisabledDomainsDraft] = useState('');
+
+  useEffect(() => {
+    setMaskedProvider(appSettings.maskedEmail?.provider ?? 'catch_all');
+    setMaskedDomain(appSettings.maskedEmail?.domain ?? '');
+    setMaskedApiKey(appSettings.maskedEmail?.apiKey ?? '');
+    setEquivDomainsDraft(
+      (appSettings.customEquivalentDomains ?? []).map((g) => g.join(', ')).join('\n'),
+    );
+    setDisabledDomainsDraft((appSettings.disabledAutofillDomains ?? []).join('\n'));
+  }, [open, appSettings]);
+
+  useEffect(() => {
+    if (!open || tab !== 'import_export') return;
+    let active = true;
+    void tauriClient
+      .snapshotList()
+      .then((list) => {
+        if (active) setSnapshots(list);
+      })
+      .catch(() => {
+        if (active) setSnapshots([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [open, tab]);
 
   useEffect(() => {
     setProfileNameDraft(displayName);
@@ -313,8 +364,10 @@ export function SettingsModal() {
         data,
         isBinary,
         importTargetVaultId || null,
+        importFormat === 'keysmith_encrypted_json' ? importPassphrase : undefined,
       );
       setImportResult(summary);
+      setImportPassphrase('');
       await refreshAll(getFilter());
       showToast({
         label: dict.settings.tabs.import_export,
@@ -658,6 +711,151 @@ export function SettingsModal() {
                     className="ks-checkbox"
                   />
                 </label>
+
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
+                  <div>
+                    <div className="font-medium text-[var(--text-primary)]">{dict.settings.sshAgentTitle}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.sshAgentDesc}</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={sshBiometricConfirm}
+                    onChange={(e) => void updatePreferences({ sshBiometricConfirm: e.target.checked })}
+                    className="ks-checkbox"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
+                  <div>
+                    <div className="font-medium text-[var(--text-primary)]">{dict.settings.trashPurgeTitle}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.trashPurgeDesc}</div>
+                  </div>
+                  <select
+                    value={trashAutoPurgeDays}
+                    onChange={(e) => void updatePreferences({ trashAutoPurgeDays: Number(e.target.value) })}
+                    className="ks-select min-w-[128px] shrink-0"
+                  >
+                    <option value={0}>{dict.settings.never}</option>
+                    <option value={7}>{dict.settings.days7}</option>
+                    <option value={30}>{dict.settings.days30}</option>
+                    <option value={90}>{dict.settings.days90}</option>
+                  </select>
+                </label>
+
+                {/* Travel Mode */}
+                <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-3">
+                  <label className="flex items-center justify-between gap-4 cursor-pointer">
+                    <div className="flex items-start gap-2.5">
+                      <Plane size={16} className="text-[var(--accent-primary)] shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-medium text-[var(--text-primary)]">{dict.settings.travelModeTitle}</div>
+                        <div className="text-xs text-[var(--text-secondary)] mt-0.5 leading-relaxed">
+                          {dict.settings.travelModeDesc}
+                        </div>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={travelMode}
+                      onChange={async (e) => {
+                        const nextVal = e.target.checked;
+                        await updatePreferences({ travelMode: nextVal });
+                        await refreshAll(getFilter());
+                        showToast({
+                          label: dict.settings.travelModeTitle,
+                          text: nextVal ? dict.sidebar.travelModeActive : dict.common.restore,
+                          kind: nextVal ? 'warning' : 'info',
+                        });
+                      }}
+                      className="ks-checkbox"
+                    />
+                  </label>
+
+                  {vaults.filter((v) => !v.isOrganization).length > 0 && (
+                    <div className="pt-2.5 border-t border-[var(--border-subtle)] flex flex-col gap-1.5">
+                      <div className="text-xs font-medium text-[var(--text-secondary)]">
+                        {dict.settings.travelSafeVaultsTitle}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {vaults
+                          .filter((v) => !v.isOrganization)
+                          .map((v) => (
+                            <label
+                              key={v.id}
+                              className="px-2.5 py-1.5 rounded-md bg-[var(--bg-detail)] border border-[var(--border-subtle)] flex items-center justify-between gap-2 text-xs cursor-pointer"
+                            >
+                              <span className="inline-flex items-center gap-1.5 truncate text-[var(--text-primary)]">
+                                <span
+                                  className="w-2 h-2 rounded-full shrink-0"
+                                  style={{ backgroundColor: v.color }}
+                                />
+                                <span className="truncate">{v.name}</span>
+                              </span>
+                              <input
+                                type="checkbox"
+                                checked={Boolean(v.travelSafe)}
+                                onChange={(e) =>
+                                  void setVaultTravelSafe(v.id, e.target.checked, getFilter())
+                                }
+                                title={dict.settings.travelSafeToggle}
+                                className="ks-checkbox"
+                              />
+                            </label>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Emergency Kit PDF */}
+                <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <FileText size={16} className="text-[var(--accent-primary)] shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-medium text-[var(--text-primary)]">{dict.settings.emergencyKitTitle}</div>
+                      <div className="text-xs text-[var(--text-secondary)] mt-0.5 leading-relaxed">
+                        {dict.settings.emergencyKitDesc}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={emergencyBusy}
+                    onClick={async () => {
+                      setEmergencyBusy(true);
+                      try {
+                        const res = await tauriClient.vaultExportEmergencyKit();
+                        const binary = atob(res.content);
+                        const bytes = new Uint8Array(binary.length);
+                        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+                        const blob = new Blob([bytes], { type: 'application/pdf' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = res.fileName;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        showToast({
+                          label: dict.settings.emergencyKitTitle,
+                          text: res.fileName,
+                          kind: 'info',
+                        });
+                      } catch (err) {
+                        showToast({
+                          label: dict.settings.emergencyKitTitle,
+                          text: err instanceof Error ? err.message : String(err),
+                          kind: 'warning',
+                        });
+                      } finally {
+                        setEmergencyBusy(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer shrink-0"
+                  >
+                    <ArrowUpFromLine size={13} />
+                    {dict.settings.emergencyKitBtn}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -993,6 +1191,177 @@ export function SettingsModal() {
                     </button>
                   </div>
                 </form>
+
+                {/* Auto-copy 2FA on autofill */}
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
+                  <div>
+                    <div className="font-medium text-[var(--text-primary)]">{dict.settings.autoCopyTotpTitle}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.autoCopyTotpDesc}</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={appSettings.autoCopyTotpOnFill ?? true}
+                    onChange={(e) => void updateAppSettings({ autoCopyTotpOnFill: e.target.checked })}
+                    className="ks-checkbox"
+                  />
+                </label>
+
+                {/* Masked Email Generator Settings */}
+                <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-2.5">
+                  <div className="flex items-start gap-2">
+                    <Mail size={15} className="text-[var(--accent-primary)] shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-semibold text-[var(--text-primary)]">{dict.settings.maskedEmailTitle}</div>
+                      <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.maskedEmailDesc}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <select
+                      aria-label={dict.settings.maskedEmailProviderLabel}
+                      value={maskedProvider}
+                      onChange={(e) => setMaskedProvider(e.target.value as MaskedEmailProvider)}
+                      className="ks-select w-full"
+                    >
+                      <option value="catch_all">Catch-All (@domain)</option>
+                      <option value="simple_login">SimpleLogin</option>
+                      <option value="addy_io">addy.io (AnonAddy)</option>
+                      <option value="fastmail">Fastmail Masked Email</option>
+                      <option value="duck_duck_go">DuckDuckGo (@duck.com)</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={maskedDomain}
+                      onChange={(e) => setMaskedDomain(e.target.value)}
+                      placeholder={dict.settings.maskedEmailDomainPlaceholder}
+                      className="ks-input w-full border-[var(--border-strong)] font-mono-tabular"
+                    />
+                  </div>
+                  {maskedProvider !== 'catch_all' && (
+                    <input
+                      type="password"
+                      value={maskedApiKey}
+                      onChange={(e) => setMaskedApiKey(e.target.value)}
+                      placeholder={dict.settings.maskedEmailApiKeyPlaceholder}
+                      className="ks-input w-full border-[var(--border-strong)] font-mono-tabular"
+                    />
+                  )}
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={maskedBusy}
+                      onClick={async () => {
+                        setMaskedBusy(true);
+                        try {
+                          await updateAppSettings({
+                            maskedEmail: {
+                              provider: maskedProvider,
+                              domain: maskedDomain.trim(),
+                              apiKey: maskedApiKey.trim(),
+                            },
+                          });
+                          const alias = await tauriClient.generatorGenerateMaskedEmail('example.com');
+                          await tauriClient.clipboardCopySecret(alias, 'Masked Email', false);
+                          showToast({
+                            label: dict.settings.maskedEmailTitle,
+                            text: alias,
+                            kind: 'info',
+                          });
+                        } catch (err) {
+                          showToast({
+                            label: dict.settings.maskedEmailTitle,
+                            text: err instanceof Error ? err.message : String(err),
+                            kind: 'warning',
+                          });
+                        } finally {
+                          setMaskedBusy(false);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+                    >
+                      {dict.settings.maskedEmailTestBtn}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={maskedBusy}
+                      onClick={async () => {
+                        await updateAppSettings({
+                          maskedEmail: {
+                            provider: maskedProvider,
+                            domain: maskedDomain.trim(),
+                            apiKey: maskedApiKey.trim(),
+                          },
+                        });
+                        showToast({
+                          label: dict.settings.maskedEmailTitle,
+                          text: dict.common.save,
+                          kind: 'info',
+                        });
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white text-xs font-medium cursor-pointer"
+                    >
+                      {dict.settings.maskedEmailSaveBtn}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Equivalent Domains & Disabled Autofill Domains */}
+                <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-3">
+                  <div>
+                    <div className="font-semibold text-[var(--text-primary)]">{dict.settings.equivDomainsTitle}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.equivDomainsDesc}</div>
+                    <textarea
+                      rows={3}
+                      value={equivDomainsDraft}
+                      onChange={(e) => setEquivDomainsDraft(e.target.value)}
+                      placeholder="example.com, example.net&#10;mycorp.io, mycorp-internal.com"
+                      className="mt-1.5 w-full rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] px-2.5 py-2 font-mono-tabular text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-[var(--text-primary)]">{dict.settings.disabledDomainsTitle}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.disabledDomainsDesc}</div>
+                    <textarea
+                      rows={2}
+                      value={disabledDomainsDraft}
+                      onChange={(e) => setDisabledDomainsDraft(e.target.value)}
+                      placeholder="localhost&#10;internal.admin.local"
+                      className="mt-1.5 w-full rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] px-2.5 py-2 font-mono-tabular text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const customEquivalentDomains = equivDomainsDraft
+                          .split('\n')
+                          .map((line) =>
+                            line
+                              .split(',')
+                              .map((d) => d.trim().toLowerCase())
+                              .filter(Boolean),
+                          )
+                          .filter((group) => group.length >= 2);
+                        const disabledAutofillDomains = disabledDomainsDraft
+                          .split(/[\n,]+/)
+                          .map((d) => d.trim().toLowerCase())
+                          .filter(Boolean);
+                        await updateAppSettings({
+                          customEquivalentDomains,
+                          disabledAutofillDomains,
+                        });
+                        showToast({
+                          label: dict.settings.tabs.browser,
+                          text: dict.common.save,
+                          kind: 'info',
+                        });
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white text-xs font-medium cursor-pointer"
+                    >
+                      {dict.settings.saveRulesBtn}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1009,6 +1378,7 @@ export function SettingsModal() {
                       onChange={(e) => setImportFormat(e.target.value as ImportFormat)}
                       className="ks-select w-full"
                     >
+                      <option value="keysmith_encrypted_json">{dict.settings.encryptedJson}</option>
                       <option value="1pux">1Password (.1pux)</option>
                       <option value="bitwarden_json">Bitwarden / Vaultwarden JSON</option>
                       <option value="bitwarden_csv">Bitwarden CSV</option>
@@ -1030,6 +1400,16 @@ export function SettingsModal() {
                         ))}
                     </select>
                   </div>
+
+                  {importFormat === 'keysmith_encrypted_json' && (
+                    <input
+                      type="password"
+                      value={importPassphrase}
+                      onChange={(e) => setImportPassphrase(e.target.value)}
+                      placeholder={dict.settings.importPassphrasePlaceholder}
+                      className="ks-input w-full border-[var(--border-strong)] font-mono-tabular"
+                    />
+                  )}
 
                   <div className="flex justify-end">
                     <label className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white text-[13px] font-medium cursor-pointer shrink-0">
@@ -1107,6 +1487,139 @@ export function SettingsModal() {
                     </button>
                   </div>
                 </form>
+
+                {/* Local Encrypted Snapshots */}
+                <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex items-start gap-2">
+                      <History size={15} className="text-[var(--accent-primary)] shrink-0 mt-0.5" />
+                      <div>
+                        <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                          {dict.settings.snapshotsTitle}
+                        </h2>
+                        <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                          {dict.settings.snapshotsDesc}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={snapshotBusy}
+                      onClick={async () => {
+                        setSnapshotBusy(true);
+                        try {
+                          await tauriClient.snapshotCreate();
+                          const list = await tauriClient.snapshotList();
+                          setSnapshots(list);
+                          showToast({
+                            label: dict.settings.snapshotsTitle,
+                            text: dict.settings.snapshotCreateBtn,
+                            kind: 'info',
+                          });
+                        } catch (err) {
+                          showToast({
+                            label: dict.settings.snapshotsTitle,
+                            text: err instanceof Error ? err.message : String(err),
+                            kind: 'warning',
+                          });
+                        } finally {
+                          setSnapshotBusy(false);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-white text-xs font-medium cursor-pointer shrink-0"
+                    >
+                      <Plus size={13} />
+                      {dict.settings.snapshotCreateBtn}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <span className="text-xs text-[var(--text-secondary)]">
+                      {dict.settings.snapshotIntervalLabel}
+                    </span>
+                    <select
+                      value={appSettings.snapshotIntervalDays ?? 1}
+                      onChange={(e) =>
+                        void updateAppSettings({ snapshotIntervalDays: Number(e.target.value) })
+                      }
+                      className="ks-select min-w-[140px]"
+                    >
+                      <option value={0}>{dict.settings.never}</option>
+                      <option value={1}>{dict.settings.days1}</option>
+                      <option value={7}>{dict.settings.days7}</option>
+                    </select>
+                  </div>
+
+                  {snapshots.length === 0 ? (
+                    <div className="p-3 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-xs text-center text-[var(--text-muted)]">
+                      {dict.settings.snapshotEmpty}
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-[var(--border-subtle)] rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)]">
+                      {snapshots.map((snap) => (
+                        <div
+                          key={snap.id}
+                          className="px-3 py-2 flex items-center justify-between gap-2 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-medium text-[var(--text-primary)] truncate">
+                              {formatDateTime(snap.createdAt)}
+                            </div>
+                            <div className="text-[11px] text-[var(--text-muted)] font-mono-tabular">
+                              {snap.vaultCount} vaults · {snap.itemCount} items ·{' '}
+                              {Math.max(1, Math.round(snap.sizeBytes / 1024))} KB
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              disabled={snapshotBusy}
+                              onClick={async () => {
+                                setSnapshotBusy(true);
+                                try {
+                                  const res = await tauriClient.snapshotRestore(snap.id);
+                                  await refreshAll(getFilter());
+                                  showToast({
+                                    label: dict.settings.snapshotsTitle,
+                                    text: fmt(dict.settings.importSummary, {
+                                      vaults: res.importedVaults,
+                                      items: res.importedItems,
+                                      skipped: res.skippedItems,
+                                    }),
+                                    kind: 'info',
+                                  });
+                                } catch (err) {
+                                  showToast({
+                                    label: dict.settings.snapshotsTitle,
+                                    text: err instanceof Error ? err.message : String(err),
+                                    kind: 'warning',
+                                  });
+                                } finally {
+                                  setSnapshotBusy(false);
+                                }
+                              }}
+                              className="px-2.5 py-1 rounded-md bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[11px] font-medium text-[var(--text-primary)] cursor-pointer"
+                            >
+                              {dict.settings.snapshotRestoreBtn}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={snapshotBusy}
+                              onClick={async () => {
+                                await tauriClient.snapshotDelete(snap.id);
+                                setSnapshots((prev) => prev.filter((x) => x.id !== snap.id));
+                              }}
+                              aria-label={dict.common.delete}
+                              className="p-1.5 rounded-md hover:bg-[var(--status-danger)]/10 text-[var(--text-muted)] hover:text-[var(--status-danger)] cursor-pointer"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

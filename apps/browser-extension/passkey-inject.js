@@ -80,7 +80,8 @@
             conditionalGet: true,
             userVerifyingPlatformAuthenticator: true,
             passkeyPlatformAuthenticator: true,
-            hybridTransport: true
+            hybridTransport: true,
+            relatedOrigins: true
           };
         };
       } catch {
@@ -296,13 +297,39 @@
     };
   }
 
+  function hydrateClientExtensionResults(rawExt) {
+    if (!rawExt || typeof rawExt !== 'object') return {};
+    const out = { ...rawExt };
+    if (rawExt.prf && typeof rawExt.prf === 'object') {
+      const prfOut = { ...rawExt.prf };
+      if (rawExt.prf.results && typeof rawExt.prf.results === 'object') {
+        const resOut = {};
+        if (typeof rawExt.prf.results.first === 'string') {
+          const buf = base64UrlToArrayBuffer(rawExt.prf.results.first);
+          if (buf) resOut.first = buf;
+        } else if (rawExt.prf.results.first instanceof ArrayBuffer) {
+          resOut.first = rawExt.prf.results.first;
+        }
+        if (typeof rawExt.prf.results.second === 'string') {
+          const buf2 = base64UrlToArrayBuffer(rawExt.prf.results.second);
+          if (buf2) resOut.second = buf2;
+        } else if (rawExt.prf.results.second instanceof ArrayBuffer) {
+          resOut.second = rawExt.prf.results.second;
+        }
+        prfOut.results = resOut;
+      }
+      out.prf = prfOut;
+    }
+    return out;
+  }
+
   function buildCredentialObject(rawCred, isCreate) {
     const rawIdBuf = base64UrlToArrayBuffer(rawCred.rawId || rawCred.id);
     const clientDataBuf = base64UrlToArrayBuffer(rawCred.response?.clientDataJSON);
     if (!rawIdBuf || !clientDataBuf) {
       return null;
     }
-    const extResults = rawCred.clientExtensionResults || {};
+    const extResults = hydrateClientExtensionResults(rawCred.clientExtensionResults);
 
     let responseObj;
     if (isCreate) {

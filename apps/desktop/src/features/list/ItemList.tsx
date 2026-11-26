@@ -20,6 +20,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
 import { useI18n } from '../../i18n';
 import { tauriClient } from '../../services/tauriClient';
+import { useSessionStore } from '../../stores/sessionStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import type { SortBy } from '../../types/domain';
@@ -64,6 +65,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
   const stopEditing = useUiStore((s) => s.stopEditing);
   const getFilter = useUiStore((s) => s.getFilter);
   const showToast = useUiStore((s) => s.showToast);
+  const trashAutoPurgeDays = useSessionStore((s) => s.trashAutoPurgeDays ?? 30);
 
   const vaults = useVaultStore((s) => s.vaults);
   const items = useVaultStore((s) => s.items);
@@ -282,7 +284,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
               {dict.list.syntaxHint}
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {['is:favorite', 'is:passkey', 'cat:passkey', 'cat:ssh'].map((chip) => (
+              {['is:favorite', 'is:passkey', 'is:sso', 'cat:passkey', 'cat:ssh'].map((chip) => (
                 <button
                   key={chip}
                   type="button"
@@ -383,6 +385,9 @@ export function ItemList({ searchInputRef }: ItemListProps) {
           <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-[var(--status-danger)]/8 border border-[var(--status-danger)]/25 text-[11px]">
             <span className="text-[var(--text-secondary)] truncate">
               {dict.sidebar.trash} ({items.length})
+              {trashAutoPurgeDays > 0
+                ? ` · ${fmt(dict.list.trashAutoPurgeHint, { days: trashAutoPurgeDays })}`
+                : ''}
             </span>
             <div className="flex items-center gap-1.5 shrink-0">
               {confirmEmptyTrash ? (
@@ -486,6 +491,11 @@ export function ItemList({ searchInputRef }: ItemListProps) {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      {item.ssoProvider && (
+                        <span className="px-1.5 py-0.5 rounded bg-violet-500/12 border border-violet-500/30 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
+                          {fmt(dict.list.ssoBadgePrefix, { provider: item.ssoProvider })}
+                        </span>
+                      )}
                       {item.hasPasskey && (
                         <span className="px-1.5 py-0.5 rounded bg-sky-500/12 border border-sky-500/30 text-[10px] font-semibold text-sky-600 dark:text-sky-400">
                           Passkey

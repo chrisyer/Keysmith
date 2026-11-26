@@ -84,6 +84,8 @@ export interface WatchtowerFlags {
   ignoreReused: boolean;
   ignoreMissing2fa: boolean;
   ignoreUnsecuredUrl: boolean;
+  ignoreExpiring?: boolean;
+  ignorePasskeyAvailable?: boolean;
 }
 
 export interface ItemAttachment {
@@ -155,6 +157,8 @@ export interface ItemPayload {
   watchtower: WatchtowerFlags;
   archived?: boolean;
   reprompt?: boolean;
+  ssoProvider?: string;
+  linkedItemIds?: string[];
   attachments?: ItemAttachment[];
   createdAt: string;
   updatedAt: string;
@@ -167,6 +171,7 @@ export interface Vault {
   color: string;
   isDefault: boolean;
   isOrganization?: boolean;
+  travelSafe?: boolean;
   itemCount: number;
 }
 
@@ -176,7 +181,8 @@ export type WatchtowerIssueType =
   | 'missing_2fa'
   | 'unsecured_url'
   | 'expiring'
-  | 'breached';
+  | 'breached'
+  | 'passkey_available';
 
 export interface ItemSummary {
   id: string;
@@ -189,6 +195,8 @@ export interface ItemSummary {
   favorite: boolean;
   archived?: boolean;
   reprompt?: boolean;
+  ssoProvider?: string;
+  linkedItemCount?: number;
   attachmentCount?: number;
   hasTotp: boolean;
   hasPasskey: boolean;
@@ -215,6 +223,8 @@ export interface ItemDraft {
   favorite: boolean;
   archived?: boolean;
   reprompt?: boolean;
+  ssoProvider?: string;
+  linkedItemIds?: string[];
   category: ItemCategory;
   subtitle?: string;
   icon?: ItemIcon;
@@ -265,7 +275,7 @@ export interface SessionState {
   autoLockMinutes: number;
   clipboardClearSeconds: number;
   lastSyncAt: string;
-  kdfType: 'Argon2id' | 'PBKDF2';
+  kdfType: 'Argon2id' | 'PBKDF2' | string;
   closeToTray: boolean;
   lockOnSleep: boolean;
   screenCaptureProtected: boolean;
@@ -274,6 +284,9 @@ export interface SessionState {
   quickAccessShortcut: string;
   biometricMaxDays: number;
   launchAtLogin: boolean;
+  travelMode?: boolean;
+  trashAutoPurgeDays?: number;
+  sshBiometricConfirm?: boolean;
 }
 
 export type SessionPreferencesPatch = Partial<
@@ -290,6 +303,9 @@ export type SessionPreferencesPatch = Partial<
     | 'quickAccessShortcut'
     | 'biometricMaxDays'
     | 'launchAtLogin'
+    | 'travelMode'
+    | 'trashAutoPurgeDays'
+    | 'sshBiometricConfirm'
   >
 >;
 
@@ -367,7 +383,7 @@ export interface AccountSummary {
 export interface GeneratorHistoryEntry {
   id: string;
   value: string;
-  mode: GeneratorMode;
+  mode: GeneratorMode | 'masked_email' | string;
   entropyBits: number;
   source?: string;
   createdAt: string;
@@ -385,7 +401,12 @@ export interface AttachmentDownloadResult {
   dataBase64: string;
 }
 
-export type ImportFormat = '1pux' | 'bitwarden_json' | 'bitwarden_csv' | 'chrome_csv';
+export type ImportFormat =
+  | 'keysmith_encrypted_json'
+  | '1pux'
+  | 'bitwarden_json'
+  | 'bitwarden_csv'
+  | 'chrome_csv';
 
 export interface ImportSummary {
   importedVaults: number;
@@ -399,6 +420,29 @@ export type ExportFormat = 'keysmith_encrypted_json' | 'bitwarden_json' | 'csv';
 export interface ExportResult {
   fileName: string;
   content: string;
+}
+
+export type MaskedEmailProvider =
+  | 'catch_all'
+  | 'simple_login'
+  | 'addy_io'
+  | 'fastmail'
+  | 'duck_duck_go';
+
+export interface MaskedEmailConfig {
+  provider: MaskedEmailProvider;
+  apiKey: string;
+  domain: string;
+  apiBaseUrl?: string;
+}
+
+export interface LocalSnapshotInfo {
+  id: string;
+  fileName: string;
+  createdAt: string;
+  sizeBytes: number;
+  itemCount: number;
+  vaultCount: number;
 }
 
 export interface CollectionInfo {
@@ -443,6 +487,12 @@ export interface AppSettings {
   theme: 'system' | 'light' | 'dark';
   customShortcuts: Record<string, string>;
   lastServerUrl?: string;
+  maskedEmail?: MaskedEmailConfig;
+  customEquivalentDomains?: string[][];
+  disabledAutofillDomains?: string[];
+  autoCopyTotpOnFill?: boolean;
+  snapshotIntervalDays?: number;
+  snapshotKeepCount?: number;
 }
 
 export interface AppSettingsPatch {
@@ -450,6 +500,12 @@ export interface AppSettingsPatch {
   theme?: 'system' | 'light' | 'dark';
   customShortcuts?: Record<string, string>;
   lastServerUrl?: string;
+  maskedEmail?: MaskedEmailConfig;
+  customEquivalentDomains?: string[][];
+  disabledAutofillDomains?: string[];
+  autoCopyTotpOnFill?: boolean;
+  snapshotIntervalDays?: number;
+  snapshotKeepCount?: number;
 }
 
 export type SendType = 'text' | 'file';

@@ -166,6 +166,7 @@ function MainWorkspaceApp() {
     });
 
     const unsubSettings = tauriClient.onEvent('ui:settings_changed', (settings) => {
+      useSessionStore.getState().setAppSettings(settings);
       if (settings.language) setLanguageMode(settings.language, false);
       if (settings.theme) setThemeMode(settings.theme, false);
       if (settings.customShortcuts) setShortcutsFromStorage(settings.customShortcuts);
@@ -284,6 +285,8 @@ function MainWorkspaceApp() {
         favorite: activeItem.favorite,
         archived: activeItem.archived,
         reprompt: activeItem.reprompt,
+        ssoProvider: activeItem.ssoProvider,
+        linkedItemIds: activeItem.linkedItemIds,
         category: activeItem.category,
         subtitle: activeItem.subtitle,
         icon: activeItem.icon,

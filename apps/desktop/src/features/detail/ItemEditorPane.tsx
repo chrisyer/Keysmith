@@ -7,6 +7,7 @@ import {
   Fingerprint,
   GripVertical,
   KeyRound,
+  Link2,
   Lock,
   Palette,
   Plus,
@@ -67,6 +68,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
 
   const [draft, setDraft] = useState<ItemDraft>(() => structuredClone(initialDraft));
   const [tagInput, setTagInput] = useState('');
+  const [linkedSearch, setLinkedSearch] = useState('');
   const [domainIconHost, setDomainIconHost] = useState(
     initialDraft.icon?.kind === 'domain' ? initialDraft.icon.host : '',
   );
@@ -78,9 +80,11 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
   useEffect(() => {
     setDraft(structuredClone(initialDraft));
     setDomainIconHost(initialDraft.icon?.kind === 'domain' ? initialDraft.icon.host : '');
+    setLinkedSearch('');
   }, [initialDraft]);
 
   const vaults = useVaultStore((s) => s.vaults);
+  const allItems = useVaultStore((s) => s.items);
   const tagCounts = useVaultStore((s) => s.tagCounts);
   const createItem = useVaultStore((s) => s.createItem);
   const updateItem = useVaultStore((s) => s.updateItem);
@@ -859,6 +863,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
               value={tagInput}
               onChange={(e) => setTagInput(e.target.value)}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                 if (e.key === 'Enter') {
                   e.preventDefault();
                   addTag(tagInput);
@@ -882,6 +887,122 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                     className="px-2 py-0.5 rounded bg-[var(--bg-detail)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] cursor-pointer"
                   >
                     + {t.tag}
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+
+        {/* SSO Provider (Login items) */}
+        {draft.category === 'login' && (
+          <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] p-4 flex flex-col gap-2.5">
+            <span className="text-xs font-semibold text-[var(--text-secondary)]">
+              {dict.editor.ssoProviderLabel}
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {(['', 'Google', 'Apple', 'GitHub', 'Microsoft', 'GitLab', 'Okta', 'WeChat'] as const).map(
+                (prov) => {
+                  const active = (draft.ssoProvider ?? '') === prov;
+                  return (
+                    <button
+                      key={prov || 'none'}
+                      type="button"
+                      onClick={() =>
+                        setDraft((p) => ({ ...p, ssoProvider: prov || undefined }))
+                      }
+                      className={`px-2.5 py-1 rounded-lg text-xs border cursor-pointer ${
+                        active
+                          ? 'bg-[var(--bg-selected)] border-[var(--accent-primary)] text-[var(--accent-primary)] font-medium'
+                          : 'bg-[var(--bg-detail)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                      }`}
+                    >
+                      {prov || dict.editor.ssoProviderNone}
+                    </button>
+                  );
+                },
+              )}
+            </div>
+            <input
+              type="text"
+              value={draft.ssoProvider ?? ''}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, ssoProvider: e.target.value || undefined }))
+              }
+              placeholder={dict.editor.ssoProviderCustomPlaceholder}
+              className="ks-input w-full text-xs"
+            />
+          </div>
+        )}
+
+        {/* Linked Items */}
+        <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] p-4 flex flex-col gap-2.5">
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--text-secondary)]">
+            <Link2 size={13} />
+            {dict.editor.linkedItemsLabel}
+          </span>
+          {(draft.linkedItemIds ?? []).length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {(draft.linkedItemIds ?? []).map((lid) => {
+                const target = allItems.find((it) => it.id === lid);
+                return (
+                  <span
+                    key={lid}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--bg-selected)] text-xs font-medium text-[var(--accent-primary)]"
+                  >
+                    <span>{target?.title ?? lid.slice(0, 8)}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDraft((p) => ({
+                          ...p,
+                          linkedItemIds: (p.linkedItemIds ?? []).filter((x) => x !== lid),
+                        }))
+                      }
+                      className="hover:text-[var(--status-danger)] cursor-pointer"
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          <input
+            type="text"
+            value={linkedSearch}
+            onChange={(e) => setLinkedSearch(e.target.value)}
+            placeholder={dict.editor.linkedItemsSearchPlaceholder}
+            className="ks-input w-full text-xs"
+          />
+          {linkedSearch.trim() && (
+            <div className="max-h-36 overflow-y-auto ks-scroll flex flex-col gap-1 pt-0.5">
+              {allItems
+                .filter(
+                  (it) =>
+                    !it.deletedAt &&
+                    it.id !== draft.id &&
+                    !(draft.linkedItemIds ?? []).includes(it.id) &&
+                    (it.title.toLowerCase().includes(linkedSearch.trim().toLowerCase()) ||
+                      it.subtitle.toLowerCase().includes(linkedSearch.trim().toLowerCase())),
+                )
+                .slice(0, 8)
+                .map((it) => (
+                  <button
+                    key={it.id}
+                    type="button"
+                    onClick={() => {
+                      setDraft((p) => ({
+                        ...p,
+                        linkedItemIds: [...(p.linkedItemIds ?? []), it.id],
+                      }));
+                      setLinkedSearch('');
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-detail)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] flex items-center justify-between text-xs text-left cursor-pointer"
+                  >
+                    <span className="font-medium text-[var(--text-primary)] truncate">{it.title}</span>
+                    <span className="text-[11px] text-[var(--text-muted)] shrink-0 ml-2">
+                      {dict.categories[it.category] ?? it.category}
+                    </span>
                   </button>
                 ))}
             </div>

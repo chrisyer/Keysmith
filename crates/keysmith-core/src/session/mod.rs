@@ -21,22 +21,26 @@ use crate::crypto::{
 };
 use crate::domain::codec::{
     cipher_to_item, collection_to_vault, decode_send_dto, draft_to_cipher, encode_send_payload,
-    encode_vault_name, folder_to_vault, new_uuid,
+    encode_vault_meta, encode_vault_name, folder_to_vault, new_uuid,
 };
 use crate::domain::{
     format_size_bytes, item_to_summary, AccountPasskey, AccountPasskeyListResponse,
     AccountProfileResponse, AccountSummary, AppSettings, AppSettingsPatch,
-    AttachmentDownloadResult, AuthStatus, CollectionInfo, ExportResult, FieldType,
+    AttachmentDownloadResult, AuthStatus, CollectionInfo, ExportResult, FieldPurpose, FieldType,
     GeneratorHistoryEntry, GeneratorOptions, GeneratorResult, ImportSummary, ItemAttachment,
-    ItemCategory, ItemDetail, ItemDraft, ItemFilter, ItemStats, ItemSummary, OrganizationInfo,
-    SendCreateFileInput, SendCreateTextInput, SendItem, SendType, SendUpdateInput,
-    ServerCheckResult, SessionPreferencesPatch, SessionState, SortBy, SshIdentity, SshKeyPair,
-    SyncStateKind, SyncStatus, TagCount, TotpCode, Vault, WatchtowerFlagsPatch, WatchtowerReport,
-    DEFAULT_PERSONAL_VAULT_ID, DEFAULT_QUICK_ACCESS_SHORTCUT,
+    ItemCategory, ItemDetail, ItemDraft, ItemFilter, ItemStats, ItemSummary, LocalSnapshotInfo,
+    MaskedEmailConfig, OrganizationInfo, SendCreateFileInput, SendCreateTextInput, SendItem,
+    SendType, SendUpdateInput, ServerCheckResult, SessionPreferencesPatch, SessionState, SortBy,
+    SshIdentity, SshKeyPair, SyncStateKind, SyncStatus, TagCount, TotpCode, Vault,
+    WatchtowerFlagsPatch, WatchtowerReport, DEFAULT_PERSONAL_VAULT_ID,
+    DEFAULT_QUICK_ACCESS_SHORTCUT,
 };
 use crate::error::CoreError;
-use crate::generator::generate_secret;
-use crate::importers::{build_export_content, parse_import_payload};
+use crate::generator::{generate_masked_email, generate_secret};
+use crate::importers::{
+    build_export_content, decrypt_and_parse_keysmith_bundle, generate_emergency_kit_pdf,
+    parse_import_payload_with_auth, EmergencyKitInput,
+};
 use crate::protocol::{
     CipherDto, CollectionDto, FolderDto, OrganizationDto, RegisterKeysRequest, RegisterRequest,
     SendDto, SendFileDto, VaultwardenClient,
@@ -45,7 +49,7 @@ use crate::search::score_search_query;
 use crate::ssh::{ssh_fingerprint_from_public, ssh_generate_ed25519, ssh_sign_ed25519};
 use crate::storage::{
     new_device_identifier, Storage, StoredAccount, StoredCipher, StoredGeneratorHistory,
-    StoredLocalAttachment, StoredVault,
+    StoredLocalAttachment, StoredSnapshot, StoredVault,
 };
 use crate::totp::{compute_totp, parse_totp_qr_image};
 use crate::traits::{BiometricKeyStore, ClipboardManager};
@@ -55,8 +59,43 @@ const KEYSMITH_ACCOUNT_RP_ID: &str = "keysmith.local";
 const APPLE_TOUCH_ID_AAGUID: &str = "adce0002-35bc-c60a-648b-0b25f1f05503";
 const YUBIKEY_5_AAGUID: &str = "ee882879-721c-4913-9775-3dfcce97072a";
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct TravelStashVault {
+    id: String,
+    account_id: String,
+    name_enc: String,
+    revision_date: String,
+    dirty_op: Option<String>,
+    is_organization: bool,
+    organization_id: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct TravelStashCipher {
+    raw_json: String,
+    dirty_op: Option<String>,
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct TravelStashBundle {
+    vaults: Vec<TravelStashVault>,
+    ciphers: Vec<TravelStashCipher>,
+}
+
 pub fn localized_biometric_reason(lang: &str, kind: &str) -> &'static str {
     let norm = lang.trim();
+    if kind == "ssh" {
+        return match norm {
+            "zh-CN" | "zh" => "验证身份以批准 SSH 密钥签名请求",
+            "zh-TW" | "zh-HK" => "驗證身分以核准 SSH 金鑰簽章請求",
+            "ja" => "SSH 鍵による署名リクエストを承認するため認証してください",
+            "ko" => "SSH 키 서명 요청을 승인하려면 인증하세요",
+            "de" => "Authentifizieren Sie sich, um die SSH-Signaturanfrage zu bestätigen",
+            "fr" => "Authentifiez-vous pour approuver la signature SSH",
+            "es" => "Autentíquese para aprobar la solicitud de firma SSH",
+            _ => "Authenticate to approve SSH key signature request",
+        };
+    }
     if kind == "reprompt" {
         return match norm {
             "zh-CN" | "zh" => "验证身份以访问受主密码重验证保护的条目",
@@ -248,6 +287,9 @@ impl AppCore {
                 quick_access_shortcut: acc.quick_access_shortcut.clone(),
                 biometric_max_days: acc.biometric_max_days,
                 launch_at_login: acc.launch_at_login,
+                travel_mode: acc.travel_mode,
+                trash_auto_purge_days: acc.trash_auto_purge_days,
+                ssh_biometric_confirm: acc.ssh_biometric_confirm,
             },
             None => SessionState {
                 account_id: String::new(),
@@ -268,6 +310,9 @@ impl AppCore {
                 quick_access_shortcut: DEFAULT_QUICK_ACCESS_SHORTCUT.to_string(),
                 biometric_max_days: 7,
                 launch_at_login: false,
+                travel_mode: false,
+                trash_auto_purge_days: 30,
+                ssh_biometric_confirm: false,
             },
         }
     }
@@ -282,9 +327,14 @@ impl AppCore {
         let stored_ciphers = storage.list_ciphers(account_id)?;
         let stored_sends = storage.list_sends(account_id)?;
         let stored_orgs = storage.list_organizations(account_id)?;
-        let enc_priv_opt = storage
-            .load_account_by_id(account_id)?
-            .and_then(|a| a.encrypted_private_key);
+        let raw_settings = storage.get_all_app_settings().unwrap_or_default();
+        let acc_record = storage.load_account_by_id(account_id)?;
+        let travel_mode = acc_record.as_ref().map(|a| a.travel_mode).unwrap_or(false);
+        let enc_priv_opt = acc_record.and_then(|a| a.encrypted_private_key);
+        let personal_travel_safe = raw_settings
+            .get(&format!("personal_travel_safe:{account_id}"))
+            .map(|v| v != "false")
+            .unwrap_or(true);
 
         let mut org_keys: HashMap<String, UserSymmetricKey> = HashMap::new();
         if let Some(enc_priv) = enc_priv_opt.as_deref() {
@@ -327,6 +377,7 @@ impl AppCore {
             color: "#0572EC".to_string(),
             is_default: true,
             is_organization: false,
+            travel_safe: personal_travel_safe,
             item_count: *counts_by_vault.get(DEFAULT_PERSONAL_VAULT_ID).unwrap_or(&0),
         }];
 
@@ -349,7 +400,11 @@ impl AppCore {
                     read_only: false,
                     extra: Default::default(),
                 };
-                let vault = collection_to_vault(&col, eff_usk, count);
+                let mut vault = collection_to_vault(&col, eff_usk, count);
+                vault.travel_safe = raw_settings
+                    .get(&format!("vault_travel_safe:{account_id}:{}", sv.id))
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
                 if let Some(oid) = sv.organization_id.clone() {
                     collections_by_org.entry(oid.clone()).or_default().push(CollectionInfo {
                         id: col.id.clone(),
@@ -365,8 +420,25 @@ impl AppCore {
                     name: sv.name_enc,
                     revision_date: Some(sv.revision_date),
                 };
-                vaults.push(folder_to_vault(&dto, &usk, count)?);
+                let mut vault = folder_to_vault(&dto, &usk, count)?;
+                if let Some(override_val) =
+                    raw_settings.get(&format!("vault_travel_safe:{account_id}:{}", sv.id))
+                {
+                    vault.travel_safe = override_val == "true";
+                }
+                vaults.push(vault);
             }
+        }
+
+        if travel_mode {
+            let safe_ids: HashSet<String> = vaults
+                .iter()
+                .filter(|v| v.travel_safe)
+                .map(|v| v.id.clone())
+                .collect();
+            vaults.retain(|v| v.travel_safe);
+            items.retain(|_, it| safe_ids.contains(&it.vault_id));
+            ciphers.retain(|id, _| items.contains_key(id));
         }
 
         let organizations: Vec<OrganizationInfo> = stored_orgs
@@ -832,6 +904,9 @@ impl AppCore {
                 quick_access_shortcut: DEFAULT_QUICK_ACCESS_SHORTCUT.to_string(),
                 biometric_max_days: 7,
                 launch_at_login: false,
+                travel_mode: false,
+                trash_auto_purge_days: 30,
+                ssh_biometric_confirm: false,
             },
         }
     }
@@ -889,8 +964,122 @@ impl AppCore {
         if let Some(v) = patch.launch_at_login {
             account.launch_at_login = v;
         }
+        if let Some(days) = patch.trash_auto_purge_days {
+            account.trash_auto_purge_days = days;
+        }
+        if let Some(v) = patch.ssh_biometric_confirm {
+            account.ssh_biometric_confirm = v;
+        }
+
+        let prev_travel = account.travel_mode;
+        if let Some(next_travel) = patch.travel_mode {
+            if next_travel != prev_travel {
+                let unlocked = guard.unlocked.as_mut().ok_or_else(|| {
+                    CoreError::InvalidState("切换旅行模式前请先解锁保险库".to_string())
+                })?;
+                let stash_key = format!("travel_stash:{}", account.id);
+                if next_travel {
+                    // Entering Travel Mode: stash non-safe vaults & ciphers encrypted locally, then purge from SQLite & memory
+                    let safe_ids: HashSet<String> = unlocked
+                        .vaults
+                        .iter()
+                        .filter(|v| v.travel_safe)
+                        .map(|v| v.id.clone())
+                        .collect();
+                    let all_vaults = self.storage.list_vaults(&account.id)?;
+                    let all_ciphers = self.storage.list_ciphers(&account.id)?;
+                    let mut stash = TravelStashBundle::default();
+
+                    for sv in all_vaults {
+                        if !safe_ids.contains(&sv.id) {
+                            self.storage.delete_vault_row(&sv.id)?;
+                            stash.vaults.push(TravelStashVault {
+                                id: sv.id,
+                                account_id: sv.account_id,
+                                name_enc: sv.name_enc,
+                                revision_date: sv.revision_date,
+                                dirty_op: sv.dirty_op,
+                                is_organization: sv.is_organization,
+                                organization_id: sv.organization_id,
+                            });
+                        }
+                    }
+
+                    for sc in all_ciphers {
+                        let vid = unlocked
+                            .items
+                            .get(&sc.id)
+                            .map(|it| it.vault_id.as_str())
+                            .or(sc.folder_id.as_deref())
+                            .unwrap_or(DEFAULT_PERSONAL_VAULT_ID);
+                        if !safe_ids.contains(vid) {
+                            self.storage.delete_cipher_row(&sc.id)?;
+                            stash.ciphers.push(TravelStashCipher {
+                                raw_json: sc.raw_json,
+                                dirty_op: sc.dirty_op,
+                            });
+                        }
+                    }
+
+                    let stash_json = serde_json::to_string(&stash)
+                        .map_err(|e| CoreError::Internal(format!("序列化旅行暂存数据失败: {e}")))?;
+                    let stash_enc = unlocked.usk.encrypt_string(&stash_json)?;
+                    self.storage.set_app_setting(&stash_key, &stash_enc)?;
+
+                    unlocked.vaults.retain(|v| v.travel_safe);
+                    unlocked.items.retain(|_, it| safe_ids.contains(&it.vault_id));
+                    unlocked
+                        .ciphers
+                        .retain(|id, _| unlocked.items.contains_key(id));
+                    Self::recompute_vault_counts(unlocked);
+                } else {
+                    // Leaving Travel Mode: restore encrypted stash back into SQLite and reload unlocked memory
+                    let usk = unlocked.usk.clone();
+                    account.travel_mode = false;
+                    self.storage.upsert_account(&account)?;
+                    let raw_settings = self.storage.get_all_app_settings().unwrap_or_default();
+                    if let Some(stash_enc) = raw_settings.get(&stash_key) {
+                        if let Ok(dec) = usk.decrypt_string(stash_enc) {
+                            if let Ok(stash) = serde_json::from_str::<TravelStashBundle>(&dec) {
+                                for sv in stash.vaults {
+                                    let _ = self.storage.upsert_vault(&StoredVault {
+                                        id: sv.id,
+                                        account_id: sv.account_id,
+                                        name_enc: sv.name_enc,
+                                        revision_date: sv.revision_date,
+                                        dirty_op: sv.dirty_op,
+                                        is_organization: sv.is_organization,
+                                        organization_id: sv.organization_id,
+                                    });
+                                }
+                                for sc in stash.ciphers {
+                                    if let Ok(dto) = serde_json::from_str::<CipherDto>(&sc.raw_json)
+                                    {
+                                        let _ = self.storage.upsert_cipher(
+                                            &account.id,
+                                            &dto,
+                                            sc.dirty_op.as_deref(),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        let _ = self.storage.delete_app_setting(&stash_key);
+                    }
+                    let reloaded = Self::load_unlocked_from_storage_sync(
+                        &self.storage,
+                        &account.id,
+                        &account.server_url,
+                        usk,
+                    )?;
+                    *unlocked = reloaded;
+                }
+                account.travel_mode = next_travel;
+            }
+        }
 
         self.storage.upsert_account(&account)?;
+        guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         guard.account = Some(account);
         guard.last_activity = Instant::now();
         Ok(Self::build_session_state(&guard, self.biometric.is_available()))
@@ -949,11 +1138,15 @@ impl AppCore {
             let _ = self.biometric.save_unlock_key(&account.id, &*usk.to_bytes());
         }
 
-        let mut guard = self.write_state()?;
-        guard.account = Some(account);
-        guard.unlocked = Some(unlocked);
-        guard.last_activity = Instant::now();
-        Ok(Self::build_session_state(&guard, self.biometric.is_available()))
+        {
+            let mut guard = self.write_state()?;
+            guard.account = Some(account);
+            guard.unlocked = Some(unlocked);
+            guard.last_activity = Instant::now();
+        }
+        let _ = self.purge_expired_trash().await;
+        self.maybe_create_scheduled_snapshot();
+        Ok(self.session_get_state())
     }
 
     pub async fn session_unlock_biometric(&self) -> Result<SessionState, CoreError> {
@@ -1007,10 +1200,14 @@ impl AppCore {
         .await
         .map_err(|e| CoreError::Internal(format!("Biometric unlock task failed: {e}")))??;
 
-        let mut guard = self.write_state()?;
-        guard.unlocked = Some(unlocked);
-        guard.last_activity = Instant::now();
-        Ok(Self::build_session_state(&guard, self.biometric.is_available()))
+        {
+            let mut guard = self.write_state()?;
+            guard.unlocked = Some(unlocked);
+            guard.last_activity = Instant::now();
+        }
+        let _ = self.purge_expired_trash().await;
+        self.maybe_create_scheduled_snapshot();
+        Ok(self.session_get_state())
     }
 
     pub async fn session_verify_biometric_reprompt(
@@ -1165,6 +1362,7 @@ impl AppCore {
             color: color_str.to_string(),
             is_default: false,
             is_organization: false,
+            travel_safe: false,
             item_count: 0,
         };
 
@@ -1204,7 +1402,13 @@ impl AppCore {
             if found.is_organization {
                 return Err(CoreError::Validation("组织集合不支持客户端重命名".to_string()));
             }
-            let enc = encode_vault_name(trimmed, &found.icon, &found.color, &unlocked.usk)?;
+            let enc = encode_vault_meta(
+                trimmed,
+                &found.icon,
+                &found.color,
+                found.travel_safe,
+                &unlocked.usk,
+            )?;
             (acc, found, enc)
         };
 
@@ -1248,6 +1452,98 @@ impl AppCore {
         if let Some(unlocked) = &mut guard.unlocked {
             if let Some(v) = unlocked.vaults.iter_mut().find(|v| v.id == id) {
                 v.name = target.name.clone();
+                target = v.clone();
+            }
+        }
+        guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
+        Ok(target)
+    }
+
+    pub async fn vault_set_travel_safe(&self, id: &str, travel_safe: bool) -> Result<Vault, CoreError> {
+        let (mut account, mut target, name_enc_opt) = {
+            let guard = self.read_state()?;
+            let acc = guard
+                .account
+                .clone()
+                .ok_or_else(|| CoreError::InvalidState("请先登录".to_string()))?;
+            let unlocked = guard
+                .unlocked
+                .as_ref()
+                .ok_or_else(|| CoreError::InvalidState("保险库已锁定".to_string()))?;
+            let found = unlocked
+                .vaults
+                .iter()
+                .find(|v| v.id == id)
+                .cloned()
+                .ok_or_else(|| CoreError::NotFound("保险库不存在".to_string()))?;
+            let enc = if !found.is_default && !found.is_organization {
+                Some(encode_vault_meta(
+                    &found.name,
+                    &found.icon,
+                    &found.color,
+                    travel_safe,
+                    &unlocked.usk,
+                )?)
+            } else {
+                None
+            };
+            (acc, found, enc)
+        };
+
+        target.travel_safe = travel_safe;
+
+        if id == DEFAULT_PERSONAL_VAULT_ID {
+            self.storage.set_app_setting(
+                &format!("personal_travel_safe:{}", account.id),
+                if travel_safe { "true" } else { "false" },
+            )?;
+        } else {
+            self.storage.set_app_setting(
+                &format!("vault_travel_safe:{}:{}", account.id, id),
+                if travel_safe { "true" } else { "false" },
+            )?;
+            if let Some(name_enc) = name_enc_opt {
+                let mut revision_date = Utc::now().to_rfc3339();
+                let mut dirty_op = Some("update".to_string());
+                if account.access_token.is_some() {
+                    let client = self.client.clone();
+                    let server_url = account.server_url.clone();
+                    let id_owned = id.to_string();
+                    let name_enc_clone = name_enc.clone();
+                    if let Ok(remote) = self
+                        .with_fresh_token(&mut account, move |tok| {
+                            let client = client.clone();
+                            let server_url = server_url.clone();
+                            let id = id_owned.clone();
+                            let name_enc = name_enc_clone.clone();
+                            async move {
+                                client.update_folder(&server_url, &tok, &id, &name_enc).await
+                            }
+                        })
+                        .await
+                    {
+                        if let Some(rev) = remote.revision_date {
+                            revision_date = rev;
+                        }
+                        dirty_op = None;
+                    }
+                }
+                self.storage.upsert_vault(&StoredVault {
+                    id: id.to_string(),
+                    account_id: account.id.clone(),
+                    name_enc,
+                    revision_date,
+                    dirty_op,
+                    is_organization: false,
+                    organization_id: None,
+                })?;
+            }
+        }
+
+        let mut guard = self.write_state()?;
+        if let Some(unlocked) = &mut guard.unlocked {
+            if let Some(v) = unlocked.vaults.iter_mut().find(|v| v.id == id) {
+                v.travel_safe = travel_safe;
                 target = v.clone();
             }
         }
@@ -1517,24 +1813,7 @@ impl AppCore {
     }
 
     fn item_to_draft(item: &ItemDetail) -> ItemDraft {
-        ItemDraft {
-            id: Some(item.id.clone()),
-            vault_id: item.vault_id.clone(),
-            title: item.title.clone(),
-            favorite: item.favorite,
-            category: item.payload.category,
-            subtitle: item.payload.subtitle.clone(),
-            icon: item.payload.icon.clone(),
-            tags: item.payload.tags.clone(),
-            urls: item.payload.urls.clone(),
-            sections: item.payload.sections.clone(),
-            passkeys: item.payload.passkeys.clone(),
-            notes: item.payload.notes.clone(),
-            password_history: item.payload.password_history.clone(),
-            watchtower: item.payload.watchtower,
-            archived: item.payload.archived,
-            reprompt: item.payload.reprompt,
-        }
+        item.to_draft()
     }
 
     fn preserve_local_fido2_if_stripped(local: &CipherDto, remote: &mut CipherDto) {
@@ -1850,6 +2129,12 @@ impl AppCore {
         if let Some(v) = patch.ignore_unsecured_url {
             draft.watchtower.ignore_unsecured_url = v;
         }
+        if let Some(v) = patch.ignore_expiring {
+            draft.watchtower.ignore_expiring = v;
+        }
+        if let Some(v) = patch.ignore_passkey_available {
+            draft.watchtower.ignore_passkey_available = v;
+        }
         self.item_update(id, draft).await
     }
 
@@ -2055,6 +2340,80 @@ impl AppCore {
         let mut purged = 0usize;
         let mut removed_ids: Vec<String> = Vec::new();
         for (id, cipher_opt) in trashed {
+            let mut deleted_remotely = false;
+            if account.access_token.is_some() {
+                let client = self.client.clone();
+                let server_url = account.server_url.clone();
+                let id_owned = id.clone();
+                if self
+                    .with_fresh_token(&mut account, move |tok| {
+                        let client = client.clone();
+                        let server_url = server_url.clone();
+                        let id = id_owned.clone();
+                        async move { client.delete_cipher_permanent(&server_url, &tok, &id).await }
+                    })
+                    .await
+                    .is_ok()
+                {
+                    deleted_remotely = true;
+                }
+            }
+            if deleted_remotely || account.access_token.is_none() {
+                self.storage.delete_cipher_row(&id)?;
+            } else if let Some(c) = cipher_opt {
+                self.storage.upsert_cipher(&account.id, &c, Some("delete"))?;
+            }
+            removed_ids.push(id);
+            purged += 1;
+        }
+
+        let mut guard = self.write_state()?;
+        if let Some(unlocked) = &mut guard.unlocked {
+            for id in removed_ids {
+                unlocked.ciphers.remove(&id);
+                unlocked.items.remove(&id);
+            }
+            Self::recompute_vault_counts(unlocked);
+        }
+        guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
+        Ok(purged)
+    }
+
+    pub async fn purge_expired_trash(&self) -> Result<usize, CoreError> {
+        let (mut account, expired) = {
+            let guard = self.read_state()?;
+            let Some(acc) = guard.account.clone() else {
+                return Ok(0);
+            };
+            if acc.trash_auto_purge_days == 0 {
+                return Ok(0);
+            }
+            let Some(unlocked) = guard.unlocked.as_ref() else {
+                return Ok(0);
+            };
+            let cutoff = Utc::now() - Duration::days(acc.trash_auto_purge_days as i64);
+            let list: Vec<(String, Option<CipherDto>)> = unlocked
+                .items
+                .values()
+                .filter(|it| {
+                    it.deleted_at
+                        .as_deref()
+                        .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+                        .map(|dt| dt.with_timezone(&Utc) <= cutoff)
+                        .unwrap_or(false)
+                })
+                .map(|it| (it.id.clone(), unlocked.ciphers.get(&it.id).cloned()))
+                .collect();
+            (acc, list)
+        };
+
+        if expired.is_empty() {
+            return Ok(0);
+        }
+
+        let mut purged = 0usize;
+        let mut removed_ids = Vec::with_capacity(expired.len());
+        for (id, cipher_opt) in expired {
             let mut deleted_remotely = false;
             if account.access_token.is_some() {
                 let client = self.client.clone();
@@ -2424,9 +2783,62 @@ impl AppCore {
         };
 
         let (pending_count, refreshed_unlocked) = tokio::task::spawn_blocking(move || {
+            let mut eff_folders = folders;
+            let mut eff_collections = collections;
+            let mut eff_ciphers = ciphers;
+
+            if account_clone.travel_mode {
+                let raw_settings = storage.get_all_app_settings().unwrap_or_default();
+                let personal_safe = raw_settings
+                    .get(&format!("personal_travel_safe:{}", account_clone.id))
+                    .map(|v| v != "false")
+                    .unwrap_or(true);
+                let mut safe_ids = HashSet::new();
+                if personal_safe {
+                    safe_ids.insert(DEFAULT_PERSONAL_VAULT_ID.to_string());
+                }
+                eff_folders.retain(|f| {
+                    let setting_override = raw_settings
+                        .get(&format!("vault_travel_safe:{}:{}", account_clone.id, f.id))
+                        .map(|v| v == "true");
+                    let meta_safe = usk_opt
+                        .as_ref()
+                        .and_then(|u| folder_to_vault(f, u, 0).ok())
+                        .map(|v| v.travel_safe)
+                        .unwrap_or(false);
+                    let is_safe = setting_override.unwrap_or(meta_safe);
+                    if is_safe {
+                        safe_ids.insert(f.id.clone());
+                    }
+                    is_safe
+                });
+                eff_collections.retain(|c| {
+                    let is_safe = raw_settings
+                        .get(&format!("vault_travel_safe:{}:{}", account_clone.id, c.id))
+                        .map(|v| v == "true")
+                        .unwrap_or(false);
+                    if is_safe {
+                        safe_ids.insert(c.id.clone());
+                    }
+                    is_safe
+                });
+                eff_ciphers.retain(|c| {
+                    let vid = c
+                        .folder_id
+                        .as_deref()
+                        .or_else(|| c.collection_ids.first().map(String::as_str))
+                        .unwrap_or(DEFAULT_PERSONAL_VAULT_ID);
+                    safe_ids.contains(vid)
+                });
+            }
+
             storage.replace_synced_organizations(&account_clone.id, &orgs)?;
-            storage.replace_synced_vaults_clean(&account_clone.id, &folders, &collections)?;
-            storage.replace_synced_ciphers_clean(&account_clone.id, &ciphers)?;
+            storage.replace_synced_vaults_clean(
+                &account_clone.id,
+                &eff_folders,
+                &eff_collections,
+            )?;
+            storage.replace_synced_ciphers_clean(&account_clone.id, &eff_ciphers)?;
             storage.replace_synced_sends(&account_clone.id, &sends)?;
             storage.upsert_account(&account_clone)?;
             let pending = storage.count_pending_dirty(&account_clone.id)?;
@@ -2444,20 +2856,25 @@ impl AppCore {
         .await
         .map_err(|e| CoreError::Internal(format!("同步落盘与解密失败: {e}")))??;
 
-        let mut guard = self.write_state()?;
-        let signalr_connected = guard.sync_status.signalr_connected;
-        guard.account = Some(account);
-        if let Some(u) = refreshed_unlocked {
-            guard.unlocked = Some(u);
-        }
-        guard.sync_status = SyncStatus {
-            state: SyncStateKind::Idle,
-            pending_count,
-            last_sync_at: now,
-            message: None,
-            signalr_connected,
+        let out_status = {
+            let mut guard = self.write_state()?;
+            let signalr_connected = guard.sync_status.signalr_connected;
+            guard.account = Some(account);
+            if let Some(u) = refreshed_unlocked {
+                guard.unlocked = Some(u);
+            }
+            guard.sync_status = SyncStatus {
+                state: SyncStateKind::Idle,
+                pending_count,
+                last_sync_at: now,
+                message: None,
+                signalr_connected,
+            };
+            guard.sync_status.clone()
         };
-        Ok(guard.sync_status.clone())
+        let _ = self.purge_expired_trash().await;
+        self.maybe_create_scheduled_snapshot();
+        Ok(out_status)
     }
 
     // --- TOTP / QR / Generator / History / SSH / Watchtower / Clipboard ---
@@ -2472,6 +2889,16 @@ impl AppCore {
 
     pub fn generator_generate(&self, options: GeneratorOptions) -> GeneratorResult {
         generate_secret(&options)
+    }
+
+    pub async fn generator_generate_masked_email(
+        &self,
+        domain_hint: Option<&str>,
+    ) -> Result<String, CoreError> {
+        let settings = self.app_settings_get()?;
+        let alias = generate_masked_email(&settings.masked_email, domain_hint).await?;
+        let _ = self.generator_history_record(&alias, "masked_email", 64, domain_hint);
+        Ok(alias)
     }
 
     pub fn generator_history_list(&self) -> Result<Vec<GeneratorHistoryEntry>, CoreError> {
@@ -2983,14 +3410,29 @@ impl AppCore {
         is_base64: bool,
         target_vault_id: Option<&str>,
     ) -> Result<ImportSummary, CoreError> {
-        {
-            let guard = self.read_state()?;
-            if guard.unlocked.is_none() {
-                return Err(CoreError::InvalidState("保险库已锁定，请先解锁".to_string()));
-            }
-        }
+        self.vault_import_with_passphrase(format, data, is_base64, target_vault_id, None)
+            .await
+    }
 
-        let parsed = parse_import_payload(format, data, is_base64)?;
+    pub async fn vault_import_with_passphrase(
+        &self,
+        format: &str,
+        data: &str,
+        is_base64: bool,
+        target_vault_id: Option<&str>,
+        import_passphrase: Option<&str>,
+    ) -> Result<ImportSummary, CoreError> {
+        let usk = {
+            let guard = self.read_state()?;
+            let unlocked = guard
+                .unlocked
+                .as_ref()
+                .ok_or_else(|| CoreError::InvalidState("保险库已锁定，请先解锁".to_string()))?;
+            unlocked.usk.clone()
+        };
+
+        let parsed =
+            parse_import_payload_with_auth(format, data, is_base64, import_passphrase, Some(&usk))?;
         let mut vault_name_to_id: HashMap<String, String> = {
             let guard = self.read_state()?;
             guard
@@ -3049,6 +3491,415 @@ impl AppCore {
             skipped_items,
             warnings,
         })
+    }
+
+    pub fn vault_export_emergency_kit(&self) -> Result<ExportResult, CoreError> {
+        let guard = self.read_state()?;
+        let acc = guard
+            .account
+            .as_ref()
+            .ok_or_else(|| CoreError::InvalidState("请先登录".to_string()))?;
+        let kdf_label = KdfConfig {
+            kdf: acc.kdf_type,
+            kdf_iterations: acc.kdf_iterations,
+            kdf_memory: acc.kdf_memory,
+            kdf_parallelism: acc.kdf_parallelism,
+        }
+        .label()
+        .to_string();
+        let display_name = if acc.display_name.trim().is_empty() {
+            acc.email
+                .split('@')
+                .next()
+                .unwrap_or("Keysmith User")
+                .to_string()
+        } else {
+            acc.display_name.clone()
+        };
+        let now = Utc::now();
+        let pdf_bytes = generate_emergency_kit_pdf(&EmergencyKitInput {
+            email: acc.email.clone(),
+            display_name,
+            server_url: acc.server_url.clone(),
+            kdf_label,
+            account_id: acc.id.clone(),
+            generated_at: now.format("%Y-%m-%d %H:%M UTC").to_string(),
+        });
+        Ok(ExportResult {
+            file_name: format!("keysmith-emergency-kit-{}.pdf", now.format("%Y%m%d")),
+            content: B64.encode(pdf_bytes),
+        })
+    }
+
+    // --- Local Encrypted Snapshots ---
+
+    pub fn snapshot_list(&self) -> Result<Vec<LocalSnapshotInfo>, CoreError> {
+        let guard = self.read_state()?;
+        let acc = guard
+            .account
+            .as_ref()
+            .ok_or_else(|| CoreError::InvalidState("请先登录".to_string()))?;
+        let rows = self.storage.list_snapshots(&acc.id)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| LocalSnapshotInfo {
+                id: r.id,
+                file_name: r.file_name,
+                created_at: r.created_at,
+                size_bytes: r.payload_enc.len() as u64,
+                item_count: r.item_count,
+                vault_count: r.vault_count,
+            })
+            .collect())
+    }
+
+    pub fn snapshot_create(&self) -> Result<LocalSnapshotInfo, CoreError> {
+        let keep_count = self
+            .app_settings_get()
+            .map(|s| s.snapshot_keep_count)
+            .unwrap_or(5)
+            .clamp(1, 50);
+        let (account_id, vaults, items, usk) = {
+            let guard = self.read_state()?;
+            let acc = guard
+                .account
+                .as_ref()
+                .ok_or_else(|| CoreError::InvalidState("请先登录".to_string()))?;
+            let unlocked = guard
+                .unlocked
+                .as_ref()
+                .ok_or_else(|| CoreError::InvalidState("保险库已锁定，请先解锁".to_string()))?;
+            let items: Vec<ItemDetail> = unlocked
+                .items
+                .values()
+                .filter(|i| i.deleted_at.is_none())
+                .cloned()
+                .collect();
+            (
+                acc.id.clone(),
+                unlocked.vaults.clone(),
+                items,
+                unlocked.usk.clone(),
+            )
+        };
+
+        let (_, payload_enc) =
+            build_export_content("keysmith_encrypted_json", &vaults, &items, &usk, None)?;
+        let now = Utc::now();
+        let id = new_uuid();
+        let short_acc = &account_id[..account_id.len().min(8)];
+        let file_name = format!(
+            "snapshot-{short_acc}-{}-{}.json",
+            now.format("%Y%m%d-%H%M%S"),
+            &id[..6]
+        );
+        let created_at = now.to_rfc3339();
+        let size_bytes = payload_enc.len() as u64;
+        let item_count = items.len();
+        let vault_count = vaults.len();
+
+        let snap = StoredSnapshot {
+            id: id.clone(),
+            account_id,
+            file_name: file_name.clone(),
+            created_at: created_at.clone(),
+            item_count,
+            vault_count,
+            payload_enc,
+        };
+        self.storage.insert_snapshot(&snap, keep_count)?;
+
+        Ok(LocalSnapshotInfo {
+            id,
+            file_name,
+            created_at,
+            size_bytes,
+            item_count,
+            vault_count,
+        })
+    }
+
+    pub async fn snapshot_restore(&self, snapshot_id: &str) -> Result<ImportSummary, CoreError> {
+        let (account_id, usk) = {
+            let guard = self.read_state()?;
+            let acc = guard
+                .account
+                .as_ref()
+                .ok_or_else(|| CoreError::InvalidState("请先登录".to_string()))?;
+            let unlocked = guard
+                .unlocked
+                .as_ref()
+                .ok_or_else(|| CoreError::InvalidState("保险库已锁定，请先解锁".to_string()))?;
+            (acc.id.clone(), unlocked.usk.clone())
+        };
+
+        let snap = self
+            .storage
+            .get_snapshot(&account_id, snapshot_id)?
+            .ok_or_else(|| CoreError::NotFound("指定的本地快照不存在".to_string()))?;
+
+        let bundle = decrypt_and_parse_keysmith_bundle(&snap.payload_enc, None, Some(&usk))?;
+
+        let mut vault_id_remap: HashMap<String, String> = HashMap::new();
+        vault_id_remap.insert(
+            DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            DEFAULT_PERSONAL_VAULT_ID.to_string(),
+        );
+        let existing_vaults = self.vault_list()?;
+        let mut imported_vaults = 0usize;
+
+        for sv in &bundle.vaults {
+            if sv.is_default || sv.id == DEFAULT_PERSONAL_VAULT_ID {
+                continue;
+            }
+            if let Some(found) = existing_vaults
+                .iter()
+                .find(|ev| ev.id == sv.id || ev.name.eq_ignore_ascii_case(&sv.name))
+            {
+                vault_id_remap.insert(sv.id.clone(), found.id.clone());
+            } else if let Ok(created) = self
+                .vault_create(&sv.name, Some(&sv.color), Some(&sv.icon))
+                .await
+            {
+                if sv.travel_safe {
+                    let _ = self.vault_set_travel_safe(&created.id, true).await;
+                }
+                vault_id_remap.insert(sv.id.clone(), created.id);
+                imported_vaults += 1;
+            }
+        }
+
+        let existing_ids: HashSet<String> = {
+            let guard = self.read_state()?;
+            guard
+                .unlocked
+                .as_ref()
+                .map(|u| u.items.keys().cloned().collect())
+                .unwrap_or_default()
+        };
+
+        let mut imported_items = 0usize;
+        let mut skipped_items = 0usize;
+        let mut warnings = Vec::new();
+
+        for detail in bundle.items {
+            let mapped_vault = vault_id_remap
+                .get(&detail.vault_id)
+                .cloned()
+                .unwrap_or_else(|| DEFAULT_PERSONAL_VAULT_ID.to_string());
+            let mut draft = detail.to_draft();
+            draft.vault_id = mapped_vault;
+
+            let res = if existing_ids.contains(&detail.id) {
+                if detail.deleted_at.is_none() {
+                    let _ = self.item_restore(&detail.id).await;
+                }
+                self.item_update(&detail.id, draft).await
+            } else {
+                draft.id = None;
+                self.item_create(draft).await
+            };
+            match res {
+                Ok(_) => imported_items += 1,
+                Err(e) => {
+                    skipped_items += 1;
+                    warnings.push(e.to_string());
+                }
+            }
+        }
+
+        Ok(ImportSummary {
+            imported_vaults,
+            imported_items,
+            skipped_items,
+            warnings,
+        })
+    }
+
+    pub fn snapshot_delete(&self, snapshot_id: &str) -> Result<(), CoreError> {
+        let guard = self.read_state()?;
+        let acc = guard
+            .account
+            .as_ref()
+            .ok_or_else(|| CoreError::InvalidState("请先登录".to_string()))?;
+        self.storage.delete_snapshot(&acc.id, snapshot_id)
+    }
+
+    pub fn maybe_create_scheduled_snapshot(&self) {
+        let Ok(settings) = self.app_settings_get() else {
+            return;
+        };
+        if settings.snapshot_interval_days == 0 {
+            return;
+        }
+        let should_create = {
+            let Ok(guard) = self.read_state() else {
+                return;
+            };
+            let Some(acc) = guard.account.as_ref() else {
+                return;
+            };
+            if acc.travel_mode {
+                return;
+            }
+            let Some(unlocked) = guard.unlocked.as_ref() else {
+                return;
+            };
+            if unlocked.items.values().all(|i| i.deleted_at.is_some()) {
+                return;
+            }
+            let Ok(existing) = self.storage.list_snapshots(&acc.id) else {
+                return;
+            };
+            match existing.first() {
+                None => true,
+                Some(latest) => DateTime::parse_from_rfc3339(&latest.created_at)
+                    .map(|dt| {
+                        Utc::now().signed_duration_since(dt.with_timezone(&Utc))
+                            >= Duration::days(settings.snapshot_interval_days as i64)
+                    })
+                    .unwrap_or(true),
+            }
+        };
+        if should_create {
+            let _ = self.snapshot_create();
+        }
+    }
+
+    // --- Developer Secret Reference (`ks://...`) ---
+
+    pub fn resolve_secret_reference(&self, reference: &str) -> Result<(ItemDetail, String), CoreError> {
+        let trimmed = reference.trim();
+        let rest = trimmed
+            .strip_prefix("ks://")
+            .ok_or_else(|| CoreError::Validation(format!("无效的密钥引用格式 (需以 ks:// 开头): {trimmed}")))?;
+        let segments: Vec<String> = rest
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(percent_decode_segment)
+            .collect();
+        if segments.len() < 2 || segments.len() > 3 {
+            return Err(CoreError::Validation(format!(
+                "无效的密钥引用路径 (支持 ks://<vault>/<item>/<field> 或 ks://<item>/<field>): {trimmed}"
+            )));
+        }
+
+        let guard = self.read_state()?;
+        let unlocked = guard
+            .unlocked
+            .as_ref()
+            .ok_or_else(|| CoreError::InvalidState("保险库已锁定，请先解锁 Keysmith".to_string()))?;
+
+        let (vault_filter, item_query, field_query) = if segments.len() == 3 {
+            (Some(segments[0].as_str()), segments[1].as_str(), segments[2].as_str())
+        } else {
+            (None, segments[0].as_str(), segments[1].as_str())
+        };
+
+        let target_vault_id = if let Some(vf) = vault_filter {
+            let vf_lower = vf.to_lowercase();
+            let matched = unlocked
+                .vaults
+                .iter()
+                .find(|v| {
+                    v.id == vf
+                        || v.name.to_lowercase() == vf_lower
+                        || (v.is_default && matches!(vf_lower.as_str(), "personal" | "default" | "个人"))
+                })
+                .ok_or_else(|| CoreError::NotFound(format!("未找到保险库: {vf}")))?;
+            Some(matched.id.clone())
+        } else {
+            None
+        };
+
+        let item_lower = item_query.to_lowercase();
+        let item = unlocked
+            .items
+            .values()
+            .filter(|it| it.deleted_at.is_none() && !it.payload.archived)
+            .filter(|it| {
+                target_vault_id
+                    .as_ref()
+                    .map(|vid| &it.vault_id == vid)
+                    .unwrap_or(true)
+            })
+            .find(|it| it.id == item_query || it.title.to_lowercase() == item_lower)
+            .cloned()
+            .ok_or_else(|| CoreError::NotFound(format!("未找到匹配的凭据条目: {item_query}")))?;
+
+        let fq = field_query.trim();
+        let fq_lower = fq.to_lowercase();
+        let all_fields: Vec<_> = item
+            .payload
+            .sections
+            .iter()
+            .flat_map(|sec| sec.fields.iter().map(move |f| (sec.title.as_str(), f)))
+            .collect();
+
+        let value = match fq_lower.as_str() {
+            "username" | "user" | "用户名" => all_fields
+                .iter()
+                .find(|(_, f)| f.purpose == Some(FieldPurpose::Username))
+                .or_else(|| {
+                    all_fields
+                        .iter()
+                        .find(|(_, f)| f.label.to_lowercase() == "username" || f.label == "用户名")
+                })
+                .map(|(_, f)| f.value.clone()),
+            "password" | "pass" | "密码" => all_fields
+                .iter()
+                .find(|(_, f)| f.purpose == Some(FieldPurpose::Password))
+                .or_else(|| {
+                    all_fields
+                        .iter()
+                        .find(|(_, f)| f.field_type == FieldType::Password)
+                })
+                .map(|(_, f)| f.value.clone()),
+            "totp" | "otp" | "2fa" => {
+                let raw_secret = all_fields
+                    .iter()
+                    .find(|(_, f)| {
+                        f.field_type == FieldType::Totp || f.purpose == Some(FieldPurpose::Totp)
+                    })
+                    .map(|(_, f)| f.value.as_str())
+                    .ok_or_else(|| CoreError::NotFound(format!("条目 '{}' 未配置 TOTP", item.title)))?;
+                Some(compute_totp(raw_secret)?.code)
+            }
+            "totp_secret" | "totpsecret" => all_fields
+                .iter()
+                .find(|(_, f)| {
+                    f.field_type == FieldType::Totp || f.purpose == Some(FieldPurpose::Totp)
+                })
+                .map(|(_, f)| f.value.clone()),
+            "notes" | "note" | "备注" => Some(item.payload.notes.clone()),
+            "url" | "uri" | "网址" => item.payload.urls.first().map(|u| u.uri.clone()),
+            "public_key" | "publickey" | "公钥" => all_fields
+                .iter()
+                .find(|(_, f)| f.field_type == FieldType::SshPublicKey)
+                .map(|(_, f)| f.value.clone()),
+            "private_key" | "privatekey" | "私钥" => all_fields
+                .iter()
+                .find(|(_, f)| f.field_type == FieldType::SshPrivateKey)
+                .map(|(_, f)| f.value.clone()),
+            _ => all_fields
+                .iter()
+                .find(|(sec_title, f)| {
+                    f.id == fq
+                        || f.label.to_lowercase() == fq_lower
+                        || (!sec_title.is_empty()
+                            && format!("{}.{}", sec_title.to_lowercase(), f.label.to_lowercase())
+                                == fq_lower)
+                })
+                .map(|(_, f)| f.value.clone()),
+        }
+        .ok_or_else(|| {
+            CoreError::NotFound(format!(
+                "条目 '{}' 中未找到字段 '{field_query}'",
+                item.title
+            ))
+        })?;
+
+        Ok((item, value))
     }
 
     pub async fn vault_export(
@@ -3891,11 +4742,57 @@ impl AppCore {
             .cloned()
             .filter(|s| !s.trim().is_empty());
 
+        let mut masked_email = raw
+            .get("masked_email")
+            .and_then(|s| serde_json::from_str::<MaskedEmailConfig>(s).ok())
+            .unwrap_or_default();
+        if masked_email.api_key.starts_with("2.") {
+            let dec = self
+                .read_state()
+                .ok()
+                .and_then(|g| {
+                    g.unlocked
+                        .as_ref()
+                        .and_then(|u| u.usk.decrypt_string(&masked_email.api_key).ok())
+                        .map(|z| z.to_string())
+                })
+                .unwrap_or_default();
+            masked_email.api_key = dec;
+        }
+
+        let custom_equivalent_domains = raw
+            .get("custom_equivalent_domains")
+            .and_then(|s| serde_json::from_str::<Vec<Vec<String>>>(s).ok())
+            .unwrap_or_default();
+        let disabled_autofill_domains = raw
+            .get("disabled_autofill_domains")
+            .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+            .unwrap_or_default();
+        let auto_copy_totp_on_fill = raw
+            .get("auto_copy_totp_on_fill")
+            .map(|s| s != "false")
+            .unwrap_or(true);
+        let snapshot_interval_days = raw
+            .get("snapshot_interval_days")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(1);
+        let snapshot_keep_count = raw
+            .get("snapshot_keep_count")
+            .and_then(|s| s.parse::<usize>().ok())
+            .map(|n| n.clamp(1, 50))
+            .unwrap_or(5);
+
         Ok(AppSettings {
             language,
             theme,
             custom_shortcuts,
             last_server_url,
+            masked_email,
+            custom_equivalent_domains,
+            disabled_autofill_domains,
+            auto_copy_totp_on_fill,
+            snapshot_interval_days,
+            snapshot_keep_count,
         })
     }
 
@@ -3922,12 +4819,86 @@ impl AppCore {
             self.storage
                 .set_app_setting("last_server_url", url.trim())?;
         }
+        if let Some(mut me) = patch.masked_email {
+            if !me.api_key.trim().is_empty() && !me.api_key.starts_with("2.") {
+                if let Ok(guard) = self.read_state() {
+                    if let Some(unlocked) = guard.unlocked.as_ref() {
+                        me.api_key = unlocked.usk.encrypt_string(me.api_key.trim())?;
+                    }
+                }
+            }
+            let json = serde_json::to_string(&me)
+                .map_err(|e| CoreError::Internal(format!("序列化随机邮箱配置失败: {e}")))?;
+            self.storage.set_app_setting("masked_email", &json)?;
+        }
+        if let Some(groups) = patch.custom_equivalent_domains {
+            let cleaned: Vec<Vec<String>> = groups
+                .into_iter()
+                .map(|g| {
+                    g.into_iter()
+                        .map(|d| crate::domain::normalize_host(&d))
+                        .filter(|d| !d.is_empty())
+                        .collect::<Vec<_>>()
+                })
+                .filter(|g| g.len() >= 2)
+                .collect();
+            let json = serde_json::to_string(&cleaned)
+                .map_err(|e| CoreError::Internal(format!("序列化等价域名失败: {e}")))?;
+            self.storage
+                .set_app_setting("custom_equivalent_domains", &json)?;
+        }
+        if let Some(disabled) = patch.disabled_autofill_domains {
+            let cleaned: Vec<String> = disabled
+                .into_iter()
+                .map(|d| crate::domain::normalize_host(&d))
+                .filter(|d| !d.is_empty())
+                .collect();
+            let json = serde_json::to_string(&cleaned)
+                .map_err(|e| CoreError::Internal(format!("序列化禁用站点列表失败: {e}")))?;
+            self.storage
+                .set_app_setting("disabled_autofill_domains", &json)?;
+        }
+        if let Some(v) = patch.auto_copy_totp_on_fill {
+            self.storage
+                .set_app_setting("auto_copy_totp_on_fill", if v { "true" } else { "false" })?;
+        }
+        if let Some(days) = patch.snapshot_interval_days {
+            self.storage
+                .set_app_setting("snapshot_interval_days", &days.to_string())?;
+        }
+        if let Some(keep) = patch.snapshot_keep_count {
+            self.storage
+                .set_app_setting("snapshot_keep_count", &keep.clamp(1, 50).to_string())?;
+        }
         self.app_settings_get()
     }
 
     pub fn checkpoint_storage(&self) -> Result<(), CoreError> {
         self.storage.wal_checkpoint()
     }
+}
+
+fn percent_decode_segment(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Ok(h), Ok(l)) = (
+                std::str::from_utf8(&bytes[i + 1..i + 2]),
+                std::str::from_utf8(&bytes[i + 2..i + 3]),
+            ) {
+                if let (Ok(hi), Ok(lo)) = (u8::from_str_radix(h, 16), u8::from_str_radix(l, 16)) {
+                    out.push((hi << 4) | lo);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| raw.to_string())
 }
 
 fn detect_image_mime(bytes: &[u8]) -> Option<&'static str> {
@@ -3954,12 +4925,36 @@ fn guess_mime_from_filename(name: &str) -> String {
         "image/png".to_string()
     } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
         "image/jpeg".to_string()
+    } else if lower.ends_with(".gif") {
+        "image/gif".to_string()
+    } else if lower.ends_with(".webp") {
+        "image/webp".to_string()
+    } else if lower.ends_with(".svg") {
+        "image/svg+xml".to_string()
     } else if lower.ends_with(".pdf") {
         "application/pdf".to_string()
-    } else if lower.ends_with(".txt") || lower.ends_with(".pem") || lower.ends_with(".key") || lower.ends_with(".pub") {
-        "text/plain".to_string()
+    } else if lower.ends_with(".md") || lower.ends_with(".markdown") {
+        "text/markdown".to_string()
+    } else if lower.ends_with(".csv") {
+        "text/csv".to_string()
     } else if lower.ends_with(".json") {
         "application/json".to_string()
+    } else if lower.ends_with(".yml") || lower.ends_with(".yaml") {
+        "text/yaml".to_string()
+    } else if lower.ends_with(".txt")
+        || lower.ends_with(".pem")
+        || lower.ends_with(".key")
+        || lower.ends_with(".pub")
+        || lower.ends_with(".crt")
+        || lower.ends_with(".cer")
+        || lower.ends_with(".env")
+        || lower.ends_with(".toml")
+        || lower.ends_with(".ini")
+        || lower.ends_with(".conf")
+        || lower.ends_with(".log")
+        || lower.ends_with(".xml")
+    {
+        "text/plain".to_string()
     } else {
         "application/octet-stream".to_string()
     }

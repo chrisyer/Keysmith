@@ -175,6 +175,7 @@ pub fn folder_to_vault(
                 color: meta.color,
                 is_default: false,
                 is_organization: false,
+                travel_safe: meta.travel_safe,
                 item_count,
             });
         }
@@ -191,6 +192,7 @@ pub fn folder_to_vault(
         color: "#0572EC".to_string(),
         is_default: false,
         is_organization: false,
+        travel_safe: false,
         item_count,
     })
 }
@@ -216,8 +218,29 @@ pub fn collection_to_vault(
         color: "#6366F1".to_string(),
         is_default: false,
         is_organization: true,
+        travel_safe: false,
         item_count,
     }
+}
+
+/// Encode Vault metadata as EncString(VaultMetaJson) with explicit `travel_safe`.
+pub fn encode_vault_meta(
+    name: &str,
+    icon: &str,
+    color: &str,
+    travel_safe: bool,
+    usk: &UserSymmetricKey,
+) -> Result<String, CoreError> {
+    let meta = VaultMetaJson {
+        schema: VAULT_SCHEMA_V1.to_string(),
+        name: name.trim().to_string(),
+        icon: icon.to_string(),
+        color: color.to_string(),
+        travel_safe,
+    };
+    let json = serde_json::to_string(&meta)
+        .map_err(|e| CoreError::Internal(format!("序列化 Vault 元数据失败: {e}")))?;
+    usk.encrypt_string(&json)
 }
 
 /// Encode Vault metadata as EncString(VaultMetaJson).
@@ -227,15 +250,7 @@ pub fn encode_vault_name(
     color: &str,
     usk: &UserSymmetricKey,
 ) -> Result<String, CoreError> {
-    let meta = VaultMetaJson {
-        schema: VAULT_SCHEMA_V1.to_string(),
-        name: name.trim().to_string(),
-        icon: icon.to_string(),
-        color: color.to_string(),
-    };
-    let json = serde_json::to_string(&meta)
-        .map_err(|e| CoreError::Internal(format!("序列化 Vault 元数据失败: {e}")))?;
-    usk.encrypt_string(&json)
+    encode_vault_meta(name, icon, color, false, usk)
 }
 
 fn decode_remote_attachments(cipher: &CipherDto, usk: &UserSymmetricKey) -> Vec<ItemAttachment> {
@@ -650,11 +665,29 @@ pub fn cipher_to_item(cipher: &CipherDto, usk: &UserSymmetricKey) -> Result<Item
         _ => ItemCategory::SecureNote,
     };
 
+    let mut sso_provider: Option<String> = None;
+    let mut linked_item_ids: Vec<String> = Vec::new();
     if !cipher.fields.is_empty() {
         let mut custom = Vec::new();
         for (idx, cf) in cipher.fields.iter().enumerate() {
             let label = dec_opt(usk, cf.name.as_deref());
             let value = dec_opt(usk, cf.value.as_deref());
+            if label == "_ks_sso_provider" {
+                let clean = value.trim().to_string();
+                if !clean.is_empty() {
+                    sso_provider = Some(clean);
+                }
+                continue;
+            }
+            if label == "_ks_linked_items" {
+                linked_item_ids = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                continue;
+            }
             let sensitive = cf.field_type == 1;
             custom.push(ItemField {
                 id: format!("f-bw-{}-{idx}", cipher.id),
@@ -719,6 +752,8 @@ pub fn cipher_to_item(cipher: &CipherDto, usk: &UserSymmetricKey) -> Result<Item
             watchtower: WatchtowerFlags::default(),
             archived: false,
             reprompt,
+            sso_provider,
+            linked_item_ids,
             attachments: remote_attachments,
             created_at,
             updated_at,
@@ -875,6 +910,19 @@ pub fn draft_to_cipher(
         Some(draft.vault_id.clone())
     };
 
+    let clean_sso = draft
+        .sso_provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let clean_linked: Vec<String> = draft
+        .linked_item_ids
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && s != id)
+        .collect();
+
     let payload = ItemPayload {
         schema: ITEM_SCHEMA_V1.to_string(),
         category: draft.category,
@@ -889,6 +937,8 @@ pub fn draft_to_cipher(
         watchtower: draft.watchtower,
         archived: draft.archived,
         reprompt: draft.reprompt,
+        sso_provider: clean_sso.clone(),
+        linked_item_ids: clean_linked.clone(),
         attachments,
         created_at: created_at.clone(),
         updated_at: now.clone(),
@@ -1013,8 +1063,10 @@ pub fn draft_to_cipher(
                 _ => {}
             }
 
-            if let Some(bw_sec) = draft.sections.iter().find(|s| s.title == "自定义字段") {
-                next.fields = bw_sec
+            let mut custom_fields_dto = if let Some(bw_sec) =
+                draft.sections.iter().find(|s| s.title == "自定义字段")
+            {
+                bw_sec
                     .fields
                     .iter()
                     .map(|f| {
@@ -1026,8 +1078,29 @@ pub fn draft_to_cipher(
                             extra: Default::default(),
                         })
                     })
-                    .collect::<Result<Vec<_>, CoreError>>()?;
+                    .collect::<Result<Vec<_>, CoreError>>()?
+            } else {
+                Vec::new()
+            };
+            if let Some(ref sso) = clean_sso {
+                custom_fields_dto.push(CipherFieldDto {
+                    name: enc_opt(usk, "_ks_sso_provider")?,
+                    value: enc_opt(usk, sso)?,
+                    field_type: 0,
+                    linked_id: None,
+                    extra: Default::default(),
+                });
             }
+            if !clean_linked.is_empty() {
+                custom_fields_dto.push(CipherFieldDto {
+                    name: enc_opt(usk, "_ks_linked_items")?,
+                    value: enc_opt(usk, &clean_linked.join(","))?,
+                    field_type: 0,
+                    linked_id: None,
+                    extra: Default::default(),
+                });
+            }
+            next.fields = custom_fields_dto;
 
             next.password_history = next_history
                 .iter()
@@ -1084,6 +1157,25 @@ pub fn draft_to_cipher(
             })
             .collect::<Result<Vec<_>, CoreError>>()?;
         let fido2_credentials = build_fido2_credentials_dto(usk, &draft.passkeys, Vec::new())?;
+        let mut meta_fields = Vec::new();
+        if let Some(ref sso) = clean_sso {
+            meta_fields.push(CipherFieldDto {
+                name: enc_opt(usk, "_ks_sso_provider")?,
+                value: enc_opt(usk, sso)?,
+                field_type: 0,
+                linked_id: None,
+                extra: Default::default(),
+            });
+        }
+        if !clean_linked.is_empty() {
+            meta_fields.push(CipherFieldDto {
+                name: enc_opt(usk, "_ks_linked_items")?,
+                value: enc_opt(usk, &clean_linked.join(","))?,
+                field_type: 0,
+                linked_id: None,
+                extra: Default::default(),
+            });
+        }
         let cipher = CipherDto {
             id: id.to_string(),
             organization_id: None,
@@ -1104,7 +1196,7 @@ pub fn draft_to_cipher(
             secure_note: None,
             card: None,
             identity: None,
-            fields: Vec::new(),
+            fields: meta_fields,
             password_history: Vec::new(),
             attachments: Vec::new(),
             reprompt: Some(if draft.reprompt { 1 } else { 0 }),

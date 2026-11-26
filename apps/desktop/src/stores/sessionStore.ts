@@ -3,6 +3,7 @@ import { tauriClient } from '../services/tauriClient';
 import type {
   AccountSummary,
   AppSettings,
+  AppSettingsPatch,
   AuthStatus,
   SessionPreferencesPatch,
   SessionState,
@@ -36,6 +37,8 @@ interface SessionStore extends SessionState {
   switchAccount: (accountId: string) => Promise<void>;
   updateProfile: (displayName: string) => Promise<{ rpId: string; userId: string; name: string; displayName: string }>;
   updatePreferences: (patch: SessionPreferencesPatch) => Promise<void>;
+  updateAppSettings: (patch: AppSettingsPatch) => Promise<AppSettings>;
+  setAppSettings: (settings: AppSettings) => void;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -62,6 +65,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   quickAccessShortcut: 'CommandOrControl+Shift+Space',
   biometricMaxDays: 7,
   launchAtLogin: false,
+  travelMode: false,
+  trashAutoPurgeDays: 30,
+  sshBiometricConfirm: false,
 
   init: async () => {
     try {
@@ -186,4 +192,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const next = await tauriClient.sessionUpdatePreferences(patch);
     set({ ...next });
   },
+
+  updateAppSettings: async (patch) => {
+    const next = await tauriClient.appSettingsUpdate(patch);
+    set({ appSettings: next });
+    return next;
+  },
+
+  setAppSettings: (appSettings) => set({ appSettings }),
 }));

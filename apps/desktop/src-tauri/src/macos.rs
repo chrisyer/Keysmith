@@ -238,14 +238,31 @@ pub fn set_launch_at_login(enabled: bool) -> Result<(), CoreError> {
     macos_impl::set_launch_at_login(enabled)
 }
 
+#[derive(Debug, Clone)]
+pub enum AutoTypeStep {
+    Text(String),
+    Tab,
+    Enter,
+}
+
+pub fn record_frontmost_external_app() {
+    macos_impl::record_frontmost_external_app();
+}
+
+pub fn auto_type_sequence(steps: &[AutoTypeStep]) -> Result<(), CoreError> {
+    macos_impl::auto_type_sequence(steps)
+}
+
 pub fn system_preferred_language() -> Option<String> {
     macos_impl::system_preferred_language()
 }
 
 #[cfg(target_os = "macos")]
 mod macos_impl {
+    use std::ffi::c_void;
     use std::path::PathBuf;
-    use std::ptr::NonNull;
+    use std::ptr::{null, NonNull};
+    use std::sync::atomic::{AtomicI32, Ordering};
     use std::sync::{mpsc, Arc};
     use std::time::Duration;
 
@@ -255,10 +272,11 @@ mod macos_impl {
     use objc2::runtime::Bool;
     use objc2::{AnyThread, MainThreadMarker};
     use objc2_app_kit::{
-        NSApplication, NSBitmapImageFileType, NSBitmapImageRep, NSColor, NSImage, NSPasteboard,
-        NSPasteboardContentsOptions, NSPasteboardTypePNG, NSPasteboardTypeString,
-        NSPasteboardTypeTIFF, NSWindow, NSWindowSharingType, NSWorkspace,
-        NSWorkspaceSessionDidResignActiveNotification, NSWorkspaceWillSleepNotification,
+        NSApplication, NSApplicationActivationOptions, NSBitmapImageFileType, NSBitmapImageRep,
+        NSColor, NSImage, NSPasteboard, NSPasteboardContentsOptions, NSPasteboardTypePNG,
+        NSPasteboardTypeString, NSPasteboardTypeTIFF, NSRunningApplication, NSWindow,
+        NSWindowSharingType, NSWorkspace, NSWorkspaceSessionDidResignActiveNotification,
+        NSWorkspaceWillSleepNotification,
     };
     use objc2_foundation::{
         NSArray, NSData, NSDictionary, NSDistributedNotificationCenter, NSError, NSLocale,
@@ -645,6 +663,125 @@ mod macos_impl {
             .firstObject()
             .map(|s| s.to_string())
     }
+
+    static LAST_EXTERNAL_PID: AtomicI32 = AtomicI32::new(0);
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventCreateKeyboardEvent(
+            source: *const c_void,
+            virtual_key: u16,
+            key_down: bool,
+        ) -> *mut c_void;
+        fn CGEventKeyboardSetUnicodeString(
+            event: *mut c_void,
+            string_length: usize,
+            unicode_string: *const u16,
+        );
+        fn CGEventSetFlags(event: *mut c_void, flags: u64);
+        fn CGEventPost(tap: u32, event: *mut c_void);
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFRelease(cf: *const c_void);
+    }
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+    }
+
+    const K_CG_HID_EVENT_TAP: u32 = 0;
+    const K_VK_RETURN: u16 = 36;
+    const K_VK_TAB: u16 = 48;
+
+    pub fn record_frontmost_external_app() {
+        let ws = NSWorkspace::sharedWorkspace();
+        if let Some(front) = ws.frontmostApplication() {
+            let pid: i32 = unsafe { objc2::msg_send![&*front, processIdentifier] };
+            if pid > 0 && pid != std::process::id() as i32 {
+                LAST_EXTERNAL_PID.store(pid, Ordering::SeqCst);
+            }
+        }
+    }
+
+    fn post_cg_key(vk: u16, utf16_slice: Option<&[u16]>) -> Result<(), CoreError> {
+        unsafe {
+            let down = CGEventCreateKeyboardEvent(null(), vk, true);
+            let up = CGEventCreateKeyboardEvent(null(), vk, false);
+            if down.is_null() || up.is_null() {
+                if !down.is_null() {
+                    CFRelease(down);
+                }
+                if !up.is_null() {
+                    CFRelease(up);
+                }
+                return Err(CoreError::Internal(
+                    "创建 macOS CoreGraphics 键盘事件失败".to_string(),
+                ));
+            }
+            // Strip physical modifier flags (e.g. held Cmd+Shift from shortcut)
+            CGEventSetFlags(down, 0);
+            CGEventSetFlags(up, 0);
+            if let Some(units) = utf16_slice {
+                CGEventKeyboardSetUnicodeString(down, units.len(), units.as_ptr());
+                CGEventKeyboardSetUnicodeString(up, units.len(), units.as_ptr());
+            }
+            CGEventPost(K_CG_HID_EVENT_TAP, down);
+            CGEventPost(K_CG_HID_EVENT_TAP, up);
+            CFRelease(down);
+            CFRelease(up);
+        }
+        Ok(())
+    }
+
+    pub fn auto_type_sequence(steps: &[super::AutoTypeStep]) -> Result<(), CoreError> {
+        if !unsafe { AXIsProcessTrusted() } {
+            return Err(CoreError::Validation(
+                "请在 macOS「系统设置 → 隐私与安全性 → 辅助功能」中允许 Keysmith 控制电脑，以启用全局自动键入".to_string(),
+            ));
+        }
+
+        let target_pid = LAST_EXTERNAL_PID.load(Ordering::SeqCst);
+        if target_pid > 0 {
+            use objc2::ClassType;
+            let running: Option<objc2::rc::Retained<NSRunningApplication>> = unsafe {
+                objc2::msg_send![
+                    NSRunningApplication::class(),
+                    runningApplicationWithProcessIdentifier: target_pid
+                ]
+            };
+            if let Some(running) = running {
+                #[allow(deprecated)]
+                let _ = running.activateWithOptions(
+                    NSApplicationActivationOptions::ActivateIgnoringOtherApps,
+                );
+            }
+        }
+        std::thread::sleep(Duration::from_millis(140));
+
+        let mut utf16_buf = [0u16; 2];
+        for step in steps {
+            match step {
+                super::AutoTypeStep::Text(text) => {
+                    for ch in text.chars() {
+                        let encoded = ch.encode_utf16(&mut utf16_buf);
+                        post_cg_key(0, Some(encoded))?;
+                        std::thread::sleep(Duration::from_millis(4));
+                    }
+                }
+                super::AutoTypeStep::Tab => {
+                    post_cg_key(K_VK_TAB, None)?;
+                    std::thread::sleep(Duration::from_millis(35));
+                }
+                super::AutoTypeStep::Enter => {
+                    post_cg_key(K_VK_RETURN, None)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -841,5 +978,24 @@ mod macos_impl {
 
     pub fn system_preferred_language() -> Option<String> {
         None
+    }
+
+    pub fn record_frontmost_external_app() {
+        #[cfg(target_os = "windows")]
+        crate::windows_native::record_frontmost_external_app();
+    }
+
+    pub fn auto_type_sequence(steps: &[super::AutoTypeStep]) -> Result<(), CoreError> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::windows_native::auto_type_sequence(steps);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = steps;
+            Err(CoreError::Validation(
+                "Auto-type is not supported on this platform".to_string(),
+            ))
+        }
     }
 }

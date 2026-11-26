@@ -1,8 +1,12 @@
+pub mod masked_email;
+
 use std::collections::HashSet;
 
 use rand::{rngs::OsRng, RngCore};
 
 use crate::domain::{GeneratorMode, GeneratorOptions, GeneratorResult, PasswordStrength};
+
+pub use masked_email::{generate_catch_all_alias, generate_masked_email};
 
 const LOWER: &[u8] = b"abcdefghijkmnopqrstuvwxyz";
 const LOWER_FULL: &[u8] = b"abcdefghijklmnopqrstuvwxyz";

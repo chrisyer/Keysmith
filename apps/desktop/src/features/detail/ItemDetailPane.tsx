@@ -5,18 +5,22 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Code,
   Copy,
   CopyPlus,
   Download,
   ExternalLink,
   Eye,
   EyeOff,
+  FileText,
   FileUp,
   Fingerprint,
   FolderInput,
   Hash,
   History,
   Image as ImageIcon,
+  Keyboard,
+  Link2,
   Lock,
   Maximize2,
   MoreHorizontal,
@@ -26,11 +30,13 @@ import {
   Send,
   ShieldOff,
   Star,
+  Terminal,
   Trash2,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { ColoredPassword } from '../../components/ColoredPassword';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
+import { MarkdownPreview } from '../../components/MarkdownPreview';
 import { TotpRow } from '../../components/TotpRow';
 import { useI18n } from '../../i18n';
 import { isTauriRuntime, tauriClient } from '../../services/tauriClient';
@@ -43,30 +49,21 @@ import { extractDomain, formatCardNumber, formatDateTime, maskCardNumber } from 
 import { openExternalUrl } from '../../utils/opener';
 import { formatShortcutMac } from '../../utils/shortcuts';
 
-function renderNotesLines(notes: string) {
-  return notes.split('\n').map((line, i) => {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('### ')) {
-      return (
-        <h4 key={i} className="text-xs font-semibold text-[var(--text-primary)] mt-2 mb-1">
-          {trimmed.slice(4)}
-        </h4>
-      );
-    }
-    if (trimmed.startsWith('- ') || /^\d+\.\s/.test(trimmed)) {
-      return (
-        <p key={i} className="text-[13px] leading-relaxed text-[var(--text-primary)] pl-2">
-          {line}
-        </p>
-      );
-    }
-    if (!trimmed) return <div key={i} className="h-2" />;
-    return (
-      <p key={i} className="text-[13px] leading-relaxed text-[var(--text-primary)]">
-        {line}
-      </p>
-    );
-  });
+function isPreviewableAttachment(fileName: string): boolean {
+  return /\.(png|jpe?g|webp|gif|svg|pdf|md|markdown|json|txt|csv|pem|pub|log|ya?ml|toml)$/i.test(
+    fileName,
+  );
+}
+
+function decodeBase64Utf8(b64: string): string {
+  try {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  } catch {
+    return '';
+  }
 }
 
 interface FieldRowProps {
@@ -264,6 +261,8 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
   const [sharingOrg, setSharingOrg] = useState(false);
   const [uploadingAtt, setUploadingAtt] = useState(false);
   const [previewAtt, setPreviewAtt] = useState<AttachmentDownloadResult | null>(null);
+  const [notesRawMode, setNotesRawMode] = useState(false);
+  const [sshSocketPath, setSshSocketPath] = useState('');
   const [repromptPw, setRepromptPw] = useState('');
   const [repromptBusy, setRepromptBusy] = useState(false);
   const [repromptErr, setRepromptErr] = useState<string | null>(null);
@@ -271,6 +270,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
   const repromptInputRef = useRef<HTMLInputElement>(null);
 
   const vaults = useVaultStore((s) => s.vaults);
+  const allItems = useVaultStore((s) => s.items);
   const watchtowerReport = useVaultStore((s) => s.watchtowerReport);
   const toggleFavorite = useVaultStore((s) => s.toggleFavorite);
   const duplicateItem = useVaultStore((s) => s.duplicateItem);
@@ -299,7 +299,24 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
   useEffect(() => {
     setRepromptPw('');
     setRepromptErr(null);
+    setPreviewAtt(null);
   }, [item.id]);
+
+  useEffect(() => {
+    if (item.category !== 'ssh_key') return;
+    let active = true;
+    void tauriClient
+      .sshAgentSocketPath()
+      .then((p) => {
+        if (active) setSshSocketPath(p);
+      })
+      .catch(() => {
+        if (active) setSshSocketPath('');
+      });
+    return () => {
+      active = false;
+    };
+  }, [item.category]);
 
   const repromptLocked = Boolean(item.reprompt) && !repromptVerifiedIds[item.id];
 
@@ -329,6 +346,8 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
     if (itemIssues.includes('reused')) flags.ignoreReused = true;
     if (itemIssues.includes('missing_2fa')) flags.ignoreMissing2fa = true;
     if (itemIssues.includes('unsecured_url')) flags.ignoreUnsecuredUrl = true;
+    if (itemIssues.includes('expiring')) flags.ignoreExpiring = true;
+    if (itemIssues.includes('passkey_available')) flags.ignorePasskeyAvailable = true;
     await updateWatchtowerFlags(item.id, flags, getFilter());
     showToast({ label: dict.sidebar.watchtower, text: dict.detail.watchtowerIgnoreToast, kind: 'info' });
   };
@@ -346,6 +365,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
         vaultId: item.vaultId,
         title: item.title,
         favorite: item.favorite,
+        archived: item.archived,
         category: item.category,
         subtitle: item.subtitle,
         icon: item.icon,
@@ -357,6 +377,8 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
         passwordHistory: item.passwordHistory,
         watchtower: item.watchtower,
         reprompt: item.reprompt,
+        ssoProvider: item.ssoProvider,
+        linkedItemIds: item.linkedItemIds,
       },
       getFilter(),
     );
@@ -405,7 +427,10 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
   const handleAttachmentDownload = async (attachmentId: string, previewOnly = false) => {
     try {
       const res = await tauriClient.attachmentDownload(item.id, attachmentId);
-      if (previewOnly && res.mimeType.startsWith('image/')) {
+      if (
+        previewOnly &&
+        (res.mimeType.startsWith('image/') || isPreviewableAttachment(res.fileName))
+      ) {
         setPreviewAtt(res);
         return;
       }
@@ -524,6 +549,11 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)] whitespace-nowrap shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: vault.color }} />
                   {vault.name}
+                </span>
+              )}
+              {item.ssoProvider && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-500/12 text-indigo-600 dark:text-indigo-300 border border-indigo-500/25 whitespace-nowrap shrink-0">
+                  {fmt(dict.detail.ssoBadge, { provider: item.ssoProvider })}
                 </span>
               )}
             </div>
@@ -651,6 +681,36 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                   <span className="text-[10px] text-[var(--text-muted)] font-mono-tabular">
                     {formatShortcutMac(shortcuts.largeType)}
                   </span>
+                </button>
+              )}
+              {!repromptLocked && (usernameField || passwordField || totpField) && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    menuRef.current?.hidePopover?.();
+                    try {
+                      await tauriClient.autofillAutoType(
+                        item.id,
+                        usernameField || passwordField ? 'credentials' : 'totp',
+                        true,
+                      );
+                      showToast({
+                        label: dict.detail.autoTypeAction,
+                        text: dict.quickAccess.autoTypedToast,
+                        kind: 'info',
+                      });
+                    } catch (err) {
+                      showToast({
+                        label: dict.detail.autoTypeAction,
+                        text: err instanceof Error ? err.message : String(err),
+                        kind: 'warning',
+                      });
+                    }
+                  }}
+                  className="px-2.5 py-2 rounded-lg hover:bg-[var(--bg-hover)] text-left flex items-center gap-2 text-[var(--text-primary)] cursor-pointer"
+                >
+                  <Keyboard size={13} />
+                  <span>{dict.detail.autoTypeAction}</span>
                 </button>
               )}
               <div className="my-1 border-t border-[var(--border-subtle)]" />
@@ -912,7 +972,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
               >
                 {dict.detail.fixNow}
               </button>
-              {itemIssues.some((i) => i !== 'expiring' && i !== 'breached') && (
+              {itemIssues.some((i) => i !== 'breached') && (
                 <button
                   type="button"
                   onClick={() => void handleIgnoreIssues()}
@@ -1113,6 +1173,10 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                                     vaultId: item.vaultId,
                                     title: item.title,
                                     favorite: item.favorite,
+                                    archived: item.archived,
+                                    reprompt: item.reprompt,
+                                    ssoProvider: item.ssoProvider,
+                                    linkedItemIds: item.linkedItemIds,
                                     category: item.category,
                                     subtitle: item.subtitle,
                                     icon: item.icon,
@@ -1212,11 +1276,140 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
           </div>
         )}
 
+        {/* SSH Agent & Git Commit Signing Wizard */}
+        {item.category === 'ssh_key' && (() => {
+          const pubKeyField = allFields.find(
+            (f) => f.fieldType === 'ssh_public_key' && f.value.trim(),
+          );
+          const socketVal = sshSocketPath || '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock';
+          if (!pubKeyField && !sshSocketPath) return null;
+          return (
+            <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] p-4 flex flex-col gap-3">
+              <div className="flex items-start gap-2.5">
+                <Terminal size={16} className="text-[var(--accent-primary)] shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-semibold text-[var(--text-primary)]">
+                    {dict.detail.sshWizardTitle}
+                  </div>
+                  <div className="text-[11px] text-[var(--text-secondary)] mt-0.5 leading-relaxed">
+                    {dict.detail.sshWizardDesc}
+                  </div>
+                  <code className="block mt-2 px-2.5 py-1.5 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] font-mono-tabular text-[11px] text-[var(--text-primary)] truncate">
+                    IdentityAgent &quot;{socketVal}&quot;
+                  </code>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCopy(socketVal, dict.detail.sshCopySocket, false)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+                >
+                  <Copy size={12} />
+                  {dict.detail.sshCopySocket}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleCopy(
+                      `Host *\n  IdentityAgent "${socketVal}"\n`,
+                      dict.detail.sshCopySshConfig,
+                      false,
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+                >
+                  <Copy size={12} />
+                  {dict.detail.sshCopySshConfig}
+                </button>
+                {pubKeyField && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void handleCopy(
+                        `git config --global gpg.format ssh && git config --global user.signingkey "${pubKeyField.value.trim()}" && git config --global commit.gpgsign true`,
+                        dict.detail.sshCopyGitConfig,
+                        false,
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white text-xs font-medium cursor-pointer"
+                  >
+                    <Check size={12} />
+                    {dict.detail.sshCopyGitConfig}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Linked Items */}
+        {(item.linkedItemIds?.length ?? 0) > 0 && (
+          <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] flex items-center gap-1.5 text-xs font-semibold text-[var(--text-secondary)]">
+              <Link2 size={13} className="text-[var(--accent-primary)]" />
+              {fmt(dict.detail.linkedItemsTitle, { count: item.linkedItemIds?.length ?? 0 })}
+            </div>
+            <div className="divide-y divide-[var(--border-subtle)]">
+              {item.linkedItemIds?.map((lid) => {
+                const linked = allItems.find((x) => x.id === lid);
+                return (
+                  <button
+                    key={lid}
+                    type="button"
+                    onClick={() => void selectItem(lid)}
+                    className="w-full px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-[var(--bg-hover)] text-left transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <ItemIconBadge
+                        icon={linked?.icon}
+                        category={linked?.category ?? 'login'}
+                        title={linked?.title ?? lid}
+                        size="sm"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-medium text-[var(--text-primary)] truncate">
+                          {linked?.title ?? lid}
+                        </div>
+                        {linked && (
+                          <div className="text-[11px] text-[var(--text-secondary)] truncate">
+                            {dict.categories[linked.category] ?? linked.category}
+                            {linked.subtitle ? ` · ${linked.subtitle}` : ''}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <ChevronRight size={14} className="text-[var(--text-muted)] shrink-0" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Notes */}
         {item.notes.trim() && (
           <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] px-4 py-3.5">
-            <div className="text-[11px] font-medium text-[var(--text-secondary)] mb-1.5">{dict.detail.notes}</div>
-            <div data-selectable="true">{renderNotesLines(item.notes)}</div>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="text-[11px] font-medium text-[var(--text-secondary)]">{dict.detail.notes}</div>
+              <button
+                type="button"
+                onClick={() => setNotesRawMode((v) => !v)}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md hover:bg-[var(--bg-hover)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+              >
+                <Code size={11} />
+                {notesRawMode ? dict.detail.markdownPreview : dict.detail.markdownRaw}
+              </button>
+            </div>
+            <div data-selectable="true">
+              {notesRawMode ? (
+                <pre className="font-mono-tabular text-[12.5px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-words">
+                  {item.notes}
+                </pre>
+              ) : (
+                <MarkdownPreview content={item.notes} />
+              )}
+            </div>
           </div>
         )}
 
@@ -1255,6 +1448,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
               <div className="divide-y divide-[var(--border-subtle)]">
                 {item.attachments?.map((att) => {
                   const isImage = /\.(png|jpe?g|webp|gif|svg)$/i.test(att.fileName);
+                  const canPreview = isPreviewableAttachment(att.fileName);
                   return (
                     <div
                       key={att.id}
@@ -1267,14 +1461,14 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        {isImage && (
+                        {canPreview && (
                           <button
                             type="button"
                             onClick={() => void handleAttachmentDownload(att.id, true)}
                             aria-label={fmt(dict.detail.previewAttachmentAria, { name: att.fileName })}
                             className="p-1.5 rounded-md hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
                           >
-                            <ImageIcon size={13} />
+                            {isImage ? <ImageIcon size={13} /> : <FileText size={13} />}
                           </button>
                         )}
                         <button
@@ -1300,25 +1494,56 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
               </div>
             )}
 
-            {previewAtt && (
-              <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-detail)] flex flex-col gap-2">
-                <div className="flex items-center justify-between text-[11px] text-[var(--text-secondary)]">
-                  <span>{fmt(dict.detail.imagePreviewTitle, { name: previewAtt.fileName })}</span>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewAtt(null)}
-                    className="text-[var(--accent-primary)] hover:underline cursor-pointer"
-                  >
-                    {dict.detail.collapsePreviewBtn}
-                  </button>
+            {previewAtt && (() => {
+              const lowerName = previewAtt.fileName.toLowerCase();
+              const isImg = previewAtt.mimeType.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg)$/i.test(lowerName);
+              const isPdf = previewAtt.mimeType === 'application/pdf' || lowerName.endsWith('.pdf');
+              const isMarkdown = /\.(md|markdown)$/i.test(lowerName);
+              const decodedText = !isImg && !isPdf ? decodeBase64Utf8(previewAtt.dataBase64) : '';
+              let formattedText = decodedText;
+              if (lowerName.endsWith('.json') && decodedText) {
+                try {
+                  formattedText = JSON.stringify(JSON.parse(decodedText), null, 2);
+                } catch {
+                  formattedText = decodedText;
+                }
+              }
+              return (
+                <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-detail)] flex flex-col gap-2">
+                  <div className="flex items-center justify-between text-[11px] text-[var(--text-secondary)]">
+                    <span>{fmt(dict.detail.imagePreviewTitle, { name: previewAtt.fileName })}</span>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewAtt(null)}
+                      className="text-[var(--accent-primary)] hover:underline cursor-pointer"
+                    >
+                      {dict.detail.collapsePreviewBtn}
+                    </button>
+                  </div>
+                  {isImg ? (
+                    <img
+                      src={`data:${previewAtt.mimeType || 'image/png'};base64,${previewAtt.dataBase64}`}
+                      alt={previewAtt.fileName}
+                      className="max-h-60 object-contain rounded-lg border border-[var(--border-subtle)] bg-black/10"
+                    />
+                  ) : isPdf ? (
+                    <iframe
+                      src={`data:application/pdf;base64,${previewAtt.dataBase64}`}
+                      title={previewAtt.fileName}
+                      className="w-full h-72 rounded-lg border border-[var(--border-subtle)] bg-white"
+                    />
+                  ) : isMarkdown ? (
+                    <div className="p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] max-h-72 overflow-y-auto">
+                      <MarkdownPreview content={decodedText} />
+                    </div>
+                  ) : (
+                    <pre className="max-h-64 overflow-auto p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] font-mono-tabular text-xs text-[var(--text-primary)] whitespace-pre-wrap break-words">
+                      {formattedText}
+                    </pre>
+                  )}
                 </div>
-                <img
-                  src={`data:${previewAtt.mimeType};base64,${previewAtt.dataBase64}`}
-                  alt={previewAtt.fileName}
-                  className="max-h-60 object-contain rounded-lg border border-[var(--border-subtle)] bg-black/10"
-                />
-              </div>
-            )}
+              );
+            })()}
           </div>
         )}
 

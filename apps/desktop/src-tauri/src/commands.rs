@@ -6,11 +6,11 @@ use keysmith_core::crypto::KdfConfig;
 use keysmith_core::domain::{
     AccountPasskey, AccountPasskeyListResponse, AccountProfileResponse, AppSettings,
     AppSettingsPatch, AppUpdateInfo, AttachmentDownloadResult, AuthStatus, ExportResult,
-    GeneratorHistoryEntry, GeneratorOptions, GeneratorResult, ImportSummary, ItemAttachment,
-    ItemDetail, ItemDraft, ItemFilter, ItemStats, ItemSummary, OrganizationInfo,
-    SendCreateFileInput, SendCreateTextInput, SendItem, SendUpdateInput, ServerCheckResult,
-    SessionPreferencesPatch, SessionState, SshKeyPair, SyncStateKind, SyncStatus, TotpCode, Vault,
-    WatchtowerFlagsPatch, WatchtowerReport,
+    FieldPurpose, FieldType, GeneratorHistoryEntry, GeneratorOptions, GeneratorResult,
+    ImportSummary, ItemAttachment, ItemDetail, ItemDraft, ItemFilter, ItemStats, ItemSummary,
+    LocalSnapshotInfo, OrganizationInfo, SendCreateFileInput, SendCreateTextInput, SendItem,
+    SendUpdateInput, ServerCheckResult, SessionPreferencesPatch, SessionState, SshKeyPair,
+    SyncStateKind, SyncStatus, TotpCode, Vault, WatchtowerFlagsPatch, WatchtowerReport,
 };
 use keysmith_core::error::CoreError;
 use keysmith_core::protocol::check_github_latest_release;
@@ -29,9 +29,10 @@ use crate::events::{
     EVENT_SYNC_STATUS, EVENT_UI_FOCUS_ITEM, EVENT_UI_SETTINGS_CHANGED,
 };
 use crate::macos::{
-    activate_app_foreground, apply_window_vibrancy,
+    activate_app_foreground, apply_window_vibrancy, auto_type_sequence,
     clipboard_read_image_png_base64 as macos_read_image_b64, configure_floating_rounded_window,
-    set_launch_at_login, set_window_screen_capture_protection,
+    record_frontmost_external_app, set_launch_at_login, set_window_screen_capture_protection,
+    AutoTypeStep,
 };
 
 pub struct AppState {
@@ -209,6 +210,7 @@ pub fn update_global_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), Cor
 }
 
 pub fn show_quick_access_window(app: &AppHandle) -> Result<(), CoreError> {
+    record_frontmost_external_app();
     let Some(state) = app.try_state::<AppState>() else {
         return Ok(());
     };
@@ -524,6 +526,7 @@ pub async fn session_update_preferences(
     let prev_shortcut = state.core.session_get_state().quick_access_shortcut;
     let shortcut_changed = patch.quick_access_shortcut.clone();
     let launch_changed = patch.launch_at_login;
+    let travel_changed = patch.travel_mode;
 
     if let Some(ref next_shortcut) = shortcut_changed {
         if let Err(err) = update_global_shortcut(&app, next_shortcut) {
@@ -537,6 +540,20 @@ pub async fn session_update_preferences(
 
     if let Some(enabled) = launch_changed {
         let _ = set_launch_at_login(enabled);
+    }
+    if let Some(travel_enabled) = travel_changed {
+        emit_data_changed(&app, true, Vec::new(), Vec::new());
+        let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+        if !travel_enabled {
+            let app_c = app.clone();
+            let core_c = Arc::clone(&state.core);
+            tauri::async_runtime::spawn(async move {
+                if core_c.sync_now().await.is_ok() {
+                    emit_data_changed(&app_c, true, Vec::new(), Vec::new());
+                    let _ = app_c.emit(EVENT_SYNC_STATUS, core_c.sync_get_status());
+                }
+            });
+        }
     }
     apply_window_preferences(&app, &session);
     Ok(session)
@@ -647,6 +664,19 @@ pub async fn vault_delete(
 }
 
 #[tauri::command]
+pub async fn vault_set_travel_safe(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    travel_safe: bool,
+) -> Result<Vault, CoreError> {
+    let vault = state.core.vault_set_travel_safe(&id, travel_safe).await?;
+    emit_data_changed(&app, true, Vec::new(), Vec::new());
+    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    Ok(vault)
+}
+
+#[tauri::command]
 pub async fn vault_import(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -654,10 +684,17 @@ pub async fn vault_import(
     data: String,
     is_base64: bool,
     target_vault_id: Option<String>,
+    import_passphrase: Option<String>,
 ) -> Result<ImportSummary, CoreError> {
     let summary = state
         .core
-        .vault_import(&format, &data, is_base64, target_vault_id.as_deref())
+        .vault_import_with_passphrase(
+            &format,
+            &data,
+            is_base64,
+            target_vault_id.as_deref(),
+            import_passphrase.as_deref(),
+        )
         .await?;
     emit_data_changed(&app, true, Vec::new(), Vec::new());
     let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
@@ -675,6 +712,49 @@ pub async fn vault_export(
         .core
         .vault_export(&format, &master_password, export_passphrase.as_deref())
         .await
+}
+
+#[tauri::command]
+pub async fn vault_export_emergency_kit(
+    state: State<'_, AppState>,
+) -> Result<ExportResult, CoreError> {
+    let core = Arc::clone(&state.core);
+    run_blocking(move || core.vault_export_emergency_kit()).await?
+}
+
+#[tauri::command]
+pub async fn snapshot_list(
+    state: State<'_, AppState>,
+) -> Result<Vec<LocalSnapshotInfo>, CoreError> {
+    let core = Arc::clone(&state.core);
+    run_blocking(move || core.snapshot_list()).await?
+}
+
+#[tauri::command]
+pub async fn snapshot_create(state: State<'_, AppState>) -> Result<LocalSnapshotInfo, CoreError> {
+    let core = Arc::clone(&state.core);
+    run_blocking(move || core.snapshot_create()).await?
+}
+
+#[tauri::command]
+pub async fn snapshot_restore(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    snapshot_id: String,
+) -> Result<ImportSummary, CoreError> {
+    let summary = state.core.snapshot_restore(&snapshot_id).await?;
+    emit_data_changed(&app, true, Vec::new(), Vec::new());
+    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    Ok(summary)
+}
+
+#[tauri::command]
+pub async fn snapshot_delete(
+    state: State<'_, AppState>,
+    snapshot_id: String,
+) -> Result<(), CoreError> {
+    let core = Arc::clone(&state.core);
+    run_blocking(move || core.snapshot_delete(&snapshot_id)).await?
 }
 
 // --- Items & Batch Ops ---
@@ -1015,6 +1095,17 @@ pub async fn generator_generate(
 }
 
 #[tauri::command]
+pub async fn generator_generate_masked_email(
+    state: State<'_, AppState>,
+    domain_hint: Option<String>,
+) -> Result<String, CoreError> {
+    state
+        .core
+        .generator_generate_masked_email(domain_hint.as_deref())
+        .await
+}
+
+#[tauri::command]
 pub async fn generator_history_list(
     state: State<'_, AppState>,
 ) -> Result<Vec<GeneratorHistoryEntry>, CoreError> {
@@ -1059,6 +1150,104 @@ pub async fn ssh_generate_ed25519(
 ) -> Result<SshKeyPair, CoreError> {
     let core = Arc::clone(&state.core);
     run_blocking(move || core.ssh_generate_ed25519(comment.as_deref())).await?
+}
+
+#[tauri::command]
+pub async fn ssh_agent_socket_path() -> Result<String, CoreError> {
+    let dir = crate::ipc_socket::resolve_app_data_dir()
+        .ok_or_else(|| CoreError::Internal("无法解析应用数据目录".to_string()))?;
+    Ok(dir.join("ssh-agent.sock").to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn autofill_auto_type(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    item_id: String,
+    mode: Option<String>,
+    submit: Option<bool>,
+) -> Result<(), CoreError> {
+    let core = Arc::clone(&state.core);
+    let item = run_blocking(move || core.item_get(&item_id))
+        .await??
+        .ok_or_else(|| CoreError::NotFound("未找到目标凭据条目".to_string()))?;
+
+    let all_fields: Vec<_> = item
+        .payload
+        .sections
+        .iter()
+        .flat_map(|s| s.fields.iter())
+        .collect();
+    let username = all_fields
+        .iter()
+        .find(|f| {
+            (f.purpose == Some(FieldPurpose::Username) || f.field_type == FieldType::Email)
+                && !f.value.trim().is_empty()
+        })
+        .map(|f| f.value.clone());
+    let password = all_fields
+        .iter()
+        .find(|f| {
+            (f.purpose == Some(FieldPurpose::Password) || f.field_type == FieldType::Password)
+                && !f.value.is_empty()
+        })
+        .map(|f| f.value.clone());
+    let totp = all_fields
+        .iter()
+        .find(|f| {
+            (f.purpose == Some(FieldPurpose::Totp) || f.field_type == FieldType::Totp)
+                && !f.value.trim().is_empty()
+        })
+        .and_then(|f| state.core.totp_compute(&f.value).ok())
+        .map(|c| c.code);
+
+    let mode_norm = mode
+        .as_deref()
+        .unwrap_or("credentials")
+        .trim()
+        .to_ascii_lowercase();
+    let mut steps = Vec::new();
+    match mode_norm.as_str() {
+        "username" => {
+            let u = username.ok_or_else(|| CoreError::Validation("该条目没有可键入的用户名".to_string()))?;
+            steps.push(AutoTypeStep::Text(u));
+        }
+        "password" => {
+            let p = password.ok_or_else(|| CoreError::Validation("该条目没有可键入的密码".to_string()))?;
+            steps.push(AutoTypeStep::Text(p));
+        }
+        "totp" => {
+            let t = totp.ok_or_else(|| CoreError::Validation("该条目未配置动态验证码 (2FA)".to_string()))?;
+            steps.push(AutoTypeStep::Text(t));
+        }
+        _ => match (username, password) {
+            (Some(u), Some(p)) => {
+                steps.push(AutoTypeStep::Text(u));
+                steps.push(AutoTypeStep::Tab);
+                steps.push(AutoTypeStep::Text(p));
+            }
+            (None, Some(p)) => {
+                steps.push(AutoTypeStep::Text(p));
+            }
+            (Some(u), None) => {
+                steps.push(AutoTypeStep::Text(u));
+            }
+            (None, None) => {
+                return Err(CoreError::Validation(
+                    "该条目没有可自动键入的用户名或密码".to_string(),
+                ));
+            }
+        },
+    }
+    if submit.unwrap_or(true) {
+        steps.push(AutoTypeStep::Enter);
+    }
+
+    if let Some(win) = app.get_webview_window("quick-access") {
+        let _ = win.hide();
+    }
+
+    run_blocking(move || auto_type_sequence(&steps)).await?
 }
 
 #[tauri::command]

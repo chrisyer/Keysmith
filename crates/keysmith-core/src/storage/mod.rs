@@ -39,6 +39,9 @@ pub struct StoredAccount {
     pub biometric_max_days: u32,
     pub launch_at_login: bool,
     pub last_master_password_unlock_at: Option<String>,
+    pub travel_mode: bool,
+    pub trash_auto_purge_days: u32,
+    pub ssh_biometric_confirm: bool,
 }
 
 impl StoredAccount {
@@ -83,6 +86,9 @@ impl StoredAccount {
             biometric_max_days: 7,
             launch_at_login: false,
             last_master_password_unlock_at: None,
+            travel_mode: false,
+            trash_auto_purge_days: 30,
+            ssh_biometric_confirm: false,
         }
     }
 }
@@ -151,9 +157,21 @@ pub struct StoredSend {
     pub revision_date: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct StoredSnapshot {
+    pub id: String,
+    pub account_id: String,
+    pub file_name: String,
+    pub created_at: String,
+    pub item_count: usize,
+    pub vault_count: usize,
+    pub payload_enc: String,
+}
+
 #[derive(Clone)]
 pub struct Storage {
     conn: Arc<Mutex<Connection>>,
+    db_path: Option<PathBuf>,
 }
 
 const ACCOUNT_COLUMNS: &str = r#"
@@ -164,7 +182,8 @@ const ACCOUNT_COLUMNS: &str = r#"
     clipboard_clear_seconds, device_identifier,
     is_active, close_to_tray, lock_on_sleep, screen_capture_protected,
     vibrancy_enabled, favicon_enabled, quick_access_shortcut,
-    biometric_max_days, launch_at_login, last_master_password_unlock_at
+    biometric_max_days, launch_at_login, last_master_password_unlock_at,
+    travel_mode, trash_auto_purge_days, ssh_biometric_confirm
 "#;
 
 fn map_account_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredAccount> {
@@ -202,6 +221,9 @@ fn map_account_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredAccount> {
         biometric_max_days: row.get::<_, i64>(25)? as u32,
         launch_at_login: row.get::<_, i64>(26)? != 0,
         last_master_password_unlock_at: row.get(27)?,
+        travel_mode: row.get::<_, i64>(28)? != 0,
+        trash_auto_purge_days: row.get::<_, i64>(29)? as u32,
+        ssh_biometric_confirm: row.get::<_, i64>(30)? != 0,
     })
 }
 
@@ -261,6 +283,7 @@ impl Storage {
             .map_err(|e| CoreError::Storage(format!("打开 SQLite 数据库失败: {e}")))?;
         let storage = Self {
             conn: Arc::new(Mutex::new(conn)),
+            db_path: Some(path.to_path_buf()),
         };
         storage.migrate()?;
         Ok(storage)
@@ -271,9 +294,16 @@ impl Storage {
             .map_err(|e| CoreError::Storage(format!("打开内存数据库失败: {e}")))?;
         let storage = Self {
             conn: Arc::new(Mutex::new(conn)),
+            db_path: None,
         };
         storage.migrate()?;
         Ok(storage)
+    }
+
+    pub fn db_dir(&self) -> Option<PathBuf> {
+        self.db_path
+            .as_ref()
+            .and_then(|p| p.parent().map(Path::to_path_buf))
     }
 
     fn exec_alter_ignore_dup(conn: &Connection, sql: &str) -> Result<(), CoreError> {
@@ -328,7 +358,10 @@ impl Storage {
                 quick_access_shortcut TEXT NOT NULL DEFAULT 'CommandOrControl+Shift+Space',
                 biometric_max_days INTEGER NOT NULL DEFAULT 7,
                 launch_at_login INTEGER NOT NULL DEFAULT 0,
-                last_master_password_unlock_at TEXT
+                last_master_password_unlock_at TEXT,
+                travel_mode INTEGER NOT NULL DEFAULT 0,
+                trash_auto_purge_days INTEGER NOT NULL DEFAULT 30,
+                ssh_biometric_confirm INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS vaults (
@@ -406,6 +439,16 @@ impl Storage {
                 raw_json TEXT NOT NULL,
                 revision_date TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS local_snapshots (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                item_count INTEGER NOT NULL DEFAULT 0,
+                vault_count INTEGER NOT NULL DEFAULT 0,
+                payload_enc TEXT NOT NULL
+            );
             "#,
         )
         .map_err(|e| CoreError::Storage(format!("执行数据库迁移失败: {e}")))?;
@@ -422,6 +465,9 @@ impl Storage {
             "ALTER TABLE accounts ADD COLUMN biometric_max_days INTEGER NOT NULL DEFAULT 7",
             "ALTER TABLE accounts ADD COLUMN launch_at_login INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE accounts ADD COLUMN last_master_password_unlock_at TEXT",
+            "ALTER TABLE accounts ADD COLUMN travel_mode INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE accounts ADD COLUMN trash_auto_purge_days INTEGER NOT NULL DEFAULT 30",
+            "ALTER TABLE accounts ADD COLUMN ssh_biometric_confirm INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE vaults ADD COLUMN is_organization INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE vaults ADD COLUMN organization_id TEXT",
         ];
@@ -538,10 +584,12 @@ impl Storage {
                 clipboard_clear_seconds, device_identifier,
                 is_active, close_to_tray, lock_on_sleep, screen_capture_protected,
                 vibrancy_enabled, favicon_enabled, quick_access_shortcut,
-                biometric_max_days, launch_at_login, last_master_password_unlock_at
+                biometric_max_days, launch_at_login, last_master_password_unlock_at,
+                travel_mode, trash_auto_purge_days, ssh_biometric_confirm
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
+                ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
+                ?29, ?30, ?31
             )
             ON CONFLICT(id) DO UPDATE SET
                 server_url = excluded.server_url,
@@ -570,7 +618,10 @@ impl Storage {
                 quick_access_shortcut = excluded.quick_access_shortcut,
                 biometric_max_days = excluded.biometric_max_days,
                 launch_at_login = excluded.launch_at_login,
-                last_master_password_unlock_at = excluded.last_master_password_unlock_at
+                last_master_password_unlock_at = excluded.last_master_password_unlock_at,
+                travel_mode = excluded.travel_mode,
+                trash_auto_purge_days = excluded.trash_auto_purge_days,
+                ssh_biometric_confirm = excluded.ssh_biometric_confirm
             "#,
             params![
                 account.id,
@@ -601,6 +652,9 @@ impl Storage {
                 account.biometric_max_days as i64,
                 if account.launch_at_login { 1 } else { 0 },
                 account.last_master_password_unlock_at,
+                if account.travel_mode { 1 } else { 0 },
+                account.trash_auto_purge_days as i64,
+                if account.ssh_biometric_confirm { 1 } else { 0 },
             ],
         )
         .map_err(|e| CoreError::Storage(format!("写入账户信息失败: {e}")))?;
@@ -1459,6 +1513,177 @@ impl Storage {
         )
         .map_err(|e| CoreError::Storage(format!("保存应用设置失败: {e}")))?;
         let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+        Ok(())
+    }
+
+    pub fn delete_app_setting(&self, key: &str) -> Result<(), CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
+        conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])
+            .map_err(|e| CoreError::Storage(format!("删除应用设置失败: {e}")))?;
+        Ok(())
+    }
+
+    // --- Local Encrypted Snapshots ---
+
+    pub fn insert_snapshot(
+        &self,
+        snap: &StoredSnapshot,
+        keep_count: usize,
+    ) -> Result<(), CoreError> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
+        tx.execute(
+            r#"
+            INSERT INTO local_snapshots (id, account_id, file_name, created_at, item_count, vault_count, payload_enc)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+            params![
+                snap.id,
+                snap.account_id,
+                snap.file_name,
+                snap.created_at,
+                snap.item_count as i64,
+                snap.vault_count as i64,
+                snap.payload_enc,
+            ],
+        )
+        .map_err(|e| CoreError::Storage(format!("写入本地加密快照失败: {e}")))?;
+
+        let keep = keep_count.max(1) as i64;
+        tx.execute(
+            r#"
+            DELETE FROM local_snapshots
+            WHERE account_id = ?1 AND id NOT IN (
+                SELECT id FROM local_snapshots
+                WHERE account_id = ?1
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT ?2
+            )
+            "#,
+            params![snap.account_id, keep],
+        )
+        .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+        tx.commit()
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
+        drop(conn);
+
+        if let Some(dir) = self.db_dir() {
+            let snap_dir = dir.join("snapshots");
+            if std::fs::create_dir_all(&snap_dir).is_ok() {
+                let _ = std::fs::write(snap_dir.join(&snap.file_name), snap.payload_enc.as_bytes());
+                // Prune older snapshot files on disk matching active DB rows
+                if let Ok(active) = self.list_snapshots(&snap.account_id) {
+                    let active_names: std::collections::HashSet<&str> =
+                        active.iter().map(|s| s.file_name.as_str()).collect();
+                    if let Ok(entries) = std::fs::read_dir(&snap_dir) {
+                        for entry in entries.flatten() {
+                            if let Some(fname) = entry.file_name().to_str() {
+                                if fname.starts_with(&format!("snapshot-{}-", &snap.account_id[..snap.account_id.len().min(8)]))
+                                    && !active_names.contains(fname)
+                                {
+                                    let _ = std::fs::remove_file(entry.path());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn list_snapshots(&self, account_id: &str) -> Result<Vec<StoredSnapshot>, CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT id, account_id, file_name, created_at, item_count, vault_count, payload_enc
+                FROM local_snapshots
+                WHERE account_id = ?1
+                ORDER BY created_at DESC, rowid DESC
+                "#,
+            )
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![account_id], |row| {
+                Ok(StoredSnapshot {
+                    id: row.get(0)?,
+                    account_id: row.get(1)?,
+                    file_name: row.get(2)?,
+                    created_at: row.get(3)?,
+                    item_count: row.get::<_, i64>(4)? as usize,
+                    vault_count: row.get::<_, i64>(5)? as usize,
+                    payload_enc: row.get(6)?,
+                })
+            })
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| CoreError::Storage(e.to_string()))?);
+        }
+        Ok(out)
+    }
+
+    pub fn get_snapshot(
+        &self,
+        account_id: &str,
+        snapshot_id: &str,
+    ) -> Result<Option<StoredSnapshot>, CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
+        conn.query_row(
+            r#"
+            SELECT id, account_id, file_name, created_at, item_count, vault_count, payload_enc
+            FROM local_snapshots
+            WHERE account_id = ?1 AND id = ?2
+            "#,
+            params![account_id, snapshot_id],
+            |row| {
+                Ok(StoredSnapshot {
+                    id: row.get(0)?,
+                    account_id: row.get(1)?,
+                    file_name: row.get(2)?,
+                    created_at: row.get(3)?,
+                    item_count: row.get::<_, i64>(4)? as usize,
+                    vault_count: row.get::<_, i64>(5)? as usize,
+                    payload_enc: row.get(6)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| CoreError::Storage(e.to_string()))
+    }
+
+    pub fn delete_snapshot(&self, account_id: &str, snapshot_id: &str) -> Result<(), CoreError> {
+        let existing = self.get_snapshot(account_id, snapshot_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
+        conn.execute(
+            "DELETE FROM local_snapshots WHERE account_id = ?1 AND id = ?2",
+            params![account_id, snapshot_id],
+        )
+        .map_err(|e| CoreError::Storage(format!("删除快照失败: {e}")))?;
+        drop(conn);
+
+        if let (Some(snap), Some(dir)) = (existing, self.db_dir()) {
+            let _ = std::fs::remove_file(dir.join("snapshots").join(&snap.file_name));
+        }
         Ok(())
     }
 

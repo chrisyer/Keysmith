@@ -1,23 +1,27 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use keysmith_core::domain::codec::new_uuid;
 use keysmith_core::domain::{
-    extract_domain, mask_card_number, AuthStatus, FieldPurpose, FieldType, GeneratorMode,
-    GeneratorOptions, ItemCategory, ItemDetail, ItemDraft, ItemField, ItemFilter, ItemIcon,
-    ItemSection, ItemUrl, UrlMatchRule, WatchtowerFlags, DEFAULT_PERSONAL_VAULT_ID,
+    domains_are_equivalent, extract_domain, is_domain_autofill_disabled, mask_card_number,
+    AuthStatus, FieldPurpose, FieldType, GeneratorMode, GeneratorOptions, ItemCategory, ItemDetail,
+    ItemDraft, ItemField, ItemFilter, ItemIcon, ItemSection, ItemUrl, UrlMatchRule,
+    WatchtowerFlags, DEFAULT_PERSONAL_VAULT_ID,
 };
 use keysmith_core::passkey::{
     assert_passkey_credential, create_passkey_credential, normalize_rp_id, now_rfc3339,
-    passkey_matches_credential_list, rp_id_matches_origin, PasskeyAssertParams,
+    passkey_matches_credential_list, rp_id_matches_origin_ext, PasskeyAssertParams,
     PasskeyCreateParams,
 };
+use keysmith_core::session::localized_biometric_reason;
 use keysmith_core::AppCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 #[cfg(unix)]
 use tokio::net::UnixListener;
 #[cfg(windows)]
@@ -103,6 +107,17 @@ pub fn spawn_ipc_socket_server(app: AppHandle, core: Arc<AppCore>) {
         eprintln!("[keysmith] cannot resolve IPC endpoint path");
         return;
     };
+
+    #[cfg(unix)]
+    {
+        if let Some(dir) = resolve_app_data_dir() {
+            let ssh_sock = dir.join("ssh-agent.sock");
+            let core_ssh = Arc::clone(&core);
+            tauri::async_runtime::spawn(async move {
+                spawn_embedded_ssh_agent(ssh_sock, core_ssh).await;
+            });
+        }
+    }
 
     #[cfg(unix)]
     tauri::async_runtime::spawn(async move {
@@ -233,12 +248,18 @@ async fn dispatch_rpc(
         "status" => {
             let state = core.session_get_state();
             let mut val = serde_json::to_value(state).map_err(|e| e.to_string())?;
-            let language = core
-                .app_settings_get()
-                .map(|s| s.language)
-                .unwrap_or_else(|_| "en".to_string());
+            let settings = core.app_settings_get().unwrap_or_default();
             if let Some(obj) = val.as_object_mut() {
-                obj.insert("language".to_string(), Value::String(language));
+                obj.insert("language".to_string(), Value::String(settings.language));
+                obj.insert(
+                    "autoCopyTotp".to_string(),
+                    Value::Bool(settings.auto_copy_totp_on_fill),
+                );
+                obj.insert(
+                    "disabledAutofillDomains".to_string(),
+                    serde_json::to_value(settings.disabled_autofill_domains)
+                        .unwrap_or(Value::Array(Vec::new())),
+                );
             }
             Ok(val)
         }
@@ -262,6 +283,8 @@ async fn dispatch_rpc(
         "item_update_quick" => rpc_item_update_quick(app, core, params).await,
         "item_trash" => rpc_item_trash(app, core, params).await,
         "generate" => rpc_generate(core, params),
+        "generate_masked_email" => rpc_generate_masked_email(core, params).await,
+        "resolve_secret_ref" => rpc_resolve_secret_ref(core, params).await,
         "clipboard_copy" => rpc_clipboard_copy(core, params),
         "url_match" => rpc_url_match(core, params),
         "cards_and_identities" => rpc_cards_and_identities(core),
@@ -330,7 +353,7 @@ async fn dispatch_rpc(
                 .collect();
             Ok(json!({ "keys": keys }))
         }
-        "ssh_sign_ed25519" => rpc_ssh_sign_ed25519(core, params),
+        "ssh_sign_ed25519" => rpc_ssh_sign_ed25519(core, params).await,
         "passkey_match" => rpc_passkey_match(core, params),
         other => Err(format!("Unsupported RPC method: {other}")),
     }
@@ -397,6 +420,46 @@ fn rpc_generate(core: &AppCore, params: &Value) -> Result<Value, String> {
 
     let res = core.generator_generate(opts);
     serde_json::to_value(res).map_err(|e| e.to_string())
+}
+
+async fn rpc_generate_masked_email(core: &Arc<AppCore>, params: &Value) -> Result<Value, String> {
+    let domain_hint = params
+        .get("domain")
+        .or_else(|| params.get("url"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let alias = core
+        .generator_generate_masked_email(domain_hint)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({
+        "email": alias,
+        "value": alias,
+    }))
+}
+
+async fn rpc_resolve_secret_ref(core: &Arc<AppCore>, params: &Value) -> Result<Value, String> {
+    require_unlocked(core)?;
+    let reference = params
+        .get("reference")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "Missing reference parameter".to_string())?;
+    let (item, value) = core
+        .resolve_secret_reference(reference)
+        .map_err(|e| e.to_string())?;
+    if item.payload.reprompt {
+        core.session_verify_biometric_reprompt(None)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(json!({
+        "id": item.id,
+        "title": item.title,
+        "value": value,
+    }))
 }
 
 fn rpc_clipboard_copy(core: &AppCore, params: &Value) -> Result<Value, String> {
@@ -749,6 +812,7 @@ fn url_matches_target(
     target_raw: &str,
     target_url: &Url,
     target_host: &str,
+    custom_equivalents: &[Vec<String>],
 ) -> bool {
     if rule == UrlMatchRule::Never || item_uri.trim().is_empty() {
         return false;
@@ -770,10 +834,12 @@ fn url_matches_target(
         }
         UrlMatchRule::Domain => {
             if let Some((_, item_host)) = parse_url_host(item_uri) {
-                if item_host == target_host {
+                if item_host == target_host
+                    || registrable_domain(&item_host) == registrable_domain(target_host)
+                {
                     return true;
                 }
-                registrable_domain(&item_host) == registrable_domain(target_host)
+                domains_are_equivalent(&item_host, target_host, custom_equivalents)
             } else {
                 false
             }
@@ -781,13 +847,23 @@ fn url_matches_target(
     }
 }
 
-fn item_matches_url(item: &ItemDetail, raw_url: &str, target_url: &Url, target_host: &str) -> bool {
-    if item
-        .payload
-        .urls
-        .iter()
-        .any(|u| url_matches_target(&u.uri, u.match_rule, raw_url, target_url, target_host))
-    {
+fn item_matches_url(
+    item: &ItemDetail,
+    raw_url: &str,
+    target_url: &Url,
+    target_host: &str,
+    custom_equivalents: &[Vec<String>],
+) -> bool {
+    if item.payload.urls.iter().any(|u| {
+        url_matches_target(
+            &u.uri,
+            u.match_rule,
+            raw_url,
+            target_url,
+            target_host,
+            custom_equivalents,
+        )
+    }) {
         return true;
     }
     item.payload.passkeys.iter().any(|pk| {
@@ -795,7 +871,8 @@ fn item_matches_url(item: &ItemDetail, raw_url: &str, target_url: &Url, target_h
         !pk_rp.is_empty()
             && (target_host == pk_rp
                 || target_host.ends_with(&format!(".{pk_rp}"))
-                || registrable_domain(&pk_rp) == registrable_domain(target_host))
+                || registrable_domain(&pk_rp) == registrable_domain(target_host)
+                || domains_are_equivalent(&pk_rp, target_host, custom_equivalents))
     })
 }
 
@@ -810,6 +887,12 @@ fn rpc_url_match(core: &AppCore, params: &Value) -> Result<Value, String> {
     let Some((target_url, target_host)) = parse_url_host(raw_url) else {
         return Ok(json!([]));
     };
+
+    let settings = core.app_settings_get().unwrap_or_default();
+    let site_disabled =
+        is_domain_autofill_disabled(&target_host, &settings.disabled_autofill_domains);
+    let auto_copy_totp = settings.auto_copy_totp_on_fill;
+    let custom_equiv = &settings.custom_equivalent_domains;
 
     let summaries = core
         .item_list(ItemFilter {
@@ -832,7 +915,7 @@ fn rpc_url_match(core: &AppCore, params: &Value) -> Result<Value, String> {
         let Ok(Some(item)) = core.item_get(&sum.id) else {
             continue;
         };
-        if !item_matches_url(&item, raw_url, &target_url, &target_host) {
+        if !item_matches_url(&item, raw_url, &target_url, &target_host, custom_equiv) {
             continue;
         }
 
@@ -855,12 +938,15 @@ fn rpc_url_match(core: &AppCore, params: &Value) -> Result<Value, String> {
             "category": item.payload.category,
             "favorite": item.favorite,
             "reprompt": reprompt,
+            "ssoProvider": item.payload.sso_provider,
             "username": username,
             "password": if reprompt { Value::Null } else { password.map(Value::String).unwrap_or(Value::Null) },
             "totp": totp_code,
             "hasTotp": totp_secret.is_some(),
             "hasPasskey": passkey_count > 0,
             "passkeyCount": passkey_count,
+            "autoCopyTotp": auto_copy_totp,
+            "siteAutofillDisabled": site_disabled,
             "urls": urls,
         }));
     }
@@ -1014,6 +1100,10 @@ fn rpc_check_login_save(core: &AppCore, params: &Value) -> Result<Value, String>
     let Some((target_url, target_host)) = parse_url_host(raw_url) else {
         return Ok(json!({ "shouldPrompt": false, "reason": "invalid_url" }));
     };
+    let custom_equiv = core
+        .app_settings_get()
+        .map(|s| s.custom_equivalent_domains)
+        .unwrap_or_default();
 
     let summaries = core
         .item_list(ItemFilter {
@@ -1031,7 +1121,7 @@ fn rpc_check_login_save(core: &AppCore, params: &Value) -> Result<Value, String>
         let Ok(Some(item)) = core.item_get(&sum.id) else {
             continue;
         };
-        if !item_matches_url(&item, raw_url, &target_url, &target_host) {
+        if !item_matches_url(&item, raw_url, &target_url, &target_host, &custom_equiv) {
             continue;
         }
         let (u, p, _) = extract_credentials(&item);
@@ -1197,10 +1287,20 @@ async fn rpc_save_or_update_login(
             );
         }
         if let Some((target_url, target_host)) = parse_url_host(raw_url) {
-            let already_has_url = draft
-                .urls
-                .iter()
-                .any(|u| url_matches_target(&u.uri, u.match_rule, raw_url, &target_url, &target_host));
+            let custom_equiv = core
+                .app_settings_get()
+                .map(|s| s.custom_equivalent_domains)
+                .unwrap_or_default();
+            let already_has_url = draft.urls.iter().any(|u| {
+                url_matches_target(
+                    &u.uri,
+                    u.match_rule,
+                    raw_url,
+                    &target_url,
+                    &target_host,
+                    &custom_equiv,
+                )
+            });
             if !already_has_url {
                 draft.urls.push(ItemUrl {
                     id: format!("u-{}", new_uuid()),
@@ -1289,6 +1389,7 @@ async fn rpc_save_or_update_login(
         watchtower: WatchtowerFlags::default(),
         archived: false,
         reprompt: false,
+        ..Default::default()
     };
 
     let saved = core
@@ -1355,7 +1456,12 @@ fn rpc_passkey_list_for_rp(core: &AppCore, params: &Value) -> Result<Value, Stri
         }));
     }
 
-    if !origin.is_empty() && !rp_id_matches_origin(&resolved_rp_id, origin) {
+    let custom_equiv = core
+        .app_settings_get()
+        .map(|s| s.custom_equivalent_domains)
+        .unwrap_or_default();
+
+    if !origin.is_empty() && !rp_id_matches_origin_ext(&resolved_rp_id, origin, &custom_equiv) {
         return Err(format!("Passkey RP ID ({resolved_rp_id}) 与来源 ({origin}) 不合法或域名不匹配"));
     }
 
@@ -1399,7 +1505,10 @@ fn rpc_passkey_list_for_rp(core: &AppCore, params: &Value) -> Result<Value, Stri
             let pk_rp = normalize_rp_id(&pk.rp_id);
             let rp_matches = !pk_rp.is_empty()
                 && (pk_rp == resolved_rp_id
-                    || (!rp_id_explicit && !origin.is_empty() && rp_id_matches_origin(&pk_rp, origin)));
+                    || domains_are_equivalent(&pk_rp, &resolved_rp_id, &custom_equiv)
+                    || (!rp_id_explicit
+                        && !origin.is_empty()
+                        && rp_id_matches_origin_ext(&pk_rp, origin, &custom_equiv)));
             if !rp_matches {
                 continue;
             }
@@ -1425,9 +1534,9 @@ fn rpc_passkey_list_for_rp(core: &AppCore, params: &Value) -> Result<Value, Stri
 
         if matches!(item.payload.category, ItemCategory::Login | ItemCategory::Passkey) {
             let matches_origin = if let Some((ref orig_url, ref orig_host)) = parsed_origin {
-                item_matches_url(&item, origin, orig_url, orig_host)
+                item_matches_url(&item, origin, orig_url, orig_host, &custom_equiv)
             } else if let Some((ref rp_url, ref rp_host)) = parse_url_host(&resolved_rp_id) {
-                item_matches_url(&item, &resolved_rp_id, rp_url, rp_host)
+                item_matches_url(&item, &resolved_rp_id, rp_url, rp_host, &custom_equiv)
             } else {
                 false
             };
@@ -1480,7 +1589,12 @@ async fn rpc_passkey_create(
         .or_else(|| parse_url_host(&origin).map(|(_, h)| normalize_rp_id(&h)))
         .ok_or_else(|| "无法解析 WebAuthn RP ID".to_string())?;
 
-    if !rp_id_matches_origin(&rp_id, &origin) {
+    let custom_equiv = core
+        .app_settings_get()
+        .map(|s| s.custom_equivalent_domains)
+        .unwrap_or_default();
+
+    if !rp_id_matches_origin_ext(&rp_id, &origin, &custom_equiv) {
         return Err(format!("Passkey RP ID ({rp_id}) 与来源 ({origin}) 不匹配"));
     }
 
@@ -1582,6 +1696,19 @@ async fn rpc_passkey_create(
         .or_else(|| options.get("crossOrigin").and_then(|v| v.as_bool()))
         .unwrap_or(false);
 
+    let prf_ext_in = options.get("extensions").and_then(|e| e.get("prf"));
+    let prf_requested = prf_ext_in.is_some();
+    let prf_eval_first_b64u = prf_ext_in
+        .and_then(|p| p.get("eval"))
+        .and_then(|ev| ev.get("first"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let prf_eval_second_b64u = prf_ext_in
+        .and_then(|p| p.get("eval"))
+        .and_then(|ev| ev.get("second"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+
     let created = create_passkey_credential(&PasskeyCreateParams {
         origin: origin.clone(),
         rp_id: rp_id.clone(),
@@ -1594,6 +1721,10 @@ async fn rpc_passkey_create(
         discoverable,
         cross_origin,
         authenticator_attachment,
+        prf_requested,
+        prf_eval_first_b64u,
+        prf_eval_second_b64u,
+        custom_equivalent_domains: custom_equiv.clone(),
     })
     .map_err(|e| e.to_string())?;
 
@@ -1611,10 +1742,16 @@ async fn rpc_passkey_create(
         let mut draft = existing.to_draft();
         draft.passkeys.push(created.credential);
         if let Some((orig_url, orig_host)) = parse_url_host(&origin) {
-            let has_url = draft
-                .urls
-                .iter()
-                .any(|u| url_matches_target(&u.uri, u.match_rule, &origin, &orig_url, &orig_host));
+            let has_url = draft.urls.iter().any(|u| {
+                url_matches_target(
+                    &u.uri,
+                    u.match_rule,
+                    &origin,
+                    &orig_url,
+                    &orig_host,
+                    &custom_equiv,
+                )
+            });
             if !has_url {
                 draft.urls.push(ItemUrl {
                     id: format!("u-{}", new_uuid()),
@@ -1677,6 +1814,7 @@ async fn rpc_passkey_create(
             watchtower: WatchtowerFlags::default(),
             archived: false,
             reprompt: false,
+            ..Default::default()
         };
         core.item_create(draft).await.map_err(|e| e.to_string())?
     };
@@ -1777,6 +1915,29 @@ async fn rpc_passkey_assert(
         .or_else(|| options.get("crossOrigin").and_then(|v| v.as_bool()))
         .unwrap_or(false);
 
+    let custom_equiv = core
+        .app_settings_get()
+        .map(|s| s.custom_equivalent_domains)
+        .unwrap_or_default();
+
+    let prf_ext_in = options.get("extensions").and_then(|e| e.get("prf"));
+    let cred_b64u_id = keysmith_core::passkey::decode_credential_id_bytes(&pk.credential_id)
+        .ok()
+        .map(|b| keysmith_core::passkey::encode_b64u(&b))
+        .unwrap_or_default();
+    let eval_source = prf_ext_in
+        .and_then(|p| p.get("evalByCredential"))
+        .and_then(|m| m.get(&cred_b64u_id).or_else(|| m.get(&pk.credential_id)))
+        .or_else(|| prf_ext_in.and_then(|p| p.get("eval")));
+    let prf_eval_first_b64u = eval_source
+        .and_then(|ev| ev.get("first"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let prf_eval_second_b64u = eval_source
+        .and_then(|ev| ev.get("second"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+
     let (next_sign_count, response_json) = assert_passkey_credential(
         pk,
         &PasskeyAssertParams {
@@ -1784,6 +1945,9 @@ async fn rpc_passkey_assert(
             rp_id,
             challenge_b64u,
             cross_origin,
+            prf_eval_first_b64u,
+            prf_eval_second_b64u,
+            custom_equivalent_domains: custom_equiv,
         },
     )
     .map_err(|e| e.to_string())?;
@@ -1805,7 +1969,17 @@ async fn rpc_passkey_assert(
     }))
 }
 
-fn rpc_ssh_sign_ed25519(core: &AppCore, params: &Value) -> Result<Value, String> {
+static SSH_BIO_APPROVAL_CACHE: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+
+fn ssh_approval_cache() -> &'static Mutex<HashMap<String, Instant>> {
+    SSH_BIO_APPROVAL_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+async fn rpc_ssh_sign_ed25519(core: &Arc<AppCore>, params: &Value) -> Result<Value, String> {
+    let session = core.session_get_state();
+    if session.status != AuthStatus::Unlocked {
+        return Err("Keysmith 保险库已锁定，请先解锁".to_string());
+    }
     let target_blob = params
         .get("publicKeyBlob")
         .and_then(|v| v.as_str())
@@ -1855,16 +2029,187 @@ fn rpc_ssh_sign_ed25519(core: &AppCore, params: &Value) -> Result<Value, String>
         let priv_key = fields
             .iter()
             .find(|f| f.field_type == FieldType::SshPrivateKey && !f.value.trim().is_empty())
-            .map(|f| f.value.as_str())
+            .map(|f| f.value.clone())
             .ok_or_else(|| format!("SSH 密钥「{}」缺少私钥内容", item.title))?;
 
+        let needs_bio = session.ssh_biometric_confirm || item.payload.reprompt;
+        if needs_bio && session.biometric_enabled {
+            let cache_key = format!("{}:{target_blob}", session.account_id);
+            let cached_valid = {
+                let mut map = ssh_approval_cache()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                map.retain(|_, ts| ts.elapsed() < Duration::from_secs(300));
+                map.contains_key(&cache_key)
+            };
+            if !cached_valid {
+                let lang = core
+                    .app_settings_get()
+                    .map(|s| s.language)
+                    .unwrap_or_else(|_| "en".to_string());
+                let reason = format!(
+                    "{} ({})",
+                    localized_biometric_reason(&lang, "ssh"),
+                    item.title
+                );
+                core.session_verify_biometric_reprompt(Some(&reason))
+                    .await
+                    .map_err(|e| e.to_string())?;
+                if let Ok(mut map) = ssh_approval_cache().lock() {
+                    map.insert(cache_key, Instant::now());
+                }
+            }
+        }
+
         let sig = core
-            .ssh_sign_ed25519(priv_key, &raw_data)
+            .ssh_sign_ed25519(&priv_key, &raw_data)
             .map_err(|e| e.to_string())?;
         return Ok(json!({ "signature": B64.encode(&sig) }));
     }
 
     Err("未在已解锁保险库中找到匹配的 Ed25519 私钥".to_string())
+}
+
+#[cfg(unix)]
+async fn spawn_embedded_ssh_agent(sock_path: PathBuf, core: Arc<AppCore>) {
+    if let Some(parent) = sock_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if sock_path.exists() {
+        let _ = std::fs::remove_file(&sock_path);
+    }
+    let Ok(listener) = UnixListener::bind(&sock_path) else {
+        return;
+    };
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600));
+    }
+    while let Ok((stream, _)) = listener.accept().await {
+        let c = Arc::clone(&core);
+        tokio::spawn(handle_ssh_agent_client(stream, c));
+    }
+}
+
+#[cfg(unix)]
+fn ssh_write_string(buf: &mut Vec<u8>, bytes: &[u8]) {
+    buf.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+    buf.extend_from_slice(bytes);
+}
+
+#[cfg(unix)]
+fn ssh_read_string<'a>(slice: &mut &'a [u8]) -> Option<&'a [u8]> {
+    if slice.len() < 4 {
+        return None;
+    }
+    let len = u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]) as usize;
+    *slice = &slice[4..];
+    if slice.len() < len {
+        return None;
+    }
+    let (head, tail) = slice.split_at(len);
+    *slice = tail;
+    Some(head)
+}
+
+#[cfg(unix)]
+async fn handle_ssh_agent_client(mut stream: tokio::net::UnixStream, core: Arc<AppCore>) {
+    const SSH_AGENT_FAILURE: u8 = 5;
+    const SSH_AGENTC_REQUEST_IDENTITIES: u8 = 11;
+    const SSH_AGENT_IDENTITIES_ANSWER: u8 = 12;
+    const SSH_AGENTC_SIGN_REQUEST: u8 = 13;
+    const SSH_AGENT_SIGN_RESPONSE: u8 = 14;
+
+    loop {
+        let mut len_buf = [0u8; 4];
+        if stream.read_exact(&mut len_buf).await.is_err() {
+            break;
+        }
+        let frame_len = u32::from_be_bytes(len_buf) as usize;
+        if frame_len == 0 || frame_len > 256 * 1024 {
+            break;
+        }
+        let mut body = vec![0u8; frame_len];
+        if stream.read_exact(&mut body).await.is_err() {
+            break;
+        }
+        let msg_type = body[0];
+        let mut payload = &body[1..];
+
+        let reply: Vec<u8> = match msg_type {
+            SSH_AGENTC_REQUEST_IDENTITIES => match core.ssh_list_identities() {
+                Ok(idents) => {
+                    let mut entries: Vec<(Vec<u8>, String)> = Vec::new();
+                    for ident in idents {
+                        if let Some(b64_part) = ident.public_key.split_whitespace().nth(1) {
+                            if let Ok(blob) = B64.decode(b64_part) {
+                                entries.push((blob, ident.title));
+                            }
+                        }
+                    }
+                    let mut out = Vec::new();
+                    out.push(SSH_AGENT_IDENTITIES_ANSWER);
+                    out.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+                    for (blob, comment) in entries {
+                        ssh_write_string(&mut out, &blob);
+                        ssh_write_string(&mut out, comment.as_bytes());
+                    }
+                    out
+                }
+                Err(_) => {
+                    let mut out = vec![SSH_AGENT_IDENTITIES_ANSWER];
+                    out.extend_from_slice(&0u32.to_be_bytes());
+                    out
+                }
+            },
+            SSH_AGENTC_SIGN_REQUEST => {
+                match (ssh_read_string(&mut payload), ssh_read_string(&mut payload)) {
+                    (Some(key_blob), Some(data)) if !key_blob.is_empty() => {
+                        let flags = if payload.len() >= 4 {
+                            u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]])
+                        } else {
+                            0
+                        };
+                        let req_params = json!({
+                            "publicKeyBlob": B64.encode(key_blob),
+                            "data": B64.encode(data),
+                            "flags": flags,
+                        });
+                        match rpc_ssh_sign_ed25519(&core, &req_params).await {
+                            Ok(val) => {
+                                if let Some(sig_b64) =
+                                    val.get("signature").and_then(|v| v.as_str())
+                                {
+                                    if let Ok(raw_sig) = B64.decode(sig_b64) {
+                                        let mut sig_blob = Vec::with_capacity(19 + raw_sig.len());
+                                        ssh_write_string(&mut sig_blob, b"ssh-ed25519");
+                                        ssh_write_string(&mut sig_blob, &raw_sig);
+                                        let mut out = vec![SSH_AGENT_SIGN_RESPONSE];
+                                        ssh_write_string(&mut out, &sig_blob);
+                                        out
+                                    } else {
+                                        vec![SSH_AGENT_FAILURE]
+                                    }
+                                } else {
+                                    vec![SSH_AGENT_FAILURE]
+                                }
+                            }
+                            Err(_) => vec![SSH_AGENT_FAILURE],
+                        }
+                    }
+                    _ => vec![SSH_AGENT_FAILURE],
+                }
+            }
+            _ => vec![SSH_AGENT_FAILURE],
+        };
+
+        let mut frame = Vec::with_capacity(4 + reply.len());
+        frame.extend_from_slice(&(reply.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&reply);
+        if stream.write_all(&frame).await.is_err() || stream.flush().await.is_err() {
+            break;
+        }
+    }
 }
 
 fn rpc_passkey_match(core: &AppCore, params: &Value) -> Result<Value, String> {
@@ -1903,6 +2248,11 @@ fn rpc_passkey_match(core: &AppCore, params: &Value) -> Result<Value, String> {
         return Ok(json!({ "handled": false, "fallback": true }));
     };
 
+    let custom_equiv = core
+        .app_settings_get()
+        .map(|s| s.custom_equivalent_domains)
+        .unwrap_or_default();
+
     let mut matched_count = 0usize;
     for sum in items {
         if let Ok(Some(detail)) = core.item_get(&sum.id) {
@@ -1910,6 +2260,7 @@ fn rpc_passkey_match(core: &AppCore, params: &Value) -> Result<Value, String> {
                 if pk.rp_id.eq_ignore_ascii_case(&resolved_rp_id)
                     || registrable_domain(&pk.rp_id.to_ascii_lowercase())
                         == registrable_domain(&resolved_rp_id.to_ascii_lowercase())
+                    || domains_are_equivalent(&pk.rp_id, &resolved_rp_id, &custom_equiv)
                 {
                     matched_count += 1;
                 }

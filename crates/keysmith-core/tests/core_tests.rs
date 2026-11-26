@@ -243,6 +243,7 @@ fn domain_decodes_bitwarden_native_ciphers_and_preserves_fields_on_update() {
         watchtower: item.payload.watchtower,
         archived: false,
         reprompt: false,
+        ..Default::default()
     };
     let (next_cipher, next_item) =
         draft_to_cipher(&item.id, &draft, Some(&bw_login), Some(&item), &usk).unwrap();
@@ -339,6 +340,7 @@ fn generator_and_watchtower_and_search() {
         color: "#0572EC".to_string(),
         is_default: false,
         is_organization: false,
+        travel_safe: false,
         item_count: 2,
     };
 
@@ -377,6 +379,7 @@ fn generator_and_watchtower_and_search() {
         watchtower: WatchtowerFlags::default(),
         archived: false,
         reprompt: false,
+        ..Default::default()
     };
     let (_, item1) = draft_to_cipher("i1", &draft1, None, None, &usk).unwrap();
 
@@ -496,6 +499,7 @@ async fn app_core_offline_unlock_lock_zeroize_and_crud() {
             watchtower: WatchtowerFlags::default(),
             archived: false,
             reprompt: false,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -605,6 +609,7 @@ async fn app_core_vaults_trash_passkeys_and_disk_zero_plaintext() {
             watchtower: WatchtowerFlags::default(),
             archived: false,
             reprompt: false,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -873,6 +878,7 @@ async fn phase2_categories_archive_duplicate_batch_and_multi_account() {
             watchtower: WatchtowerFlags::default(),
             archived: false,
             reprompt: false,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -894,6 +900,7 @@ async fn phase2_categories_archive_duplicate_batch_and_multi_account() {
             watchtower: WatchtowerFlags::default(),
             archived: false,
             reprompt: false,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -1034,6 +1041,7 @@ async fn ssh_keygen_sign_qr_decode_and_import_export() {
         watchtower: WatchtowerFlags::default(),
         archived: false,
         reprompt: false,
+        ..Default::default()
     })
     .await
     .unwrap();
@@ -1245,6 +1253,7 @@ fn fido2_credentials_decode_and_preserve() {
         watchtower: decoded.payload.watchtower,
         archived: decoded.payload.archived,
         reprompt: decoded.payload.reprompt,
+        ..Default::default()
     };
     let (updated_cipher, _) = draft_to_cipher(&decoded.id, &draft, Some(&cipher), Some(&decoded), &usk).unwrap();
     assert_eq!(
@@ -1299,6 +1308,7 @@ async fn app_settings_and_account_persist_across_reopen() {
                 theme: Some("dark".to_string()),
                 custom_shortcuts: Some(shortcuts),
                 last_server_url: Some("https://vault.example.com".to_string()),
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(saved.language, "en");
@@ -1343,6 +1353,7 @@ fn search_excludes_email_domain_noise_and_ranks_relevance() {
         color: "#007AFF".to_string(),
         is_default: true,
         is_organization: false,
+        travel_safe: true,
         item_count: 3,
     };
 
@@ -1382,6 +1393,7 @@ fn search_excludes_email_domain_noise_and_ranks_relevance() {
             watchtower: WatchtowerFlags::default(),
             archived: false,
             reprompt: false,
+            ..Default::default()
         },
         None,
         None,
@@ -1425,6 +1437,7 @@ fn search_excludes_email_domain_noise_and_ranks_relevance() {
             watchtower: WatchtowerFlags::default(),
             archived: false,
             reprompt: false,
+            ..Default::default()
         },
         None,
         None,
@@ -1468,6 +1481,7 @@ fn search_excludes_email_domain_noise_and_ranks_relevance() {
             watchtower: WatchtowerFlags::default(),
             archived: false,
             reprompt: false,
+            ..Default::default()
         },
         None,
         None,
@@ -1651,6 +1665,7 @@ async fn reprompt_roundtrip_and_empty_trash() {
             watchtower: WatchtowerFlags::default(),
             archived: false,
             reprompt: true,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -1674,6 +1689,7 @@ async fn reprompt_roundtrip_and_empty_trash() {
             watchtower: WatchtowerFlags::default(),
             archived: false,
             reprompt: false,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -1716,6 +1732,7 @@ fn passkey_create_and_assert_es256_webauthn_valid() {
         discoverable: true,
         cross_origin: false,
         authenticator_attachment: None,
+        ..Default::default()
     })
     .unwrap();
 
@@ -1759,6 +1776,7 @@ fn passkey_create_and_assert_es256_webauthn_valid() {
             rp_id: "example.com".to_string(),
             challenge_b64u: encode_b64u(b"assert-challenge-999"),
             cross_origin: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -1846,6 +1864,7 @@ fn bitwarden_login_fido2_credentials_roundtrip_and_assert() {
         discoverable: true,
         cross_origin: false,
         authenticator_attachment: None,
+        ..Default::default()
     })
     .unwrap();
 
@@ -1871,6 +1890,7 @@ fn bitwarden_login_fido2_credentials_roundtrip_and_assert() {
             rp_id: "example.com".to_string(),
             challenge_b64u: encode_b64u(b"chal-2"),
             cross_origin: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -1902,6 +1922,7 @@ fn passkey_normalization_credential_id_variants_and_cross_origin_assert() {
         discoverable: true,
         cross_origin: false,
         authenticator_attachment: None,
+        ..Default::default()
     })
     .unwrap();
 
@@ -1943,6 +1964,7 @@ fn passkey_normalization_credential_id_variants_and_cross_origin_assert() {
             rp_id: "paypal.com".to_string(),
             challenge_b64u: encode_b64u(b"paypal-assert-chal"),
             cross_origin: true,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -2083,9 +2105,7 @@ async fn semver_compare_rsa_org_key_and_offline_revision_preservation() {
     let updated_settings = core
         .app_settings_update(keysmith_core::domain::AppSettingsPatch {
             language: Some("ja".to_string()),
-            theme: None,
-            custom_shortcuts: None,
-            last_server_url: None,
+            ..Default::default()
         })
         .unwrap();
     assert_eq!(updated_settings.language, "ja");
@@ -2110,6 +2130,7 @@ fn passkey_prefixed_b64_and_hex_credential_ids_decode_and_assert() {
         discoverable: true,
         cross_origin: false,
         authenticator_attachment: None,
+        ..Default::default()
     })
     .unwrap();
 
@@ -2139,6 +2160,7 @@ fn passkey_prefixed_b64_and_hex_credential_ids_decode_and_assert() {
             rp_id: "example.com".to_string(),
             challenge_b64u: encode_b64u_test(b"assert-challenge-456"),
             cross_origin: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -2166,6 +2188,7 @@ fn passkey_fido2_creation_date_plain_and_rp_id_scheme_port_normalization() {
         discoverable: true,
         cross_origin: false,
         authenticator_attachment: Some("cross-platform".to_string()),
+        ..Default::default()
     })
     .unwrap();
 
@@ -2206,6 +2229,7 @@ fn passkey_fido2_creation_date_plain_and_rp_id_scheme_port_normalization() {
         watchtower: Default::default(),
         archived: false,
         reprompt: false,
+        ..Default::default()
     };
 
     let (new_cipher, _) = draft_to_cipher("cipher-new-pk", &new_draft, None, None, &usk).unwrap();
@@ -2243,4 +2267,483 @@ fn encode_b64u_test(bytes: &[u8]) -> String {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine as _;
     URL_SAFE_NO_PAD.encode(bytes)
+}
+
+#[test]
+fn ed25519_passkey_prf_extension_and_related_origins() {
+    use keysmith_core::domain::domains_are_equivalent;
+    use keysmith_core::passkey::{
+        assert_passkey_credential, create_passkey_credential, decode_b64u_or_b64, encode_b64u,
+        rp_id_matches_origin_ext, PasskeyAssertParams, PasskeyCreateParams,
+    };
+    use sha2::{Digest, Sha256};
+
+    assert!(domains_are_equivalent("youtube.com", "google.com", &[]));
+    assert!(rp_id_matches_origin_ext(
+        "google.com",
+        "https://accounts.youtube.com",
+        &[]
+    ));
+
+    let salt1 = encode_b64u(b"vault-encryption-salt-v1");
+    let salt2 = encode_b64u(b"vault-encryption-salt-v2");
+
+    let created = create_passkey_credential(&PasskeyCreateParams {
+        origin: "https://accounts.google.com".to_string(),
+        rp_id: "google.com".to_string(),
+        rp_name: "Google".to_string(),
+        user_id_b64u: encode_b64u(b"g-user-1"),
+        user_name: "alice@gmail.com".to_string(),
+        user_display_name: "Alice".to_string(),
+        challenge_b64u: encode_b64u(b"ed25519-create-chal"),
+        pub_key_cred_params: vec![-8, -7],
+        discoverable: true,
+        cross_origin: false,
+        authenticator_attachment: Some("platform".to_string()),
+        prf_requested: true,
+        prf_eval_first_b64u: Some(salt1.clone()),
+        prf_eval_second_b64u: Some(salt2.clone()),
+        custom_equivalent_domains: Vec::new(),
+    })
+    .unwrap();
+
+    assert_eq!(created.credential.algorithm, -8);
+    assert_eq!(
+        created.response_json["response"]["publicKeyAlgorithm"],
+        serde_json::json!(-8)
+    );
+    assert_eq!(
+        created.response_json["clientExtensionResults"]["prf"]["enabled"],
+        serde_json::json!(true)
+    );
+    let create_prf_first = created.response_json["clientExtensionResults"]["prf"]["results"]
+        ["first"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(decode_b64u_or_b64(&create_prf_first).unwrap().len(), 32);
+
+    // Verify Bitwarden FIDO2 EdDSA round-trip
+    let usk = UserSymmetricKey::from_bytes(&[31u8; 64]).unwrap();
+    let draft = ItemDraft {
+        vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+        title: "Google Ed25519".to_string(),
+        category: ItemCategory::Login,
+        passkeys: vec![created.credential.clone()],
+        ..Default::default()
+    };
+    let (cipher, _) = draft_to_cipher("cipher-ed-pk", &draft, None, None, &usk).unwrap();
+    let decoded_item = cipher_to_item(&cipher, &usk).unwrap();
+    assert_eq!(decoded_item.payload.passkeys[0].algorithm, -8);
+
+    // Assert from Related Origin (youtube.com -> rpId google.com) with PRF evaluation
+    let (sign_cnt, assert_json) = assert_passkey_credential(
+        &decoded_item.payload.passkeys[0],
+        &PasskeyAssertParams {
+            origin: "https://www.youtube.com".to_string(),
+            rp_id: "google.com".to_string(),
+            challenge_b64u: encode_b64u(b"ed25519-assert-chal"),
+            cross_origin: false,
+            prf_eval_first_b64u: Some(salt1),
+            prf_eval_second_b64u: None,
+            custom_equivalent_domains: Vec::new(),
+        },
+    )
+    .unwrap();
+    assert_eq!(sign_cnt, 1);
+
+    // PRF output for identical salt must be deterministic
+    let assert_prf_first = assert_json["clientExtensionResults"]["prf"]["results"]["first"]
+        .as_str()
+        .unwrap();
+    assert_eq!(assert_prf_first, create_prf_first);
+
+    // Verify 64-byte Ed25519 signature over authData || SHA256(clientDataJSON)
+    let auth_data =
+        decode_b64u_or_b64(assert_json["response"]["authenticatorData"].as_str().unwrap()).unwrap();
+    let client_data =
+        decode_b64u_or_b64(assert_json["response"]["clientDataJSON"].as_str().unwrap()).unwrap();
+    let sig_bytes =
+        decode_b64u_or_b64(assert_json["response"]["signature"].as_str().unwrap()).unwrap();
+    assert_eq!(sig_bytes.len(), 64);
+
+    let spki_bytes = decode_b64u_or_b64(&created.credential.public_key_spki).unwrap();
+    assert_eq!(spki_bytes.len(), 44);
+    let vk_bytes: [u8; 32] = spki_bytes[12..44].try_into().unwrap();
+    let vk = VerifyingKey::from_bytes(&vk_bytes).unwrap();
+    let mut signed = Vec::new();
+    signed.extend_from_slice(&auth_data);
+    signed.extend_from_slice(&Sha256::digest(&client_data));
+    let sig = Signature::from_slice(&sig_bytes).unwrap();
+    vk.verify(&signed, &sig).unwrap();
+}
+
+#[tokio::test]
+async fn roadmap_watchtower_emergency_kit_snapshots_travel_mode_secret_ref_and_sso() {
+    use keysmith_core::domain::{
+        domains_are_equivalent, is_domain_autofill_disabled, MaskedEmailConfig,
+        MaskedEmailProvider, WatchtowerFlagsPatch,
+    };
+
+    // 1. Equivalent domains & site disable rules
+    let custom_groups = vec![vec!["corp-a.internal".to_string(), "corp-b.io".to_string()]];
+    assert!(domains_are_equivalent(
+        "login.corp-a.internal",
+        "app.corp-b.io",
+        &custom_groups
+    ));
+    assert!(domains_are_equivalent("taobao.com", "alipay.com", &[]));
+    assert!(is_domain_autofill_disabled(
+        "admin.intranet.local",
+        &["intranet.local".to_string()]
+    ));
+    assert!(!is_domain_autofill_disabled(
+        "github.com",
+        &["intranet.local".to_string()]
+    ));
+
+    // Setup unlocked AppCore
+    let storage = Storage::open_in_memory().unwrap();
+    let kdf = KdfConfig {
+        kdf: 0,
+        kdf_iterations: 1000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    };
+    let mk = derive_master_key("Roadmap#2026!", "pilot@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let acc = make_test_account(
+        "acc-roadmap",
+        "pilot@example.com",
+        "https://vault.example.com",
+        &kdf,
+        protect_user_symmetric_key(&usk, &smk).unwrap(),
+    );
+    storage.upsert_account(&acc).unwrap();
+
+    let core = AppCore::with_storage(
+        storage.clone(),
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    core.session_unlock_password("Roadmap#2026!").await.unwrap();
+
+    // 2. Masked Email (Catch-All) + encrypted API key storage
+    core.app_settings_update(AppSettingsPatch {
+        masked_email: Some(MaskedEmailConfig {
+            provider: MaskedEmailProvider::CatchAll,
+            domain: "alias.example.com".to_string(),
+            api_key: "sl_secret_token_123".to_string(),
+            api_base_url: None,
+        }),
+        ..Default::default()
+    })
+    .unwrap();
+    let loaded_settings = core.app_settings_get().unwrap();
+    assert_eq!(loaded_settings.masked_email.api_key, "sl_secret_token_123");
+    let raw_me_json = storage.get_all_app_settings().unwrap()["masked_email"].clone();
+    assert!(
+        !raw_me_json.contains("sl_secret_token_123"),
+        "API key must be encrypted at rest in SQLite"
+    );
+    let alias = core
+        .generator_generate_masked_email(Some("https://github.com/signup"))
+        .await
+        .unwrap();
+    assert!(alias.starts_with("github.") && alias.ends_with("@alias.example.com"));
+
+    // 3. Create items for Secret Ref, Watchtower PasskeyAvailable, Expiring MM/YY, SSO & Linked Items
+    let db_item = core
+        .item_create(ItemDraft {
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: "Prod DB".to_string(),
+            category: ItemCategory::Database,
+            sections: vec![ItemSection {
+                id: "s1".to_string(),
+                title: "Credentials".to_string(),
+                fields: vec![
+                    ItemField {
+                        id: "f-user".to_string(),
+                        label: "Username".to_string(),
+                        field_type: FieldType::Text,
+                        value: "db_admin".to_string(),
+                        sensitive: false,
+                        copyable: true,
+                        purpose: Some(FieldPurpose::Username),
+                    },
+                    ItemField {
+                        id: "f-pw".to_string(),
+                        label: "Password".to_string(),
+                        field_type: FieldType::Password,
+                        value: "Sup3rS3cret!Db#99".to_string(),
+                        sensitive: true,
+                        copyable: true,
+                        purpose: Some(FieldPurpose::Password),
+                    },
+                    ItemField {
+                        id: "f-tok".to_string(),
+                        label: "API_TOKEN".to_string(),
+                        field_type: FieldType::Password,
+                        value: "tok_live_abc123".to_string(),
+                        sensitive: true,
+                        copyable: true,
+                        purpose: None,
+                    },
+                ],
+            }],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let gh_login = core
+        .item_create(ItemDraft {
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: "GitHub Legacy".to_string(),
+            category: ItemCategory::Login,
+            urls: vec![ItemUrl {
+                id: "u1".to_string(),
+                uri: "https://github.com".to_string(),
+                label: None,
+                match_rule: UrlMatchRule::Domain,
+            }],
+            sections: vec![ItemSection {
+                id: "s1".to_string(),
+                title: String::new(),
+                fields: vec![ItemField {
+                    id: "f1".to_string(),
+                    label: "Password".to_string(),
+                    field_type: FieldType::Password,
+                    value: "V3ryStr0ng!Unique#Pass2026".to_string(),
+                    sensitive: true,
+                    copyable: true,
+                    purpose: Some(FieldPurpose::Password),
+                }],
+            }],
+            linked_item_ids: vec![db_item.id.clone()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let sso_login = core
+        .item_create(ItemDraft {
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: "Notion SSO".to_string(),
+            category: ItemCategory::Login,
+            sso_provider: Some("Google".to_string()),
+            urls: vec![ItemUrl {
+                id: "u2".to_string(),
+                uri: "https://www.notion.so".to_string(),
+                label: None,
+                match_rule: UrlMatchRule::Domain,
+            }],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let exp_card = core
+        .item_create(ItemDraft {
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: "Expiring Visa".to_string(),
+            category: ItemCategory::CreditCard,
+            sections: vec![ItemSection {
+                id: "sc".to_string(),
+                title: String::new(),
+                fields: vec![ItemField {
+                    id: "fe".to_string(),
+                    label: "Expiry".to_string(),
+                    field_type: FieldType::Text,
+                    value: "01/22".to_string(),
+                    sensitive: false,
+                    copyable: true,
+                    purpose: Some(FieldPurpose::CardExpiry),
+                }],
+            }],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Verify SSO & linkedItemIds round-trip and search syntax
+    let vaults = core.vault_list().unwrap();
+    assert!(matches_search_query(&sso_login, &vaults, "is:sso sso:google"));
+    assert!(!matches_search_query(&gh_login, &vaults, "is:sso"));
+    assert!(matches_search_query(&gh_login, &vaults, "is:linked"));
+
+    // Verify ks:// secret references
+    let (_, resolved_pw) = core
+        .resolve_secret_reference("ks://personal/Prod DB/password")
+        .unwrap();
+    assert_eq!(resolved_pw, "Sup3rS3cret!Db#99");
+    let (_, resolved_tok) = core
+        .resolve_secret_reference("ks://Prod DB/API_TOKEN")
+        .unwrap();
+    assert_eq!(resolved_tok, "tok_live_abc123");
+
+    // Verify Watchtower PasskeyAvailable, SSO exemption, and MM/YY expiring
+    let wt = core.watchtower_scan(false).await.unwrap();
+    assert!(wt.item_issues[&gh_login.id].contains(&WatchtowerIssueType::PasskeyAvailable));
+    assert!(!wt.item_issues.contains_key(&sso_login.id));
+    assert!(wt.item_issues[&exp_card.id].contains(&WatchtowerIssueType::Expiring));
+
+    // Ignore PasskeyAvailable & Expiring flags
+    core.item_update_watchtower_flags(
+        &gh_login.id,
+        WatchtowerFlagsPatch {
+            ignore_missing_2fa: Some(true),
+            ignore_passkey_available: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    core.item_update_watchtower_flags(
+        &exp_card.id,
+        WatchtowerFlagsPatch {
+            ignore_expiring: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let wt_after = core.watchtower_scan(false).await.unwrap();
+    assert!(!wt_after.item_issues.contains_key(&gh_login.id));
+    assert!(!wt_after.item_issues.contains_key(&exp_card.id));
+
+    // 4. Emergency Kit PDF export
+    let kit = core.vault_export_emergency_kit().unwrap();
+    assert!(kit.file_name.ends_with(".pdf"));
+    let pdf_bytes = B64.decode(&kit.content).unwrap();
+    let pdf_str = String::from_utf8_lossy(&pdf_bytes);
+    assert!(pdf_str.starts_with("%PDF-1.4"));
+    assert!(pdf_str.contains("%%EOF"));
+    assert!(pdf_str.contains("pilot@example.com"));
+    assert!(pdf_str.contains("https://vault.example.com"));
+
+    // 5. Encrypted JSON export + lossless re-import with passphrase
+    let enc_export = core
+        .vault_export(
+            "keysmith_encrypted_json",
+            "Roadmap#2026!",
+            Some("BackupPass#77"),
+        )
+        .await
+        .unwrap();
+    let storage2 = Storage::open_in_memory().unwrap();
+    let mk2 = derive_master_key("Roadmap#2026!", "restore@example.com", &kdf).unwrap();
+    let smk2 = stretch_master_key(&mk2).unwrap();
+    let usk2 = UserSymmetricKey::generate();
+    let acc2 = make_test_account(
+        "acc-restore",
+        "restore@example.com",
+        "https://vault.example.com",
+        &kdf,
+        protect_user_symmetric_key(&usk2, &smk2).unwrap(),
+    );
+    storage2.upsert_account(&acc2).unwrap();
+    let core2 = AppCore::with_storage(
+        storage2,
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    core2.session_unlock_password("Roadmap#2026!").await.unwrap();
+    let imp_summary = core2
+        .vault_import_with_passphrase(
+            "keysmith_encrypted_json",
+            &enc_export.content,
+            false,
+            None,
+            Some("BackupPass#77"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(imp_summary.imported_items, 4);
+    let restored_list = core2.item_list(ItemFilter::default()).unwrap();
+    assert!(restored_list
+        .iter()
+        .any(|i| i.title == "Notion SSO" && i.sso_provider.as_deref() == Some("Google")));
+
+    // 6. Local Encrypted Snapshots (create, delete item, restore, delete snapshot)
+    let snap = core.snapshot_create().unwrap();
+    assert_eq!(snap.item_count, 4);
+    assert_eq!(core.snapshot_list().unwrap().len(), 1);
+    core.item_delete_permanent(&sso_login.id).await.unwrap();
+    assert_eq!(core.item_list(ItemFilter::default()).unwrap().len(), 3);
+    let snap_res = core.snapshot_restore(&snap.id).await.unwrap();
+    assert!(snap_res.imported_items >= 4);
+    assert_eq!(core.item_list(ItemFilter::default()).unwrap().len(), 4);
+    core.snapshot_delete(&snap.id).unwrap();
+    assert!(core.snapshot_list().unwrap().is_empty());
+
+    // 7. Travel Mode (purges non-safe vaults & ciphers locally, restores when disabled)
+    core.vault_set_travel_safe(DEFAULT_PERSONAL_VAULT_ID, false)
+        .await
+        .unwrap();
+    let safe_vault = core.vault_create("Border Safe", None, None).await.unwrap();
+    core.vault_set_travel_safe(&safe_vault.id, true).await.unwrap();
+    let safe_item = core
+        .item_create(ItemDraft {
+            vault_id: safe_vault.id.clone(),
+            title: "Airline Booking".to_string(),
+            category: ItemCategory::Login,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Activate Travel Mode: default personal vault is NOT travel_safe, so its 4 items must vanish locally
+    let st_travel = core
+        .session_update_preferences(SessionPreferencesPatch {
+            travel_mode: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(st_travel.travel_mode);
+    let during_travel = core.item_list(ItemFilter::default()).unwrap();
+    assert_eq!(during_travel.len(), 1);
+    assert_eq!(during_travel[0].id, safe_item.id);
+    assert_eq!(storage.list_ciphers(&acc.id).unwrap().len(), 1);
+
+    // Disable Travel Mode: stashed vaults & items are restored cleanly
+    let st_back = core
+        .session_update_preferences(SessionPreferencesPatch {
+            travel_mode: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(!st_back.travel_mode);
+    let after_travel = core.item_list(ItemFilter::default()).unwrap();
+    assert_eq!(after_travel.len(), 5);
+
+    // 8. Auto-purge expired trash
+    core.item_trash(&safe_item.id).await.unwrap();
+    // Backdate deleted_date in storage & reload via lock+unlock to verify automatic purge on unlock
+    let raw_row = storage
+        .list_ciphers(&acc.id)
+        .unwrap()
+        .into_iter()
+        .find(|r| r.id == safe_item.id)
+        .unwrap();
+    let mut backdated_cipher: CipherDto = serde_json::from_str(&raw_row.raw_json).unwrap();
+    backdated_cipher.deleted_date = Some((Utc::now() - Duration::days(45)).to_rfc3339());
+    storage
+        .upsert_cipher(&acc.id, &backdated_cipher, Some("trash"))
+        .unwrap();
+    core.session_lock("test").unwrap();
+    core.session_unlock_password("Roadmap#2026!").await.unwrap();
+    let trashed_after = core
+        .item_list(ItemFilter {
+            trashed: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(
+        trashed_after.is_empty(),
+        "Expired trashed item (>30 days) must be auto-purged on unlock"
+    );
 }

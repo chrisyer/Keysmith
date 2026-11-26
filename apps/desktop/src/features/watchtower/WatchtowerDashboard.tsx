@@ -2,6 +2,7 @@ import {
   AlertOctagon,
   CalendarClock,
   CopyCheck,
+  Fingerprint,
   GlobeLock,
   Loader2,
   ShieldAlert,
@@ -24,6 +25,7 @@ const CARD_META: Array<{
   { issue: 'missing_2fa', color: 'var(--status-warning)', icon: Smartphone },
   { issue: 'unsecured_url', color: 'var(--status-caution)', icon: GlobeLock },
   { issue: 'expiring', color: 'var(--status-info)', icon: CalendarClock },
+  { issue: 'passkey_available', color: 'var(--accent-primary)', icon: Fingerprint },
   { issue: 'breached', color: 'var(--status-danger)', icon: AlertOctagon },
 ];
 

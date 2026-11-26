@@ -24,6 +24,7 @@ import type {
   ItemStats,
   ItemSummary,
   KdfConfig,
+  LocalSnapshotInfo,
   OrganizationInfo,
   SendCreateFileInput,
   SendCreateTextInput,
@@ -158,17 +159,24 @@ export interface KeysmithClient {
   vaultCreate(name: string, color?: string, icon?: string): Promise<Vault>;
   vaultRename(id: string, name: string): Promise<Vault>;
   vaultDelete(id: string): Promise<void>;
+  vaultSetTravelSafe(id: string, travelSafe: boolean): Promise<Vault>;
   vaultImport(
     format: ImportFormat,
     data: string,
     isBase64: boolean,
     targetVaultId?: string | null,
+    importPassphrase?: string,
   ): Promise<ImportSummary>;
   vaultExport(
     format: ExportFormat,
     masterPassword: string,
     exportPassphrase?: string,
   ): Promise<ExportResult>;
+  vaultExportEmergencyKit(): Promise<ExportResult>;
+  snapshotList(): Promise<LocalSnapshotInfo[]>;
+  snapshotCreate(): Promise<LocalSnapshotInfo>;
+  snapshotRestore(snapshotId: string): Promise<ImportSummary>;
+  snapshotDelete(snapshotId: string): Promise<void>;
   organizationList(): Promise<OrganizationInfo[]>;
   itemShareToOrganization(
     itemId: string,
@@ -210,16 +218,23 @@ export interface KeysmithClient {
   totpCompute(secretOrUri: string): Promise<TotpCode>;
   totpParseQrImage(imageBase64: string): Promise<string>;
   generatorGenerate(options: GeneratorOptions): Promise<GeneratorResult>;
+  generatorGenerateMaskedEmail(domainHint?: string): Promise<string>;
   generatorHistoryList(): Promise<GeneratorHistoryEntry[]>;
   generatorHistoryRecord(
     value: string,
-    mode: GeneratorMode,
+    mode: GeneratorMode | 'masked_email' | string,
     entropyBits: number,
     source?: string,
   ): Promise<GeneratorHistoryEntry>;
   generatorHistoryClear(): Promise<void>;
   watchtowerScan(checkHibp?: boolean): Promise<WatchtowerReport>;
   sshGenerateEd25519(comment?: string): Promise<SshKeyPair>;
+  sshAgentSocketPath(): Promise<string>;
+  autofillAutoType(
+    itemId: string,
+    mode?: 'credentials' | 'username' | 'password' | 'totp',
+    submit?: boolean,
+  ): Promise<void>;
   faviconFetch(host: string): Promise<string | null>;
 
   clipboardCopySecret(text: string, label: string, isSensitive: boolean): Promise<void>;
@@ -424,17 +439,23 @@ class KeysmithTauriClient implements KeysmithClient {
     return invokeCore<void>('vault_delete', { id });
   }
 
+  vaultSetTravelSafe(id: string, travelSafe: boolean): Promise<Vault> {
+    return invokeCore<Vault>('vault_set_travel_safe', { id, travelSafe });
+  }
+
   vaultImport(
     format: ImportFormat,
     data: string,
     isBase64: boolean,
     targetVaultId?: string | null,
+    importPassphrase?: string,
   ): Promise<ImportSummary> {
     return invokeCore<ImportSummary>('vault_import', {
       format,
       data,
       isBase64,
       targetVaultId: targetVaultId ?? null,
+      importPassphrase: importPassphrase?.trim() || null,
     });
   }
 
@@ -448,6 +469,26 @@ class KeysmithTauriClient implements KeysmithClient {
       masterPassword,
       exportPassphrase: exportPassphrase ?? null,
     });
+  }
+
+  vaultExportEmergencyKit(): Promise<ExportResult> {
+    return invokeCore<ExportResult>('vault_export_emergency_kit');
+  }
+
+  snapshotList(): Promise<LocalSnapshotInfo[]> {
+    return invokeCore<LocalSnapshotInfo[]>('snapshot_list');
+  }
+
+  snapshotCreate(): Promise<LocalSnapshotInfo> {
+    return invokeCore<LocalSnapshotInfo>('snapshot_create');
+  }
+
+  snapshotRestore(snapshotId: string): Promise<ImportSummary> {
+    return invokeCore<ImportSummary>('snapshot_restore', { snapshotId });
+  }
+
+  snapshotDelete(snapshotId: string): Promise<void> {
+    return invokeCore<void>('snapshot_delete', { snapshotId });
   }
 
   organizationList(): Promise<OrganizationInfo[]> {
@@ -586,13 +627,19 @@ class KeysmithTauriClient implements KeysmithClient {
     return invokeCore<GeneratorResult>('generator_generate', { options });
   }
 
+  generatorGenerateMaskedEmail(domainHint?: string): Promise<string> {
+    return invokeCore<string>('generator_generate_masked_email', {
+      domainHint: domainHint?.trim() || null,
+    });
+  }
+
   generatorHistoryList(): Promise<GeneratorHistoryEntry[]> {
     return invokeCore<GeneratorHistoryEntry[]>('generator_history_list');
   }
 
   generatorHistoryRecord(
     value: string,
-    mode: GeneratorMode,
+    mode: GeneratorMode | 'masked_email' | string,
     entropyBits: number,
     source?: string,
   ): Promise<GeneratorHistoryEntry> {
@@ -614,6 +661,18 @@ class KeysmithTauriClient implements KeysmithClient {
 
   sshGenerateEd25519(comment?: string): Promise<SshKeyPair> {
     return invokeCore<SshKeyPair>('ssh_generate_ed25519', { comment: comment ?? null });
+  }
+
+  sshAgentSocketPath(): Promise<string> {
+    return invokeCore<string>('ssh_agent_socket_path');
+  }
+
+  autofillAutoType(
+    itemId: string,
+    mode: 'credentials' | 'username' | 'password' | 'totp' = 'credentials',
+    submit = true,
+  ): Promise<void> {
+    return invokeCore<void>('autofill_auto_type', { itemId, mode, submit });
   }
 
   faviconFetch(host: string): Promise<string | null> {
@@ -795,10 +854,17 @@ class KeysmithPrototypeClient implements KeysmithClient {
   private demoMasterPassword = 'keysmith';
   private hibpChecked = false;
   private hibpCheckedAt: string | undefined;
+  private snapshots: Array<{ info: LocalSnapshotInfo; items: ItemDetail[]; vaults: Omit<Vault, 'itemCount'>[] }> = [];
   private appSettings: AppSettings = {
     language: 'system',
     theme: 'system',
     customShortcuts: {},
+    maskedEmail: { provider: 'catch_all', apiKey: '', domain: 'example.com' },
+    customEquivalentDomains: [],
+    disabledAutofillDomains: [],
+    autoCopyTotpOnFill: true,
+    snapshotIntervalDays: 1,
+    snapshotKeepCount: 5,
   };
 
   private session: SessionState = {
@@ -820,6 +886,9 @@ class KeysmithPrototypeClient implements KeysmithClient {
     quickAccessShortcut: 'CommandOrControl+Shift+Space',
     biometricMaxDays: 7,
     launchAtLogin: false,
+    travelMode: false,
+    trashAutoPurgeDays: 30,
+    sshBiometricConfirm: false,
   };
 
   private syncStatusState: SyncStatus = {
@@ -1106,17 +1175,29 @@ class KeysmithPrototypeClient implements KeysmithClient {
     this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [], deletedItemIds: [] });
   }
 
+  async vaultSetTravelSafe(id: string, travelSafe: boolean): Promise<Vault> {
+    const v = this.vaults.find((item) => item.id === id);
+    if (!v) throw new Error('Vault not found');
+    v.travelSafe = travelSafe;
+    this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [], deletedItemIds: [] });
+    return {
+      ...v,
+      itemCount: this.items.filter((it) => !it.deletedAt && !it.archived && it.vaultId === v.id).length,
+    };
+  }
+
   async vaultImport(
     format: ImportFormat,
     data: string,
     _isBase64: boolean,
     targetVaultId?: string | null,
+    _importPassphrase?: string,
   ): Promise<ImportSummary> {
     const fallbackVault = targetVaultId || this.vaults.find((v) => v.isDefault)?.id || this.vaults[0]?.id || 'vault-personal';
     let importedItems = 0;
     const warnings: string[] = [];
 
-    if (format === 'bitwarden_json') {
+    if (format === 'bitwarden_json' || format === 'keysmith_encrypted_json') {
       try {
         const parsed = JSON.parse(data) as { items?: Array<{ name?: string; notes?: string }> };
         for (const entry of parsed.items ?? []) {
@@ -1208,6 +1289,60 @@ class KeysmithPrototypeClient implements KeysmithClient {
     };
   }
 
+  async vaultExportEmergencyKit(): Promise<ExportResult> {
+    const stamp = new Date().toISOString().slice(0, 10);
+    return {
+      fileName: `keysmith-emergency-kit-${stamp}.pdf`,
+      content: btoa('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF'),
+    };
+  }
+
+  async snapshotList(): Promise<LocalSnapshotInfo[]> {
+    return this.snapshots.map((s) => ({ ...s.info }));
+  }
+
+  async snapshotCreate(): Promise<LocalSnapshotInfo> {
+    const now = new Date().toISOString();
+    const id = makeId('snap');
+    const active = this.items.filter((i) => !i.deletedAt);
+    const info: LocalSnapshotInfo = {
+      id,
+      fileName: `keysmith-snapshot-${now.slice(0, 10)}.json`,
+      createdAt: now,
+      sizeBytes: JSON.stringify(active).length,
+      itemCount: active.length,
+      vaultCount: this.vaults.length,
+    };
+    this.snapshots.unshift({
+      info,
+      items: structuredClone(this.items),
+      vaults: structuredClone(this.vaults),
+    });
+    const keep = this.appSettings.snapshotKeepCount ?? 5;
+    if (this.snapshots.length > keep) {
+      this.snapshots = this.snapshots.slice(0, keep);
+    }
+    return { ...info };
+  }
+
+  async snapshotRestore(snapshotId: string): Promise<ImportSummary> {
+    const found = this.snapshots.find((s) => s.info.id === snapshotId);
+    if (!found) throw new Error('Snapshot not found');
+    this.items = structuredClone(found.items);
+    this.vaults = structuredClone(found.vaults);
+    this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [], deletedItemIds: [] });
+    return {
+      importedVaults: found.vaults.length,
+      importedItems: found.items.length,
+      skippedItems: 0,
+      warnings: [],
+    };
+  }
+
+  async snapshotDelete(snapshotId: string): Promise<void> {
+    this.snapshots = this.snapshots.filter((s) => s.info.id !== snapshotId);
+  }
+
   // --- Items ---
 
   private toSummary(item: ItemDetail, report: WatchtowerReport): ItemSummary {
@@ -1227,6 +1362,8 @@ class KeysmithPrototypeClient implements KeysmithClient {
       favorite: item.favorite,
       archived: Boolean(item.archived),
       reprompt: Boolean(item.reprompt),
+      ssoProvider: item.ssoProvider,
+      linkedItemCount: item.linkedItemIds?.length ?? 0,
       attachmentCount: item.attachments?.length ?? 0,
       hasTotp,
       hasPasskey,
@@ -1343,6 +1480,8 @@ class KeysmithPrototypeClient implements KeysmithClient {
       favorite: draft.favorite,
       archived: Boolean(draft.archived),
       reprompt: Boolean(draft.reprompt),
+      ssoProvider: draft.ssoProvider?.trim() || undefined,
+      linkedItemIds: draft.linkedItemIds ? [...draft.linkedItemIds] : [],
       schema: 'keysmith.item.v1',
       category: draft.category,
       subtitle: draft.subtitle,
@@ -1391,6 +1530,12 @@ class KeysmithPrototypeClient implements KeysmithClient {
       favorite: draft.favorite,
       archived: draft.archived ?? prev.archived ?? false,
       reprompt: draft.reprompt ?? prev.reprompt ?? false,
+      ssoProvider:
+        draft.ssoProvider !== undefined
+          ? draft.ssoProvider.trim() || undefined
+          : prev.ssoProvider,
+      linkedItemIds:
+        draft.linkedItemIds !== undefined ? [...draft.linkedItemIds] : prev.linkedItemIds ?? [],
       category: draft.category,
       subtitle: draft.subtitle,
       icon: draft.icon,
@@ -1717,13 +1862,28 @@ class KeysmithPrototypeClient implements KeysmithClient {
     return generateSecret(options);
   }
 
+  async generatorGenerateMaskedEmail(domainHint?: string): Promise<string> {
+    const cleanDomain =
+      this.appSettings.maskedEmail?.domain?.trim() || 'example.com';
+    const prefix =
+      domainHint
+        ?.trim()
+        .replace(/^https?:\/\//i, '')
+        .split('/')[0]
+        .split('.')[0]
+        .replace(/[^a-z0-9]/gi, '')
+        .toLowerCase() || 'alias';
+    const token = Math.random().toString(36).slice(2, 8);
+    return `${prefix}.${token}@${cleanDomain}`;
+  }
+
   async generatorHistoryList(): Promise<GeneratorHistoryEntry[]> {
     return structuredClone(this.generatorHistory);
   }
 
   async generatorHistoryRecord(
     value: string,
-    mode: GeneratorMode,
+    mode: GeneratorMode | 'masked_email' | string,
     entropyBits: number,
     source?: string,
   ): Promise<GeneratorHistoryEntry> {
@@ -1770,6 +1930,16 @@ class KeysmithPrototypeClient implements KeysmithClient {
       fingerprintSha256: `SHA256:${fpB64}`,
     };
   }
+
+  async sshAgentSocketPath(): Promise<string> {
+    return '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock';
+  }
+
+  async autofillAutoType(
+    _itemId: string,
+    _mode: 'credentials' | 'username' | 'password' | 'totp' = 'credentials',
+    _submit = true,
+  ): Promise<void> {}
 
   async faviconFetch(_host: string): Promise<string | null> {
     return null;

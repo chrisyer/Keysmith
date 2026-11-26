@@ -1,3 +1,5 @@
+pub mod emergency_kit;
+
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
@@ -17,6 +19,8 @@ use crate::domain::{
     DEFAULT_PERSONAL_VAULT_ID,
 };
 use crate::error::CoreError;
+
+pub use emergency_kit::{generate_emergency_kit_pdf, EmergencyKitInput};
 
 pub struct ParsedImportData {
     pub vaults: Vec<String>,
@@ -49,14 +53,35 @@ pub fn parse_import_payload(
     data: &str,
     is_base64: bool,
 ) -> Result<ParsedImportData, CoreError> {
+    parse_import_payload_with_auth(format, data, is_base64, None, None)
+}
+
+pub fn parse_import_payload_with_auth(
+    format: &str,
+    data: &str,
+    is_base64: bool,
+    passphrase: Option<&str>,
+    usk: Option<&UserSymmetricKey>,
+) -> Result<ParsedImportData, CoreError> {
     let fmt = format.trim().to_ascii_lowercase();
     let bytes = decode_input_bytes(data, is_base64)?;
 
     match fmt.as_str() {
+        "keysmith_encrypted_json" => {
+            let text = String::from_utf8(bytes)
+                .map_err(|_| CoreError::Validation("加密备份文件必须是 UTF-8 JSON".to_string()))?;
+            parse_keysmith_encrypted_json(&text, passphrase, usk)
+        }
         "1pux" => parse_1pux(&bytes),
         "bitwarden_json" => {
             let text = String::from_utf8(bytes)
                 .map_err(|_| CoreError::Validation("JSON 文件必须是 UTF-8 编码".to_string()))?;
+            // Auto-detect Keysmith Encrypted JSON if user selected JSON accidentally
+            if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                if val.get("schema").and_then(|s| s.as_str()) == Some("keysmith.export.v1") {
+                    return parse_keysmith_encrypted_json(&text, passphrase, usk);
+                }
+            }
             parse_bitwarden_json(&text)
         }
         "bitwarden_csv" => {
@@ -71,6 +96,44 @@ pub fn parse_import_payload(
         }
         _ => Err(CoreError::Validation(format!("不支持的导入格式: {format}"))),
     }
+}
+
+fn parse_keysmith_encrypted_json(
+    raw_json: &str,
+    passphrase: Option<&str>,
+    usk: Option<&UserSymmetricKey>,
+) -> Result<ParsedImportData, CoreError> {
+    let bundle = decrypt_and_parse_keysmith_bundle(raw_json, passphrase, usk)?;
+    let mut vault_id_to_name: HashMap<String, String> = HashMap::new();
+    let mut vaults = Vec::new();
+    for v in &bundle.vaults {
+        if !v.is_default && v.id != DEFAULT_PERSONAL_VAULT_ID && !v.name.trim().is_empty() {
+            let clean = v.name.trim().to_string();
+            vault_id_to_name.insert(v.id.clone(), clean.clone());
+            if !vaults.contains(&clean) {
+                vaults.push(clean);
+            }
+        }
+    }
+
+    let mut items = Vec::with_capacity(bundle.items.len());
+    for detail in bundle.items {
+        let vault_name = if detail.vault_id == DEFAULT_PERSONAL_VAULT_ID {
+            None
+        } else {
+            vault_id_to_name.get(&detail.vault_id).cloned()
+        };
+        let mut draft = detail.to_draft();
+        draft.id = None;
+        items.push((vault_name, draft));
+    }
+
+    Ok(ParsedImportData {
+        vaults,
+        items,
+        skipped_items: 0,
+        warnings: Vec::new(),
+    })
 }
 
 fn map_1p_category(uuid: &str) -> ItemCategory {
@@ -333,6 +396,7 @@ fn parse_1pux(zip_bytes: &[u8]) -> Result<ParsedImportData, CoreError> {
                                     .map(|s| s == "archived")
                                     .unwrap_or(false),
                                 reprompt: false,
+                                ..Default::default()
                             },
                         ));
                     }
@@ -579,6 +643,7 @@ fn parse_bitwarden_json(text: &str) -> Result<ParsedImportData, CoreError> {
                 watchtower: WatchtowerFlags::default(),
                 archived: false,
                 reprompt: false,
+                ..Default::default()
             },
         ));
     }
@@ -731,6 +796,7 @@ fn parse_bitwarden_csv(text: &str) -> Result<ParsedImportData, CoreError> {
                 watchtower: WatchtowerFlags::default(),
                 archived: false,
                 reprompt: false,
+                ..Default::default()
             },
         ));
     }
@@ -867,6 +933,7 @@ fn parse_browser_csv(text: &str) -> Result<ParsedImportData, CoreError> {
                 watchtower: WatchtowerFlags::default(),
                 archived: false,
                 reprompt: false,
+                ..Default::default()
             },
         ));
     }
@@ -891,9 +958,19 @@ pub struct KeysmithEncryptedExport {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ExportBundlePayload {
-    vaults: Vec<Vault>,
-    items: Vec<ItemDetail>,
+pub struct ExportBundlePayload {
+    pub vaults: Vec<Vault>,
+    pub items: Vec<ItemDetail>,
+}
+
+pub fn decrypt_and_parse_keysmith_bundle(
+    raw_json: &str,
+    passphrase: Option<&str>,
+    usk: Option<&UserSymmetricKey>,
+) -> Result<ExportBundlePayload, CoreError> {
+    let plaintext = decrypt_keysmith_export(raw_json, passphrase, usk)?;
+    serde_json::from_str::<ExportBundlePayload>(&plaintext)
+        .map_err(|e| CoreError::Validation(format!("解析加密备份内容失败: {e}")))
 }
 
 pub fn build_export_content(

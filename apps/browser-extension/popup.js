@@ -978,6 +978,12 @@ function createItemCard(item, isVaultSummary = false) {
     b.textContent = t('repromptBadge');
     badges.appendChild(b);
   }
+  if (item.ssoProvider) {
+    const b = document.createElement('span');
+    b.className = 'mini-badge';
+    b.textContent = t('ssoBadgePrefix', { provider: item.ssoProvider });
+    badges.appendChild(b);
+  }
   if (item.hasPasskey) {
     const b = document.createElement('span');
     b.className = 'mini-badge';
@@ -1090,6 +1096,26 @@ async function loadVaultSearch() {
 }
 
 async function runGenerator() {
+  if (genMode === 'masked_email') {
+    genOutputEl.textContent = t('genGenerating');
+    const url = activeTab?.url || '';
+    const domain = isHttpUrl(url) ? extractHostname(url) : '';
+    const res = await sendBg({
+      type: 'GENERATE_MASKED_EMAIL',
+      domain,
+      url: isHttpUrl(url) ? url : ''
+    });
+    const emailVal = res.result?.email || res.result?.value;
+    if (res.ok && emailVal) {
+      currentGeneratedValue = emailVal;
+      genOutputEl.textContent = currentGeneratedValue;
+      genStrengthEl.textContent = t('genMaskedBadge');
+    } else {
+      genOutputEl.textContent = res.error || t('genFailed');
+    }
+    return;
+  }
+
   const len = Number(genLenRange.value || 20);
   const res = await sendBg({
     type: 'GENERATE',
@@ -1120,9 +1146,18 @@ async function runGenerator() {
 function updateGeneratorControlsForMode() {
   const isPw = genMode === 'password';
   const isPhrase = genMode === 'passphrase';
+  const isMasked = genMode === 'masked_email';
+  const lenRow = genLenRange.closest('.control-row');
+  if (lenRow) {
+    lenRow.classList.toggle('hidden', isMasked);
+  }
   optDigitsWrap.classList.toggle('hidden', !isPw);
   optSymbolsWrap.classList.toggle('hidden', !isPw);
   optAmbigWrap.classList.toggle('hidden', !isPw);
+
+  if (isMasked) {
+    return;
+  }
 
   genLenLabel.textContent = isPhrase
     ? t('genWordsLabel')
@@ -1367,17 +1402,30 @@ for (const chk of [genDigitsEl, genSymbolsEl, genAmbigEl]) {
 }
 document.getElementById('gen-regen-btn').addEventListener('click', () => void runGenerator());
 document.getElementById('gen-copy-btn').addEventListener('click', () =>
-  void copyText(currentGeneratedValue, t('labelPassword'))
+  void copyText(
+    currentGeneratedValue,
+    genMode === 'masked_email' ? t('modeMaskedEmail') : t('labelPassword')
+  )
 );
 document.getElementById('gen-fill-btn').addEventListener('click', async () => {
   if (!currentGeneratedValue) return;
-  await copyText(currentGeneratedValue, t('labelPassword'));
+  await copyText(
+    currentGeneratedValue,
+    genMode === 'masked_email' ? t('modeMaskedEmail') : t('labelPassword')
+  );
   if (activeTab?.id && isHttpUrl(activeTab?.url || '')) {
-    const res = await sendBg({
-      type: 'FILL_GENERATED_ACTIVE_TAB',
-      tabId: activeTab.id,
-      password: currentGeneratedValue
-    });
+    const res =
+      genMode === 'masked_email'
+        ? await sendBg({
+            type: 'FILL_USERNAME_ACTIVE_TAB',
+            tabId: activeTab.id,
+            username: currentGeneratedValue
+          })
+        : await sendBg({
+            type: 'FILL_GENERATED_ACTIVE_TAB',
+            tabId: activeTab.id,
+            password: currentGeneratedValue
+          });
     if (res.ok) {
       showToast(t('toastGenAndFilled'));
       setTimeout(() => window.close(), 380);

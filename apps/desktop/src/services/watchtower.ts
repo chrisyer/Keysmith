@@ -10,6 +10,47 @@ const KNOWN_BREACHED_SAMPLE = new Set([
   'LetMeIn2024!',
 ]);
 
+const PASSKEY_CAPABLE_DOMAINS = new Set([
+  'google.com',
+  'youtube.com',
+  'gmail.com',
+  'apple.com',
+  'icloud.com',
+  'microsoft.com',
+  'live.com',
+  'outlook.com',
+  'github.com',
+  'gitlab.com',
+  'amazon.com',
+  'paypal.com',
+  'x.com',
+  'twitter.com',
+  'cloudflare.com',
+  'discord.com',
+  'openai.com',
+  'chatgpt.com',
+  'notion.so',
+  'figma.com',
+  'vercel.com',
+  'shopify.com',
+  'stripe.com',
+  'linkedin.com',
+  'dropbox.com',
+  '1password.com',
+  'bitwarden.com',
+]);
+
+function extractRegistrableHost(uri: string): string {
+  try {
+    const candidate = uri.includes('://') ? uri : `https://${uri}`;
+    const host = new URL(candidate).hostname.toLowerCase().replace(/^www\./, '');
+    const parts = host.split('.');
+    return parts.length > 2 ? parts.slice(-2).join('.') : host;
+  } catch {
+    return '';
+  }
+}
+
 function isLocalOrIntranetHost(uri: string): boolean {
   try {
     const u = new URL(uri);
@@ -36,12 +77,18 @@ function isExpiringOrExpired(value: string, now: Date): boolean {
   if (!trimmed) return false;
 
   let expiryDate: Date | null = null;
-  if (/^\d{4}-\d{2}$/.test(trimmed)) {
-    const [y, m] = trimmed.split('-').map(Number);
-    // Last day of month
+  if (/^\d{4}[-/]\d{2}$/.test(trimmed)) {
+    const [y, m] = trimmed.split(/[-/]/).map(Number);
     expiryDate = new Date(y, m, 0, 23, 59, 59);
-  } else if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
-    const d = new Date(trimmed.slice(0, 10));
+  } else if (/^\d{1,2}[-/](\d{2}|\d{4})$/.test(trimmed)) {
+    const [rawM, rawY] = trimmed.split(/[-/]/);
+    const m = Number(rawM);
+    const y = rawY.length === 2 ? 2000 + Number(rawY) : Number(rawY);
+    if (m >= 1 && m <= 12) {
+      expiryDate = new Date(y, m, 0, 23, 59, 59);
+    }
+  } else if (/^\d{4}[-/]\d{2}[-/]\d{2}/.test(trimmed)) {
+    const d = new Date(trimmed.slice(0, 10).replace(/\//g, '-'));
     if (!Number.isNaN(d.getTime())) expiryDate = d;
   }
   if (!expiryDate) return false;
@@ -81,6 +128,7 @@ export function runWatchtowerAudit(
     unsecured_url: [],
     expiring: [],
     breached: [],
+    passkey_available: [],
   };
 
   const itemIssueSets: Record<string, Set<WatchtowerIssueType>> = {};
@@ -121,21 +169,32 @@ export function runWatchtowerAudit(
 
       // 5. Expiring / expired dates & card expiry
       if (
+        !item.watchtower.ignoreExpiring &&
         (field.purpose === 'card_expiry' ||
-          (field.fieldType === 'date' && /(到期|过期|有效期|expiry)/i.test(field.label))) &&
+          field.fieldType === 'month_year' ||
+          (field.fieldType === 'date' && /(到期|过期|有效期|expiry|expir)/i.test(field.label))) &&
         isExpiringOrExpired(field.value, now)
       ) {
         addIssue(item.id, 'expiring');
       }
     }
 
-    // 3. Missing 2FA for Login items with URLs (exempt if TOTP or Passkey is bound)
-    if (!item.watchtower.ignoreMissing2fa && item.category === 'login') {
+    // 3. Missing 2FA & Passkey upgrade availability for Login items with URLs
+    if (item.category === 'login') {
       const hasValidUrl = item.urls.some((u) => u.uri.trim().length > 0);
       const hasTotp = fields.some((f) => f.fieldType === 'totp' && f.value.trim().length > 0);
       const hasPasskey = (item.passkeys?.length ?? 0) > 0;
-      if (hasValidUrl && !hasTotp && !hasPasskey) {
+      const hasSso = Boolean(item.ssoProvider?.trim());
+      if (!item.watchtower.ignoreMissing2fa && hasValidUrl && !hasTotp && !hasPasskey && !hasSso) {
         addIssue(item.id, 'missing_2fa');
+      }
+      if (
+        !item.watchtower.ignorePasskeyAvailable &&
+        !hasPasskey &&
+        !hasSso &&
+        item.urls.some((u) => PASSKEY_CAPABLE_DOMAINS.has(extractRegistrableHost(u.uri)))
+      ) {
+        addIssue(item.id, 'passkey_available');
       }
     }
 
@@ -170,7 +229,8 @@ export function runWatchtowerAudit(
     itemIdsByIssue.reused.length * 7 +
     itemIdsByIssue.missing_2fa.length * 4 +
     itemIdsByIssue.unsecured_url.length * 5 +
-    itemIdsByIssue.expiring.length * 3;
+    itemIdsByIssue.expiring.length * 3 +
+    itemIdsByIssue.passkey_available.length * 1;
 
   const score = Math.max(12, Math.min(100, 100 - penalty));
 
@@ -185,6 +245,7 @@ export function runWatchtowerAudit(
       unsecured_url: itemIdsByIssue.unsecured_url.length,
       expiring: itemIdsByIssue.expiring.length,
       breached: itemIdsByIssue.breached.length,
+      passkey_available: itemIdsByIssue.passkey_available.length,
     },
     itemIdsByIssue,
     itemIssues,

@@ -11,6 +11,7 @@ import {
   Layers,
   Lock,
   Pencil,
+  Plane,
   Plus,
   RefreshCw,
   Send,
@@ -85,6 +86,7 @@ export function Sidebar() {
   const accountId = useSessionStore((s) => s.accountId);
   const savedAccounts = useSessionStore((s) => s.savedAccounts);
   const vibrancyEnabled = useSessionStore((s) => s.vibrancyEnabled);
+  const travelMode = useSessionStore((s) => s.travelMode);
   const lock = useSessionStore((s) => s.lock);
   const switchAccount = useSessionStore((s) => s.switchAccount);
   const startAddingAccount = useSessionStore((s) => s.startAddingAccount);
@@ -287,6 +289,14 @@ export function Sidebar() {
                         style={{ backgroundColor: vault.color }}
                       />
                       <span className="truncate font-medium text-[var(--text-primary)]">{vault.name}</span>
+                      {vault.travelSafe && (
+                        <span
+                          title={dict.sidebar.travelSafeBadge}
+                          className="px-1 py-0.2 rounded bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 text-[9px] font-medium shrink-0"
+                        >
+                          <Plane size={10} />
+                        </span>
+                      )}
                       {vault.isOrganization && (
                         <span className="px-1.5 py-0.2 rounded bg-sky-500/12 text-sky-600 dark:text-sky-400 text-[9px] font-medium shrink-0">
                           {dict.sidebar.orgCollection}
@@ -352,6 +362,19 @@ export function Sidebar() {
               </button>
             </div>
           </div>
+
+          {travelMode && (
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-amber-500/12 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-medium cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5 truncate">
+                <Plane size={12} className="shrink-0" />
+                <span className="truncate">{dict.sidebar.travelModeActive}</span>
+              </span>
+            </button>
+          )}
         </div>
       </div>
 

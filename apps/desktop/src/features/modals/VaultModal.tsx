@@ -12,20 +12,28 @@ export function VaultModal() {
   const vaultModal = useUiStore((s) => s.vaultModal);
   const setVaultModal = useUiStore((s) => s.setVaultModal);
   const setActiveVault = useUiStore((s) => s.setActiveVault);
+  const getFilter = useUiStore((s) => s.getFilter);
   const showToast = useUiStore((s) => s.showToast);
 
+  const vaults = useVaultStore((s) => s.vaults);
   const createVault = useVaultStore((s) => s.createVault);
   const renameVault = useVaultStore((s) => s.renameVault);
+  const setVaultTravelSafe = useVaultStore((s) => s.setVaultTravelSafe);
 
   const [name, setName] = useState('');
   const [color, setColor] = useState(VAULT_COLORS[0]);
+  const [travelSafe, setTravelSafe] = useState(false);
 
   useEffect(() => {
     if (vaultModal) {
       setName(vaultModal.initialName ?? '');
       setColor(VAULT_COLORS[0]);
+      const existing = vaultModal.vaultId
+        ? vaults.find((v) => v.id === vaultModal.vaultId)
+        : undefined;
+      setTravelSafe(Boolean(existing?.travelSafe));
     }
-  }, [vaultModal]);
+  }, [vaultModal, vaults]);
 
   const handleClose = () => setVaultModal(null);
 
@@ -34,10 +42,14 @@ export function VaultModal() {
     if (!vaultModal || !name.trim()) return;
     if (vaultModal.mode === 'create') {
       const created = await createVault(name, color);
+      if (travelSafe) {
+        await setVaultTravelSafe(created.id, true, getFilter());
+      }
       setActiveVault(created.id);
       showToast({ label: 'Vault', text: fmt(dict.vaultModal.createdToast, { name: created.name }), kind: 'info' });
     } else if (vaultModal.vaultId) {
       await renameVault(vaultModal.vaultId, name);
+      await setVaultTravelSafe(vaultModal.vaultId, travelSafe, getFilter());
       showToast({ label: 'Vault', text: fmt(dict.vaultModal.renamedToast, { name: name.trim() }), kind: 'info' });
     }
     handleClose();
@@ -102,6 +114,16 @@ export function VaultModal() {
               </div>
             </div>
           )}
+
+          <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={travelSafe}
+              onChange={(e) => setTravelSafe(e.target.checked)}
+              className="ks-checkbox"
+            />
+            <span>{dict.vaultModal.travelSafeLabel}</span>
+          </label>
 
           <div className="flex items-center justify-end gap-2 pt-1">
             <button

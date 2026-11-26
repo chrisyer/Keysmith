@@ -87,8 +87,11 @@ export interface ParsedSearchQuery {
   tags: string[];
   vaults: string[];
   categories: ItemCategory[];
+  ssoProviders: string[];
   favoriteOnly: boolean;
   passkeyOnly: boolean;
+  ssoOnly: boolean;
+  linkedOnly: boolean;
   freeTerms: string[];
 }
 
@@ -97,8 +100,11 @@ export function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
     tags: [],
     vaults: [],
     categories: [],
+    ssoProviders: [],
     favoriteOnly: false,
     passkeyOnly: false,
+    ssoOnly: false,
+    linkedOnly: false,
     freeTerms: [],
   };
 
@@ -112,10 +118,16 @@ export function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
     } else if (lower.startsWith('cat:') && token.length > 4) {
       const mapped = CATEGORY_ALIASES[lower.slice(4)];
       if (mapped) result.categories.push(mapped);
+    } else if (lower.startsWith('sso:') && token.length > 4) {
+      result.ssoProviders.push(lower.slice(4));
     } else if (lower === 'is:favorite' || lower === 'is:fav') {
       result.favoriteOnly = true;
     } else if (lower === 'is:passkey') {
       result.passkeyOnly = true;
+    } else if (lower === 'is:sso') {
+      result.ssoOnly = true;
+    } else if (lower === 'is:linked') {
+      result.linkedOnly = true;
     } else {
       result.freeTerms.push(lower);
     }
@@ -156,6 +168,11 @@ export function scoreSearchQuery(item: ItemDetail, vaults: Vault[], rawQuery: st
   if (parsed.favoriteOnly && !item.favorite) return null;
   if (parsed.passkeyOnly && (item.passkeys?.length ?? 0) === 0 && item.category !== 'passkey') {
     return null;
+  }
+  if (parsed.ssoOnly && !item.ssoProvider?.trim()) return null;
+  if (parsed.linkedOnly && (item.linkedItemIds?.length ?? 0) === 0) return null;
+  for (const sso of parsed.ssoProviders) {
+    if (!(item.ssoProvider ?? '').toLowerCase().includes(sso)) return null;
   }
 
   for (const tag of parsed.tags) {

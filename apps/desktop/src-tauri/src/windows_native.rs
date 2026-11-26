@@ -4,6 +4,7 @@ use std::ffi::c_void;
 use std::fs;
 use std::path::PathBuf;
 use std::ptr::{null, null_mut};
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -27,10 +28,15 @@ use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, 
 use windows_sys::Win32::System::RemoteDesktop::{
     WTSRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
 };
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+    VK_RETURN, VK_TAB,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, GetWindowLongPtrW,
-    PostQuitMessage, RegisterClassW, SetWindowLongPtrW, TranslateMessage, CREATESTRUCTW,
-    GWLP_USERDATA, HWND_MESSAGE, MSG, PBT_APMSUSPEND, WM_CREATE, WM_DESTROY, WM_POWERBROADCAST,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetForegroundWindow, GetMessageW,
+    GetWindowLongPtrW, GetWindowThreadProcessId, PostQuitMessage, RegisterClassW,
+    SetForegroundWindow, SetWindowLongPtrW, TranslateMessage, CREATESTRUCTW, GWLP_USERDATA,
+    HWND_MESSAGE, MSG, PBT_APMSUSPEND, WM_CREATE, WM_DESTROY, WM_POWERBROADCAST,
     WM_WTSSESSION_CHANGE, WNDCLASSW, WTS_CONSOLE_DISCONNECT, WTS_REMOTE_DISCONNECT,
     WTS_SESSION_LOCK,
 };
@@ -336,6 +342,125 @@ pub fn keychain_load(account_id: &str) -> Result<Zeroizing<Vec<u8>>, CoreError> 
         LocalFree(out_blob.pbData as HLOCAL);
     }
     Ok(Zeroizing::new(plain))
+}
+
+static LAST_EXTERNAL_HWND: AtomicIsize = AtomicIsize::new(0);
+
+pub fn record_frontmost_external_app() {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return;
+        }
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid != 0 && pid != std::process::id() {
+            LAST_EXTERNAL_HWND.store(hwnd as isize, Ordering::SeqCst);
+        }
+    }
+}
+
+fn send_vk(vk: u16) -> Result<(), CoreError> {
+    let inputs = [
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: 0,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+    ];
+    let sent = unsafe { SendInput(2, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32) };
+    if sent == 0 {
+        return Err(CoreError::Internal(format!(
+            "Win32 SendInput failed ({})",
+            unsafe { GetLastError() }
+        )));
+    }
+    Ok(())
+}
+
+fn send_unicode_unit(unit: u16) -> Result<(), CoreError> {
+    let inputs = [
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: 0,
+                    wScan: unit,
+                    dwFlags: KEYEVENTF_UNICODE,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: 0,
+                    wScan: unit,
+                    dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+    ];
+    let sent = unsafe { SendInput(2, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32) };
+    if sent == 0 {
+        return Err(CoreError::Internal(format!(
+            "Win32 SendInput unicode failed ({})",
+            unsafe { GetLastError() }
+        )));
+    }
+    Ok(())
+}
+
+pub fn auto_type_sequence(steps: &[crate::macos::AutoTypeStep]) -> Result<(), CoreError> {
+    let target_hwnd = LAST_EXTERNAL_HWND.load(Ordering::SeqCst);
+    if target_hwnd != 0 {
+        unsafe {
+            SetForegroundWindow(target_hwnd as HWND);
+        }
+    }
+    thread::sleep(Duration::from_millis(140));
+
+    for step in steps {
+        match step {
+            crate::macos::AutoTypeStep::Text(text) => {
+                for u in text.encode_utf16() {
+                    send_unicode_unit(u)?;
+                    thread::sleep(Duration::from_millis(4));
+                }
+            }
+            crate::macos::AutoTypeStep::Tab => {
+                send_vk(VK_TAB)?;
+                thread::sleep(Duration::from_millis(35));
+            }
+            crate::macos::AutoTypeStep::Enter => {
+                send_vk(VK_RETURN)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn keychain_delete(account_id: &str) -> Result<(), CoreError> {

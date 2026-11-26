@@ -228,6 +228,11 @@ impl SocketClient {
     pub async fn passkey_match(&self, params: Value) -> Result<Value> {
         self.call("passkey_match", params).await
     }
+
+    pub async fn resolve_secret_ref(&self, reference: &str) -> Result<Value> {
+        self.call("resolve_secret_ref", json!({ "reference": reference }))
+            .await
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -301,6 +306,12 @@ mod tests {
                                 result: Some(json!({ "handled": false, "fallback": true })),
                                 error: None,
                             },
+                            "resolve_secret_ref" => RpcResponse {
+                                id: req.id,
+                                ok: true,
+                                result: Some(json!({ "value": "resolved-secret-value" })),
+                                error: None,
+                            },
                             other => RpcResponse {
                                 id: req.id,
                                 ok: false,
@@ -348,6 +359,13 @@ mod tests {
         assert_eq!(
             client.passkey_match(json!({ "action": "get", "rpId": "github.com" })).await.unwrap()["fallback"],
             true
+        );
+        assert_eq!(
+            client
+                .resolve_secret_ref("ks://Work/GitHub/password")
+                .await
+                .unwrap()["value"],
+            "resolved-secret-value"
         );
 
         let err = client.call("nonexistent", json!({})).await.unwrap_err();

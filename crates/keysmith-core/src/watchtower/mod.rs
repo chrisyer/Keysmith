@@ -55,6 +55,34 @@ pub fn is_known_2fa_domain(uri: &str) -> bool {
         .any(|d| host == *d || host.ends_with(&format!(".{d}")))
 }
 
+/// Curated directory of popular websites & developer platforms supporting WebAuthn Passkeys.
+pub const PASSKEY_CAPABLE_DOMAINS: &[&str] = &[
+    "github.com", "gitlab.com", "google.com", "accounts.google.com", "youtube.com", "gmail.com",
+    "apple.com", "icloud.com", "microsoft.com", "live.com", "outlook.com", "office.com",
+    "amazon.com", "aws.amazon.com", "amazon.co.jp", "amazon.co.uk", "amazon.de",
+    "paypal.com", "ebay.com", "shopify.com", "stripe.com", "cloudflare.com", "vercel.com",
+    "netlify.com", "supabase.com", "tailscale.com", "1password.com", "bitwarden.com",
+    "proton.me", "fastmail.com", "dropbox.com", "box.com", "notion.so", "figma.com",
+    "linear.app", "discord.com", "slack.com", "atlassian.com", "x.com", "twitter.com",
+    "tiktok.com", "whatsapp.com", "linkedin.com", "uber.com", "airbnb.com", "booking.com",
+    "kayak.com", "binance.com", "coinbase.com", "kraken.com", "okx.com", "bybit.com",
+    "robinhood.com", "wise.com", "revolut.com", "playstation.com", "sony.com", "nintendo.com",
+    "bestbuy.com", "target.com", "walmart.com", "homedepot.com", "cvs.com", "adobe.com",
+    "docusign.com", "intuit.com", "okta.com", "auth0.com", "openai.com", "anthropic.com",
+    "huggingface.co", "npmjs.com", "pypi.org", "yahoo.com", "zoho.com", "alipay.com",
+    "taobao.com", "dingtalk.com", "feishu.cn", "larksuite.com",
+];
+
+pub fn is_known_passkey_domain(uri: &str) -> bool {
+    let host = extract_domain(uri).to_ascii_lowercase();
+    if host.is_empty() {
+        return false;
+    }
+    PASSKEY_CAPABLE_DOMAINS
+        .iter()
+        .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+}
+
 fn is_local_or_intranet_host(uri: &str) -> bool {
     let Ok(parsed) = url::Url::parse(uri) else {
         return false;
@@ -81,6 +109,18 @@ fn is_local_or_intranet_host(uri: &str) -> bool {
     false
 }
 
+fn last_day_of_year_month(year: i32, month: u32) -> Option<NaiveDate> {
+    if !(1..=12).contains(&month) || !(1970..=2200).contains(&year) {
+        return None;
+    }
+    let next_month = if month == 12 {
+        NaiveDate::from_ymd_opt(year + 1, 1, 1)
+    } else {
+        NaiveDate::from_ymd_opt(year, month + 1, 1)
+    };
+    next_month.and_then(|d| d.pred_opt())
+}
+
 fn is_expiring_or_expired(value: &str, now: NaiveDate) -> bool {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -88,15 +128,23 @@ fn is_expiring_or_expired(value: &str, now: NaiveDate) -> bool {
     }
     let threshold = now + Duration::days(35);
 
-    if trimmed.len() == 7 && trimmed.as_bytes()[4] == b'-' {
+    // YYYY-MM or YYYY/MM
+    if trimmed.len() == 7 && matches!(trimmed.as_bytes()[4], b'-' | b'/') {
         if let (Ok(y), Ok(m)) = (trimmed[..4].parse::<i32>(), trimmed[5..7].parse::<u32>()) {
-            if (1..=12).contains(&m) {
-                let next_month = if m == 12 {
-                    NaiveDate::from_ymd_opt(y + 1, 1, 1)
-                } else {
-                    NaiveDate::from_ymd_opt(y, m + 1, 1)
-                };
-                if let Some(last_day) = next_month.and_then(|d| d.pred_opt()) {
+            if let Some(last_day) = last_day_of_year_month(y, m) {
+                return last_day <= threshold;
+            }
+        }
+    }
+
+    // MM/YY or MM-YY or MM/YYYY or MM-YYYY
+    if let Some((left, right)) = trimmed.split_once('/').or_else(|| trimmed.split_once('-')) {
+        let l = left.trim();
+        let r = right.trim();
+        if (1..=2).contains(&l.len()) && (r.len() == 2 || r.len() == 4) {
+            if let (Ok(m), Ok(raw_y)) = (l.parse::<u32>(), r.parse::<i32>()) {
+                let full_y = if r.len() == 2 { 2000 + raw_y } else { raw_y };
+                if let Some(last_day) = last_day_of_year_month(full_y, m) {
                     return last_day <= threshold;
                 }
             }
@@ -104,7 +152,10 @@ fn is_expiring_or_expired(value: &str, now: NaiveDate) -> bool {
     }
 
     if trimmed.len() >= 10 {
-        if let Ok(d) = NaiveDate::parse_from_str(&trimmed[..10], "%Y-%m-%d") {
+        let head = &trimmed[..10];
+        if let Ok(d) = NaiveDate::parse_from_str(head, "%Y-%m-%d")
+            .or_else(|_| NaiveDate::parse_from_str(head, "%Y/%m/%d"))
+        {
             return d <= threshold;
         }
     }
@@ -119,6 +170,9 @@ fn is_expiry_label(label: &str) -> bool {
         || label.contains("有效期")
         || lower.contains("expiry")
         || lower.contains("expire")
+        || lower.contains("expiration")
+        || lower.contains("valid thru")
+        || lower.contains("valid until")
 }
 
 pub fn sha1_upper_hex(secret: &str) -> String {
@@ -188,6 +242,7 @@ pub fn run_watchtower_audit(
         WatchtowerIssueType::UnsecuredUrl,
         WatchtowerIssueType::Expiring,
         WatchtowerIssueType::Breached,
+        WatchtowerIssueType::PasskeyAvailable,
     ];
 
     let mut item_ids_by_issue: HashMap<WatchtowerIssueType, Vec<String>> = HashMap::new();
@@ -246,16 +301,29 @@ pub fn run_watchtower_audit(
                 }
             }
 
-            if (field.purpose == Some(FieldPurpose::CardExpiry)
-                || (field.field_type == FieldType::Date && is_expiry_label(&field.label)))
+            if !item.payload.watchtower.ignore_expiring
+                && (field.purpose == Some(FieldPurpose::CardExpiry)
+                    || field.field_type == FieldType::MonthYear
+                    || (matches!(
+                        field.field_type,
+                        FieldType::Date | FieldType::Text | FieldType::MonthYear
+                    ) && is_expiry_label(&field.label)))
                 && is_expiring_or_expired(&field.value, today)
             {
                 add_issue(&item.id, WatchtowerIssueType::Expiring);
             }
         }
 
+        let has_sso = item
+            .payload
+            .sso_provider
+            .as_deref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+
         if !item.payload.watchtower.ignore_missing_2fa
             && item.payload.category == ItemCategory::Login
+            && !has_sso
         {
             let has_valid_url = item.payload.urls.iter().any(|u| !u.uri.trim().is_empty());
             let has_totp = fields
@@ -273,6 +341,19 @@ pub fn run_watchtower_audit(
                 }
                 add_issue(&item.id, WatchtowerIssueType::Missing2fa);
             }
+        }
+
+        if !item.payload.watchtower.ignore_passkey_available
+            && item.payload.category == ItemCategory::Login
+            && !has_sso
+            && item.payload.passkeys.is_empty()
+            && item
+                .payload
+                .urls
+                .iter()
+                .any(|u| is_known_passkey_domain(&u.uri))
+        {
+            add_issue(&item.id, WatchtowerIssueType::PasskeyAvailable);
         }
 
         if !item.payload.watchtower.ignore_unsecured_url {
@@ -313,7 +394,8 @@ pub fn run_watchtower_audit(
         + (counts[&WatchtowerIssueType::Reused] as i32) * 7
         + (counts[&WatchtowerIssueType::Missing2fa] as i32) * 4
         + (counts[&WatchtowerIssueType::UnsecuredUrl] as i32) * 5
-        + (counts[&WatchtowerIssueType::Expiring] as i32) * 3;
+        + (counts[&WatchtowerIssueType::Expiring] as i32) * 3
+        + (counts[&WatchtowerIssueType::PasskeyAvailable] as i32);
 
     let score = (100 - penalty).clamp(12, 100) as u32;
 

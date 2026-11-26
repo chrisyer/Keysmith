@@ -98,6 +98,22 @@ function isWebUrl(url) {
   return typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'));
 }
 
+function isHostDisabled(rawUrl, disabledList) {
+  if (!Array.isArray(disabledList) || disabledList.length === 0) return false;
+  try {
+    const host = new URL(rawUrl).hostname.toLowerCase();
+    return disabledList.some((entry) => {
+      const d = String(entry || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^\.+/, '');
+      return Boolean(d) && (host === d || host.endsWith('.' + d));
+    });
+  } catch {
+    return false;
+  }
+}
+
 async function setBadgeForTab(tabId, text, color) {
   if (!tabId || tabId < 0) return;
   try {
@@ -364,6 +380,7 @@ async function autofillBestMatchOnTab(tab) {
     }
   }
 
+  const autoCopyTotp = st.result?.autoCopyTotp !== false;
   const fillRes = await sendToTab(tab.id, {
     type: 'FILL_CREDENTIALS',
     username: item.username || '',
@@ -371,7 +388,16 @@ async function autofillBestMatchOnTab(tab) {
     totp
   });
   if (fillRes?.ok) {
-    await showToastInTab(tab.id, t('ddFilledItem', { title: item.title || t('ddUnnamed') }), 'success');
+    if (totp && autoCopyTotp) {
+      await rpcRaw('clipboard_copy', {
+        value: totp,
+        label: `${item.title || t('ddUnnamed')} 2FA`,
+        sensitive: true
+      });
+      await showToastInTab(tab.id, t('ddFilledWithTotp', { code: totp }), 'success');
+    } else {
+      await showToastInTab(tab.id, t('ddFilledItem', { title: item.title || t('ddUnnamed') }), 'success');
+    }
   } else {
     await showToastInTab(tab.id, fillRes?.error || t('ddCouldNotFill'), 'warn');
   }
@@ -550,19 +576,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await self.KeysmithI18n.syncFromDesktop(st.result.language);
         }
         if (!st.connected) {
-          sendResponse({ connected: false, status: 'Disconnected', matches: [] });
+          sendResponse({
+            connected: false,
+            status: 'Disconnected',
+            matches: [],
+            autoCopyTotp: true,
+            siteAutofillDisabled: false
+          });
           break;
         }
         const status = st.result?.status || 'Locked';
+        const autoCopyTotp = st.result?.autoCopyTotp !== false;
+        const siteAutofillDisabled = isHostDisabled(
+          targetUrl,
+          st.result?.disabledAutofillDomains
+        );
         if (!st.ok || status !== 'Unlocked') {
-          sendResponse({ connected: true, status, matches: [] });
+          sendResponse({
+            connected: true,
+            status,
+            matches: [],
+            autoCopyTotp,
+            siteAutofillDisabled
+          });
           break;
         }
         const m = await rpcRaw('url_match', { url: targetUrl });
+        const matches = m.ok && Array.isArray(m.result) ? m.result : [];
         sendResponse({
           connected: true,
           status: 'Unlocked',
-          matches: m.ok && Array.isArray(m.result) ? m.result : []
+          matches,
+          autoCopyTotp,
+          siteAutofillDisabled:
+            siteAutofillDisabled || Boolean(matches[0]?.siteAutofillDisabled)
         });
         break;
       }
@@ -617,6 +664,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'GENERATE': {
         sendResponse(await rpcRaw('generate', message.options || {}));
+        break;
+      }
+      case 'GENERATE_MASKED_EMAIL': {
+        sendResponse(
+          await rpcRaw('generate_masked_email', {
+            domain: message.domain || '',
+            url: message.url || ''
+          })
+        );
         break;
       }
       case 'COPY_SECRET': {
@@ -825,14 +881,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error: t('errNoTargetTab') });
           break;
         }
-        sendResponse(
-          await sendToTab(message.tabId, {
-            type: 'FILL_CREDENTIALS',
-            username: message.username || '',
-            password: message.password || '',
-            totp: message.totp || ''
-          })
-        );
+        const fillRes = await sendToTab(message.tabId, {
+          type: 'FILL_CREDENTIALS',
+          username: message.username || '',
+          password: message.password || '',
+          totp: message.totp || ''
+        });
+        if (fillRes?.ok && message.totp) {
+          const st = await rpcRaw('status', {});
+          if (st.result?.autoCopyTotp !== false) {
+            await rpcRaw('clipboard_copy', {
+              value: message.totp,
+              label: '2FA',
+              sensitive: true
+            });
+          }
+        }
+        sendResponse(fillRes);
         break;
       }
       case 'FILL_GENERATED_ACTIVE_TAB': {
@@ -844,6 +909,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await sendToTab(message.tabId, {
             type: 'FILL_GENERATED_PASSWORD',
             password: message.password || ''
+          })
+        );
+        break;
+      }
+      case 'FILL_USERNAME_ACTIVE_TAB': {
+        if (!message.tabId) {
+          sendResponse({ ok: false, error: t('errNoTargetTab') });
+          break;
+        }
+        sendResponse(
+          await sendToTab(message.tabId, {
+            type: 'FILL_GENERATED_USERNAME',
+            username: message.username || ''
           })
         );
         break;

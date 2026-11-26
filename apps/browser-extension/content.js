@@ -60,7 +60,7 @@
     }
   }
 
-  function isVisible(el) {
+  function isVisibleControl(el, minWidth = 48) {
     if (!el || !el.isConnected) return false;
     if (el.disabled || el.readOnly) return false;
     const style = window.getComputedStyle(el);
@@ -72,7 +72,72 @@
       return false;
     }
     const rect = el.getBoundingClientRect();
-    return rect.width >= 48 && rect.height >= 18;
+    return rect.width >= minWidth && rect.height >= 18;
+  }
+
+  function isVisible(el) {
+    return isVisibleControl(el, 48);
+  }
+
+  function isSingleCharOtpInput(el) {
+    if (!(el instanceof HTMLInputElement)) return false;
+    const type = (el.type || 'text').toLowerCase();
+    if (!['text', 'tel', 'number', 'password'].includes(type)) return false;
+    if (!isVisibleControl(el, 18)) return false;
+    if (el.maxLength === 1 || el.getAttribute('maxlength') === '1') {
+      return true;
+    }
+    const inputMode = (el.getAttribute('inputmode') || '').toLowerCase();
+    const pattern = el.getAttribute('pattern') || '';
+    if (
+      el.size === 1 &&
+      (inputMode === 'numeric' || pattern.includes('[0-9]') || pattern.includes('\\d'))
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function findSegmentedOtpGroupFromInput(el) {
+    if (!isSingleCharOtpInput(el)) return null;
+    let node = el.parentElement;
+    for (let depth = 0; depth < 3 && node; depth += 1) {
+      const candidates = Array.from(node.querySelectorAll('input')).filter(isSingleCharOtpInput);
+      if (candidates.length >= 4 && candidates.length <= 8 && candidates.includes(el)) {
+        return candidates;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function findAnySegmentedOtpGroup(scope) {
+    const root = scope || document;
+    const singles = Array.from(root.querySelectorAll('input')).filter(isSingleCharOtpInput);
+    for (const candidate of singles) {
+      const grp = findSegmentedOtpGroupFromInput(candidate);
+      if (grp && grp.length >= 4) {
+        return grp;
+      }
+    }
+    return null;
+  }
+
+  function fillSegmentedOtpGroup(boxes, code) {
+    const clean = String(code || '').replace(/[\s-]+/g, '');
+    if (!clean || !Array.isArray(boxes) || boxes.length === 0) return 0;
+    const limit = Math.min(boxes.length, clean.length);
+    for (let i = 0; i < limit; i += 1) {
+      const box = boxes[i];
+      markProgrammaticFill(box);
+      setNativeValue(box, clean[i]);
+      try {
+        box.dispatchEvent(new KeyboardEvent('keyup', { key: clean[i], bubbles: true }));
+      } catch {
+        // Ignore synthetic KeyboardEvent restrictions
+      }
+    }
+    return limit;
   }
 
   function fieldHints(el) {
@@ -199,13 +264,18 @@
 
   function autofillLogin(username, password, totp, anchorInput) {
     const allVisible = Array.from(document.querySelectorAll('input')).filter(isVisible);
-    if (allVisible.length === 0) {
+    const segmentedOtp =
+      (anchorInput && findSegmentedOtpGroupFromInput(anchorInput)) ||
+      findAnySegmentedOtpGroup(anchorInput?.form || document);
+    if (allVisible.length === 0 && (!segmentedOtp || segmentedOtp.length === 0)) {
       return { ok: false, error: t('errNoVisibleInputs') };
     }
 
     const scoped = findFormInputs(anchorInput);
     const targetPw =
-      (anchorInput?.type === 'password' ? anchorInput : null) ||
+      (anchorInput?.type === 'password' && !isSingleCharOtpInput(anchorInput)
+        ? anchorInput
+        : null) ||
       scoped.passwords[0] ||
       allVisible.find((el) => el.type === 'password');
     const targetUser =
@@ -235,16 +305,39 @@
       setNativeValue(targetPw, password);
       filled += 1;
     }
-    if (totp && targetTotp) {
-      markProgrammaticFill(targetTotp);
-      setNativeValue(targetTotp, totp);
-      filled += 1;
+    if (totp) {
+      if (segmentedOtp && segmentedOtp.length >= 4) {
+        filled += fillSegmentedOtpGroup(segmentedOtp, totp);
+      } else if (targetTotp) {
+        markProgrammaticFill(targetTotp);
+        setNativeValue(targetTotp, totp);
+        filled += 1;
+      }
     }
 
     if (filled === 0) {
       return { ok: false, error: t('errNoMatchedAuth') };
     }
     return { ok: true, filled };
+  }
+
+  function autofillGeneratedUsername(username, anchorInput) {
+    if (!username) return { ok: false, error: t('errNoMatchedAuth') };
+    const allVisible = Array.from(document.querySelectorAll('input')).filter(isVisible);
+    const scoped = findFormInputs(anchorInput);
+    const target =
+      (anchorInput && classifyAuthField(anchorInput, allVisible) === 'username'
+        ? anchorInput
+        : null) ||
+      scoped.usernames[0] ||
+      allVisible.find((el) => classifyAuthField(el, allVisible) === 'username') ||
+      allVisible.find((el) => el.type === 'email');
+    if (!target) {
+      return { ok: false, error: t('errNoMatchedAuth') };
+    }
+    markProgrammaticFill(target);
+    setNativeValue(target, username);
+    return { ok: true, filled: 1 };
   }
 
   function autofillGeneratedPassword(password, anchorInput) {
@@ -783,7 +876,14 @@
 
   // ==================== Inline Autofill Icons & Dropdown ====================
 
-  let cachedPageData = { connected: false, status: 'Disconnected', matches: [], fetchedAt: 0 };
+  let cachedPageData = {
+    connected: false,
+    status: 'Disconnected',
+    matches: [],
+    autoCopyTotp: true,
+    siteAutofillDisabled: false,
+    fetchedAt: 0
+  };
   let activeDropdownInput = null;
   let activeDropdownKind = null;
   let activeConditionalPasskey = null;
@@ -804,6 +904,8 @@
       connected: Boolean(resp.connected),
       status: resp.status || 'Disconnected',
       matches: Array.isArray(resp.matches) ? resp.matches : [],
+      autoCopyTotp: resp.autoCopyTotp !== false,
+      siteAutofillDisabled: Boolean(resp.siteAutofillDisabled),
       fetchedAt: Date.now()
     };
     scheduleIconRender();
@@ -887,6 +989,42 @@
         });
         dd.appendChild(pkBtn);
       }
+    }
+
+    if (kind === 'username' && data.connected && data.status === 'Unlocked') {
+      const aliasBtn = document.createElement('button');
+      aliasBtn.type = 'button';
+      aliasBtn.className = 'ks-dd-row ks-dd-gen';
+      const meta = document.createElement('div');
+      meta.className = 'ks-dd-meta';
+      const tEl = document.createElement('div');
+      tEl.className = 'ks-dd-title';
+      tEl.textContent = t('ddGenMaskedTitle');
+      meta.appendChild(tEl);
+      aliasBtn.appendChild(meta);
+      aliasBtn.addEventListener('mousedown', (e) => e.preventDefault());
+      aliasBtn.addEventListener('click', async () => {
+        const mRes = await sendMsg({
+          type: 'GENERATE_MASKED_EMAIL',
+          domain: window.location.hostname,
+          url: window.location.href
+        });
+        const emailVal = mRes.result?.email || mRes.result?.value;
+        if (mRes.ok && emailVal) {
+          await sendMsg({
+            type: 'COPY_SECRET',
+            value: emailVal,
+            label: t('modeMaskedEmail'),
+            sensitive: false
+          });
+          autofillGeneratedUsername(emailVal, input);
+          showToast(t('ddCopiedFilledAlias'), 'success');
+          closeDropdown();
+        } else {
+          showToast(mRes.error || t('genFailed'), 'warn');
+        }
+      });
+      dd.appendChild(aliasBtn);
     }
 
     if (kind === 'new-password' || kind === 'password') {
@@ -1096,6 +1234,12 @@
         meta.append(title, sub);
         row.appendChild(meta);
 
+        if (item.ssoProvider) {
+          const pill = document.createElement('span');
+          pill.className = 'ks-pill';
+          pill.textContent = t('ssoBadgePrefix', { provider: item.ssoProvider });
+          row.appendChild(pill);
+        }
         if (item.hasPasskey) {
           const pill = document.createElement('span');
           pill.className = 'ks-pill';
@@ -1136,7 +1280,8 @@
             }
           }
           const res = autofillLogin(fillItem.username || '', fillItem.password || '', totp, input);
-          if (totp) {
+          const shouldCopyTotp = Boolean(totp) && data.autoCopyTotp !== false;
+          if (shouldCopyTotp) {
             await sendMsg({
               type: 'COPY_SECRET',
               value: totp,
@@ -1145,7 +1290,7 @@
           }
           if (res.ok) {
             showToast(
-              totp
+              shouldCopyTotp
                 ? t('ddFilledWithTotp', { code: totp })
                 : t('ddFilledItem', { title: fillItem.title || item.title || t('ddUnnamed') }),
               'success'
@@ -1170,39 +1315,53 @@
   function renderInlineIcons() {
     rafScheduled = false;
     if (!isWeb || !ensureOverlay() || !iconLayer) return;
+    if (cachedPageData.siteAutofillDisabled) {
+      iconLayer.textContent = '';
+      return;
+    }
 
     const allInputs = Array.from(document.querySelectorAll('input'));
     const visibleAuth = [];
+    const seenOtpGroups = new Set();
     for (const inp of allInputs) {
-      if (!isVisible(inp)) continue;
-      const kind = classifyAuthField(inp, allInputs);
-      if (kind) {
-        visibleAuth.push({ input: inp, kind });
-        if (!trackedInputs.has(inp)) {
-          trackedInputs.add(inp);
-          inp.addEventListener('input', () => recordTypedCredential(inp));
-          inp.addEventListener('keydown', (ev) => {
-            if (ev.key === 'Enter' && inp.type === 'password') {
-              handleFormSubmitTrigger(inp.form || inp);
-            }
-          });
-          inp.addEventListener('focus', () => {
-            const hasConditionalPk = Boolean(activeConditionalPasskey?.passkeys?.length);
-            if (
-              (cachedPageData.status === 'Unlocked' && cachedPageData.matches.length > 0) ||
-              hasConditionalPk ||
-              (cachedPageData.status === 'Unlocked' && (kind === 'card' || kind === 'identity'))
-            ) {
-              openDropdownForInput(inp, kind);
-            }
-          });
+      if (isVisible(inp)) {
+        const kind = classifyAuthField(inp, allInputs);
+        if (kind) {
+          visibleAuth.push({ input: inp, anchorEl: inp, kind });
+          if (!trackedInputs.has(inp)) {
+            trackedInputs.add(inp);
+            inp.addEventListener('input', () => recordTypedCredential(inp));
+            inp.addEventListener('keydown', (ev) => {
+              if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && inp.type === 'password') {
+                handleFormSubmitTrigger(inp.form || inp);
+              }
+            });
+            inp.addEventListener('focus', () => {
+              if (cachedPageData.siteAutofillDisabled) return;
+              const hasConditionalPk = Boolean(activeConditionalPasskey?.passkeys?.length);
+              if (
+                (cachedPageData.status === 'Unlocked' && cachedPageData.matches.length > 0) ||
+                hasConditionalPk ||
+                (cachedPageData.status === 'Unlocked' && (kind === 'card' || kind === 'identity'))
+              ) {
+                openDropdownForInput(inp, kind);
+              }
+            });
+          }
+        }
+      } else if (isSingleCharOtpInput(inp)) {
+        const grp = findSegmentedOtpGroupFromInput(inp);
+        if (grp && grp[0] === inp && !seenOtpGroups.has(grp[0])) {
+          seenOtpGroups.add(grp[0]);
+          const lastBox = grp[grp.length - 1];
+          visibleAuth.push({ input: grp[0], anchorEl: lastBox, kind: 'totp', outsideRight: true });
         }
       }
     }
 
     iconLayer.textContent = '';
-    for (const { input, kind } of visibleAuth) {
-      const rect = input.getBoundingClientRect();
+    for (const { input, anchorEl, kind, outsideRight } of visibleAuth) {
+      const rect = (anchorEl || input).getBoundingClientRect();
       if (
         rect.bottom < 0 ||
         rect.top > window.innerHeight ||
@@ -1217,7 +1376,10 @@
       btn.className = 'ks-icon-btn';
       btn.title = t('iconTitle');
       btn.setAttribute('aria-label', t('iconAria'));
-      btn.style.left = `${Math.max(4, rect.right - 28)}px`;
+      const leftPos = outsideRight
+        ? Math.min(window.innerWidth - 26, rect.right + 6)
+        : Math.max(4, rect.right - 28);
+      btn.style.left = `${leftPos}px`;
       btn.style.top = `${Math.round(rect.top + (rect.height - 22) / 2)}px`;
       btn.appendChild(createKeySvg(13));
 
@@ -2292,6 +2454,10 @@
     }
     if (message?.type === 'FILL_GENERATED_PASSWORD') {
       sendResponse(autofillGeneratedPassword(message.password || '', activeDropdownInput));
+      return true;
+    }
+    if (message?.type === 'FILL_GENERATED_USERNAME') {
+      sendResponse(autofillGeneratedUsername(message.username || '', activeDropdownInput));
       return true;
     }
     if (message?.type === 'FILL_CARD') {

@@ -1,4 +1,4 @@
-use crate::domain::{extract_domain, ItemCategory, ItemDetail, Vault};
+use crate::domain::{expand_equivalent_domains, extract_domain, ItemCategory, ItemDetail, Vault};
 
 const PINYIN_TOKENS: &[(&str, &str)] = &[
     ("个人", "gr geren"),
@@ -56,8 +56,10 @@ pub struct ParsedSearchQuery {
     pub tags: Vec<String>,
     pub vaults: Vec<String>,
     pub categories: Vec<ItemCategory>,
+    pub sso_providers: Vec<String>,
     pub favorite_only: bool,
     pub passkey_only: bool,
+    pub linked_only: bool,
     pub free_terms: Vec<String>,
 }
 
@@ -85,12 +87,26 @@ pub fn parse_search_query(raw_query: &str) -> ParsedSearchQuery {
                 continue;
             }
         }
+        if let Some(sso) = lower.strip_prefix("sso:") {
+            if !sso.is_empty() {
+                result.sso_providers.push(sso.to_string());
+                continue;
+            }
+        }
         if lower == "is:favorite" || lower == "is:fav" {
             result.favorite_only = true;
             continue;
         }
         if lower == "is:passkey" {
             result.passkey_only = true;
+            continue;
+        }
+        if lower == "is:sso" {
+            result.sso_providers.push("*".to_string());
+            continue;
+        }
+        if lower == "is:linked" {
+            result.linked_only = true;
             continue;
         }
         result.free_terms.push(lower);
@@ -186,6 +202,10 @@ pub fn score_search_query(item: &ItemDetail, vaults: &[Vault], raw_query: &str) 
         return None;
     }
 
+    if parsed.linked_only && item.payload.linked_item_ids.is_empty() {
+        return None;
+    }
+
     for tag in &parsed.tags {
         if !item
             .payload
@@ -208,6 +228,23 @@ pub fn score_search_query(item: &ItemDetail, vaults: &[Vault], raw_query: &str) 
         return None;
     }
 
+    if !parsed.sso_providers.is_empty() {
+        let item_sso = item
+            .payload
+            .sso_provider
+            .as_deref()
+            .unwrap_or("")
+            .to_lowercase();
+        if item_sso.is_empty() {
+            return None;
+        }
+        for sso_filter in &parsed.sso_providers {
+            if sso_filter != "*" && !item_sso.contains(sso_filter) {
+                return None;
+            }
+        }
+    }
+
     if parsed.free_terms.is_empty() {
         return Some(100);
     }
@@ -222,6 +259,16 @@ pub fn score_search_query(item: &ItemDetail, vaults: &[Vault], raw_query: &str) 
         .map(|u| extract_domain(&u.uri).to_lowercase())
         .filter(|h| !h.is_empty())
         .collect();
+    let equiv_hosts_lower: Vec<String> = url_hosts_lower
+        .iter()
+        .flat_map(|h| expand_equivalent_domains(h, &[]))
+        .collect();
+    let sso_lower = item
+        .payload
+        .sso_provider
+        .as_deref()
+        .unwrap_or("")
+        .to_lowercase();
     let full_urls_lower: Vec<String> = item
         .payload
         .urls
@@ -290,6 +337,12 @@ pub fn score_search_query(item: &ItemDetail, vaults: &[Vault], raw_query: &str) 
             || passkey_rps_lower.iter().any(|rp| rp.contains(term))
         {
             best_term_score = best_term_score.max(550);
+        } else if term.len() >= 3 && equiv_hosts_lower.iter().any(|eq| eq.contains(term)) {
+            best_term_score = best_term_score.max(460);
+        }
+
+        if !sso_lower.is_empty() && sso_lower.contains(term) {
+            best_term_score = best_term_score.max(420);
         }
 
         if full_urls_lower.iter().any(|u| u.contains(term))
