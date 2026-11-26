@@ -14,16 +14,16 @@ use windows::core::HSTRING;
 use windows::Security::Credentials::UI::{
     UserConsentVerificationResult, UserConsentVerifier, UserConsentVerifierAvailability,
 };
-use windows_sys::Win32::Foundation::{GetLastError, HLOCAL, HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Foundation::{
+    GetLastError, GlobalFree, LocalFree, HLOCAL, HWND, LPARAM, LRESULT, WPARAM,
+};
 use windows_sys::Win32::Security::Cryptography::{
     CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
 };
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
-use windows_sys::Win32::System::Memory::{
-    GlobalAlloc, GlobalFree, GlobalLock, GlobalUnlock, LocalFree, GMEM_MOVEABLE,
-};
+use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
 use windows_sys::Win32::System::RemoteDesktop::{
     WTSRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
 };
