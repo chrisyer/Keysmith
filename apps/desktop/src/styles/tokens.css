@@ -223,15 +223,17 @@ html.ks-glass-enabled body {
 }
 
 /* macOS Liquid Glass / Frosted Vibrancy Material Palette */
-html.ks-glass-enabled {
-  --bg-sidebar: rgba(242, 243, 247, 0.48);
-  --bg-list: rgba(249, 249, 252, 0.72);
-  --bg-detail: rgba(255, 255, 255, 0.84);
-  --bg-card: rgba(255, 255, 255, 0.62);
-  --bg-elevated: rgba(255, 255, 255, 0.86);
-  --bg-input: rgba(255, 255, 255, 0.74);
-  --border-subtle: rgba(0, 0, 0, 0.09);
-  --border-strong: rgba(0, 0, 0, 0.16);
+html.ks-glass-enabled,
+html.ks-glass-enabled[data-theme="light"],
+html.ks-glass-enabled:has(> head > meta[name="color-scheme"][content="light"]) {
+  --bg-sidebar: rgba(244, 245, 249, 0.36);
+  --bg-list: rgba(250, 250, 253, 0.56);
+  --bg-detail: rgba(255, 255, 255, 0.72);
+  --bg-card: rgba(255, 255, 255, 0.54);
+  --bg-elevated: rgba(255, 255, 255, 0.80);
+  --bg-input: rgba(255, 255, 255, 0.66);
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.15);
 }
 
 @media (prefers-color-scheme: dark) {

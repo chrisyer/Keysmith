@@ -167,7 +167,25 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
+pub fn apply_window_theme(app: &AppHandle, theme: &str) {
+    let target = match theme.trim().to_ascii_lowercase().as_str() {
+        "light" => Some(tauri::Theme::Light),
+        "dark" => Some(tauri::Theme::Dark),
+        _ => None,
+    };
+    for label in ["main", "large-type", "quick-access", "generator"] {
+        if let Some(win) = app.get_webview_window(label) {
+            let _ = win.set_theme(target);
+        }
+    }
+}
+
 pub fn apply_window_preferences(app: &AppHandle, session: &SessionState) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(settings) = state.core.app_settings_get() {
+            apply_window_theme(app, &settings.theme);
+        }
+    }
     if let Some(main_win) = app.get_webview_window("main") {
         set_window_screen_capture_protection(&main_win, session.screen_capture_protected);
         apply_window_vibrancy(&main_win, session.vibrancy_enabled);
@@ -1431,10 +1449,20 @@ pub async fn app_settings_update(
     patch: AppSettingsPatch,
 ) -> Result<AppSettings, CoreError> {
     let lang_changed = patch.language.is_some();
+    let theme_changed = patch.theme.is_some();
     let core = Arc::clone(&state.core);
     let updated = run_blocking(move || core.app_settings_update(patch)).await??;
     if lang_changed {
         let _ = crate::refresh_localized_menus(&app, &updated.language);
+    }
+    if theme_changed {
+        apply_window_theme(&app, &updated.theme);
+        let session = state.core.session_get_state();
+        if session.vibrancy_enabled {
+            if let Some(main_win) = app.get_webview_window("main") {
+                apply_window_vibrancy(&main_win, true);
+            }
+        }
     }
     let _ = app.emit(EVENT_UI_SETTINGS_CHANGED, &updated);
     Ok(updated)
