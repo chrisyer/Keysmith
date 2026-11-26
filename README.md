@@ -39,6 +39,11 @@ open target/release/bundle/macos/Keysmith.app
 ```
 
 > 提示：请通过 `Keysmith.app`（或安装后的 DMG）启动完整 Cocoa 应用包以启用 `Info.plist` 图标与标准输入法会话，避免在终端直跑裸 Mach-O 二进制。
+>
+> 从 GitHub Releases 下载 `.dmg` 拖入 `/Applications` 后，因未经过 Apple Developer 公证，首次打开若提示「已损坏，无法打开」，请运行一次以下命令移除下载隔离标记：
+> ```bash
+> xattr -cr /Applications/Keysmith.app
+> ```
 
 ### 2. 开发调试与打包
 

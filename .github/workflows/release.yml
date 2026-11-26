@@ -73,6 +73,12 @@ jobs:
           test -f "target/${{ matrix.target }}/release/bundle/macos/Keysmith.app/Contents/Resources/browser-extension/manifest.json"
           test -f "target/${{ matrix.target }}/release/bundle/macos/Keysmith.app/Contents/Resources/browser-extension/icons/128.png"
 
+      - name: Sign & verify Keysmith.app bundle
+        run: |
+          APP_PATH="target/${{ matrix.target }}/release/bundle/macos/Keysmith.app"
+          codesign --force --deep --sign - "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
       - name: Package & verify DMG installer
         run: |
           mkdir -p dist-release
@@ -177,4 +183,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          body: |
+            ### macOS 安装说明（首次运行）
+            当前安装包采用本地 Ad-hoc 签名（暂未购买 Apple Developer 公证证书），从浏览器下载 `.dmg` 拖入 `/Applications` 后若提示「**已损坏，无法打开**」，在终端执行一次以下命令移除下载隔离标记即可正常打开：
+            ```bash
+            xattr -cr /Applications/Keysmith.app
+            ```
           files: release-assets/*
