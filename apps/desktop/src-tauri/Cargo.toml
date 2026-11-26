@@ -1,6 +1,6 @@
 [package]
 name = "keysmith-desktop"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "Keysmith macOS desktop shell powered by Tauri v2"
 
