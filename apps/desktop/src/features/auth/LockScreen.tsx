@@ -131,17 +131,24 @@ export function LockScreen() {
   const initials = (displayName || email || 'K').slice(0, 2).toUpperCase();
   const hasQuickUnlock = biometricEnabled || hasAccountPasskeys;
 
-  return (
-    <div className="h-dvh w-full flex flex-col items-center justify-center bg-[var(--bg-sidebar)] p-4 pt-9 overflow-y-auto">
-      {inTauri && <div data-tauri-drag-region className="fixed top-0 left-0 right-0 h-9" />}
-      <div className="relative w-full max-w-[380px] rounded-xl bg-[var(--bg-elevated)] backdrop-blur-2xl border border-[var(--border-strong)] shadow-xl p-6 flex flex-col items-center text-center">
-        <label className="absolute top-3.5 right-3.5 inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[11.5px] font-medium text-[var(--text-secondary)] cursor-pointer">
-          <Globe size={12} />
+  const content = (
+    <div
+      className={
+        inTauri
+          ? 'h-dvh w-full flex flex-col bg-[var(--bg-elevated)] backdrop-blur-2xl overflow-hidden'
+          : 'w-full max-w-[390px] rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-2xl overflow-hidden flex flex-col'
+      }
+    >
+      {/* Top Bar (with drag region on desktop & clean compact language pill) */}
+      <div className="relative h-11 px-3.5 flex items-center justify-end shrink-0">
+        {inTauri && <div data-tauri-drag-region className="absolute inset-0" />}
+        <label className="relative z-10 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--bg-card)]/70 hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] cursor-pointer">
+          <Globe size={12} className="shrink-0" />
           <select
             aria-label={dict.settings.languageLabel}
             value={languageMode}
             onChange={(e) => setLanguageMode(e.target.value as LanguageMode)}
-            className="bg-transparent focus:outline-none cursor-pointer text-[11.5px] font-medium text-[var(--text-secondary)]"
+            className="ks-select-inline text-[var(--text-secondary)]"
           >
             <option value="system">{dict.settings.languageSystem}</option>
             {SUPPORTED_LOCALES.map((loc) => (
@@ -151,9 +158,12 @@ export function LockScreen() {
             ))}
           </select>
         </label>
+      </div>
 
+      {/* Main Centered Lock Content */}
+      <div className="flex-1 overflow-y-auto ks-scroll px-7 pb-5 pt-2 flex flex-col items-center justify-center text-center">
         <div className="relative">
-          <div className="w-14 h-14 rounded-full bg-[var(--accent-primary)] text-white text-lg font-semibold flex items-center justify-center">
+          <div className="w-16 h-16 rounded-full bg-[var(--accent-primary)] text-white text-xl font-semibold flex items-center justify-center shadow-sm">
             {initials}
           </div>
           <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-strong)] flex items-center justify-center text-[var(--text-secondary)]">
@@ -161,10 +171,12 @@ export function LockScreen() {
           </div>
         </div>
 
-        <h1 className="mt-3.5 text-base font-semibold text-[var(--text-primary)]">{displayName || email}</h1>
+        <h1 className="mt-3 text-[17px] font-semibold text-[var(--text-primary)] tracking-tight">
+          {displayName || email}
+        </h1>
         <p className="text-[13px] text-[var(--text-secondary)] mt-0.5">{email}</p>
         {serverUrl && (
-          <p className="mt-1 text-xs font-mono-tabular text-[var(--text-muted)] truncate max-w-full">
+          <p className="mt-0.5 text-xs font-mono-tabular text-[var(--text-muted)] truncate max-w-full">
             {serverUrl}
           </p>
         )}
@@ -198,7 +210,7 @@ export function LockScreen() {
             type="button"
             onClick={() => void handleTouchId(false)}
             disabled={touchScanning}
-            className="mt-5 w-full py-2.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-70 text-[13.5px] font-semibold text-white flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            className="mt-5 w-full h-11 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-70 text-sm font-semibold text-white flex items-center justify-center gap-2 transition-colors cursor-pointer"
           >
             {touchScanning ? (
               <Loader2 size={16} className="animate-spin" />
@@ -214,10 +226,10 @@ export function LockScreen() {
             type="button"
             onClick={() => void handlePasskeyUnlock()}
             disabled={passkeyScanning}
-            className={`${biometricEnabled ? 'mt-2.5' : 'mt-5'} w-full py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+            className={`${biometricEnabled ? 'mt-2.5' : 'mt-5'} w-full h-10 rounded-lg text-[13px] font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer ${
               biometricEnabled
                 ? 'bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[var(--text-primary)]'
-                : 'bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white font-semibold py-2.5'
+                : 'bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white font-semibold h-11'
             }`}
           >
             <KeyRound
@@ -237,7 +249,7 @@ export function LockScreen() {
         {hasQuickUnlock && (
           <div className="w-full flex items-center gap-2.5 mt-4 mb-2">
             <div className="h-px flex-1 bg-[var(--border-subtle)]" />
-            <span className="text-[11.5px] text-[var(--text-muted)]">{dict.lock.orMasterPassword}</span>
+            <span className="text-xs text-[var(--text-muted)]">{dict.lock.orMasterPassword}</span>
             <div className="h-px flex-1 bg-[var(--border-subtle)]" />
           </div>
         )}
@@ -245,7 +257,7 @@ export function LockScreen() {
         {/* Master Password Fallback */}
         <form
           onSubmit={(e) => void handlePasswordUnlock(e)}
-          className={`w-full ${hasQuickUnlock ? 'mt-0.5' : 'mt-5'} flex flex-col gap-2`}
+          className={`w-full ${hasQuickUnlock ? 'mt-1' : 'mt-5'} flex flex-col gap-2`}
         >
           <div className={`relative flex items-center ${shaking ? 'ks-shake' : ''}`}>
             <input
@@ -264,7 +276,7 @@ export function LockScreen() {
                   : fmt(dict.lock.demoUnlockPlaceholder, { pw: 'keysmith' })
               }
               aria-label={dict.auth.masterPassword}
-              className="w-full pl-3.5 pr-11 py-2.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-[13.5px] font-mono-tabular text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/20 focus:outline-none transition-colors"
+              className="w-full h-11 pl-3.5 pr-11 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-[13.5px] font-mono-tabular text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/20 focus:outline-none transition-colors"
             />
             <button
               type="submit"
@@ -277,52 +289,63 @@ export function LockScreen() {
           </div>
 
           {error && (
-            <p className="text-xs text-[var(--status-danger)] text-left px-0.5">{error}</p>
+            <p className="text-xs text-[var(--status-danger)] text-left px-0.5 leading-snug">{error}</p>
           )}
         </form>
+      </div>
 
-        <div className="mt-5 pt-3.5 border-t border-[var(--border-subtle)] w-full flex items-center justify-between text-xs text-[var(--text-muted)]">
-          <button
-            type="button"
-            onClick={startAddingAccount}
-            className="inline-flex items-center gap-1 text-[var(--accent-primary)] hover:underline cursor-pointer"
-          >
-            <UserPlus size={12} />
-            {dict.lock.addAccount}
-          </button>
+      {/* Pinned Bottom Bar */}
+      <div className="px-6 py-3.5 border-t border-[var(--border-subtle)] bg-[var(--bg-card)]/40 flex items-center justify-between text-xs text-[var(--text-muted)] shrink-0">
+        <button
+          type="button"
+          onClick={startAddingAccount}
+          className="inline-flex items-center gap-1.5 text-[var(--accent-primary)] hover:underline cursor-pointer"
+        >
+          <UserPlus size={13} />
+          {dict.lock.addAccount}
+        </button>
 
-          {confirmRemove ? (
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => setConfirmRemove(false)}
-                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
-              >
-                {dict.common.cancel}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setConfirmRemove(false);
-                  void logout(false);
-                }}
-                className="text-[var(--status-danger)] font-medium cursor-pointer"
-              >
-                {dict.common.confirm}
-              </button>
-            </div>
-          ) : (
+        {confirmRemove ? (
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setConfirmRemove(true)}
-              className="inline-flex items-center gap-1 text-[var(--text-secondary)] hover:text-[var(--status-danger)] cursor-pointer"
+              onClick={() => setConfirmRemove(false)}
+              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
             >
-              <LogOut size={12} />
-              {dict.lock.removeAccount}
+              {dict.common.cancel}
             </button>
-          )}
-        </div>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmRemove(false);
+                void logout(false);
+              }}
+              className="text-[var(--status-danger)] font-medium cursor-pointer"
+            >
+              {dict.common.confirm}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmRemove(true)}
+            className="inline-flex items-center gap-1.5 text-[var(--text-secondary)] hover:text-[var(--status-danger)] cursor-pointer"
+          >
+            <LogOut size={13} />
+            {dict.lock.removeAccount}
+          </button>
+        )}
       </div>
+    </div>
+  );
+
+  if (inTauri) {
+    return content;
+  }
+
+  return (
+    <div className="h-dvh w-full flex items-center justify-center bg-[var(--bg-sidebar)] p-6">
+      {content}
     </div>
   );
 }

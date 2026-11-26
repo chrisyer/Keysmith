@@ -2087,3 +2087,63 @@ async fn semver_compare_rsa_org_key_and_offline_revision_preservation() {
         .unwrap();
     assert_eq!(updated_settings.language, "ja");
 }
+
+#[test]
+fn passkey_prefixed_b64_and_hex_credential_ids_decode_and_assert() {
+    use keysmith_core::passkey::{
+        assert_passkey_credential, create_passkey_credential, decode_credential_id_bytes,
+        passkey_matches_credential_list, PasskeyAssertParams, PasskeyCreateParams,
+    };
+
+    let created = create_passkey_credential(&PasskeyCreateParams {
+        origin: "https://example.com".to_string(),
+        rp_id: "example.com".to_string(),
+        rp_name: "Example".to_string(),
+        user_id_b64u: "b64.dXNlci0x".to_string(),
+        user_name: "alice@example.com".to_string(),
+        user_display_name: "Alice".to_string(),
+        challenge_b64u: encode_b64u_test(b"test-challenge-123"),
+        pub_key_cred_params: vec![-7],
+        discoverable: true,
+        cross_origin: false,
+    })
+    .unwrap();
+
+    let raw_cred_id = decode_credential_id_bytes(&created.credential.credential_id).unwrap();
+    let b64_prefixed = format!("b64.{}", B64.encode(&raw_cred_id));
+    let hex_prefixed = format!(
+        "hex.{}",
+        raw_cred_id
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
+    let b64u = created.response_json["id"].as_str().unwrap().to_string();
+
+    assert_eq!(decode_credential_id_bytes(&b64_prefixed).unwrap(), raw_cred_id);
+    assert_eq!(decode_credential_id_bytes(&hex_prefixed).unwrap(), raw_cred_id);
+
+    let mut prefixed_cred = created.credential.clone();
+    prefixed_cred.credential_id = b64_prefixed;
+    prefixed_cred.user_handle = "b64.dXNlci0x".to_string();
+    assert!(passkey_matches_credential_list(&prefixed_cred, &[b64u.clone()]));
+
+    let (next_cnt, assertion) = assert_passkey_credential(
+        &prefixed_cred,
+        &PasskeyAssertParams {
+            origin: "https://example.com".to_string(),
+            rp_id: "example.com".to_string(),
+            challenge_b64u: encode_b64u_test(b"assert-challenge-456"),
+            cross_origin: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(next_cnt, 1);
+    assert_eq!(assertion["id"].as_str().unwrap(), b64u);
+}
+
+fn encode_b64u_test(bytes: &[u8]) -> String {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+    URL_SAFE_NO_PAD.encode(bytes)
+}

@@ -224,39 +224,39 @@ html.ks-glass-enabled body {
 
 /* macOS Liquid Glass / Frosted Vibrancy Material Palette */
 html.ks-glass-enabled {
-  --bg-sidebar: rgba(244, 245, 248, 0.28);
-  --bg-list: rgba(250, 250, 252, 0.66);
-  --bg-detail: rgba(255, 255, 255, 0.80);
-  --bg-card: rgba(255, 255, 255, 0.56);
-  --bg-elevated: rgba(255, 255, 255, 0.88);
-  --bg-input: rgba(255, 255, 255, 0.68);
-  --border-subtle: rgba(0, 0, 0, 0.08);
-  --border-strong: rgba(0, 0, 0, 0.14);
+  --bg-sidebar: rgba(242, 243, 247, 0.48);
+  --bg-list: rgba(249, 249, 252, 0.72);
+  --bg-detail: rgba(255, 255, 255, 0.84);
+  --bg-card: rgba(255, 255, 255, 0.62);
+  --bg-elevated: rgba(255, 255, 255, 0.86);
+  --bg-input: rgba(255, 255, 255, 0.74);
+  --border-subtle: rgba(0, 0, 0, 0.09);
+  --border-strong: rgba(0, 0, 0, 0.16);
 }
 
 @media (prefers-color-scheme: dark) {
   html.ks-glass-enabled:not([data-theme="light"]) {
-    --bg-sidebar: rgba(28, 28, 32, 0.30);
-    --bg-list: rgba(30, 30, 34, 0.64);
-    --bg-detail: rgba(26, 26, 30, 0.78);
-    --bg-card: rgba(44, 44, 50, 0.54);
-    --bg-elevated: rgba(38, 38, 44, 0.88);
-    --bg-input: rgba(22, 22, 26, 0.62);
-    --border-subtle: rgba(255, 255, 255, 0.11);
-    --border-strong: rgba(255, 255, 255, 0.19);
+    --bg-sidebar: rgba(24, 24, 28, 0.52);
+    --bg-list: rgba(26, 26, 30, 0.72);
+    --bg-detail: rgba(24, 24, 28, 0.84);
+    --bg-card: rgba(42, 42, 48, 0.60);
+    --bg-elevated: rgba(28, 28, 33, 0.84);
+    --bg-input: rgba(20, 20, 24, 0.68);
+    --border-subtle: rgba(255, 255, 255, 0.12);
+    --border-strong: rgba(255, 255, 255, 0.20);
   }
 }
 
 html.ks-glass-enabled[data-theme="dark"],
 html.ks-glass-enabled:has(> head > meta[name="color-scheme"][content="dark"]) {
-  --bg-sidebar: rgba(28, 28, 32, 0.30);
-  --bg-list: rgba(30, 30, 34, 0.64);
-  --bg-detail: rgba(26, 26, 30, 0.78);
-  --bg-card: rgba(44, 44, 50, 0.54);
-  --bg-elevated: rgba(38, 38, 44, 0.88);
-  --bg-input: rgba(22, 22, 26, 0.62);
-  --border-subtle: rgba(255, 255, 255, 0.11);
-  --border-strong: rgba(255, 255, 255, 0.19);
+  --bg-sidebar: rgba(24, 24, 28, 0.52);
+  --bg-list: rgba(26, 26, 30, 0.72);
+  --bg-detail: rgba(24, 24, 28, 0.84);
+  --bg-card: rgba(42, 42, 48, 0.60);
+  --bg-elevated: rgba(28, 28, 33, 0.84);
+  --bg-input: rgba(20, 20, 24, 0.68);
+  --border-subtle: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.20);
 }
 
 html.ks-glass-enabled dialog.ks-dialog:not(.ks-dialog-dark),
@@ -368,7 +368,6 @@ textarea,
   select {
     -webkit-appearance: none;
     appearance: none;
-    min-height: 34px;
     line-height: 1.35;
     cursor: pointer;
   }
@@ -391,6 +390,29 @@ textarea,
 }
 
 @layer components {
+  .ks-select-inline {
+    -webkit-appearance: none;
+    appearance: none;
+    min-height: 0;
+    height: 22px;
+    line-height: 1;
+    padding: 0 18px 0 2px;
+    font-size: 12px;
+    font-weight: 500;
+    background-color: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 2px center;
+    background-size: 12px 12px;
+  }
+
+  .ks-select-inline:focus {
+    outline: none;
+  }
+
   .ks-select,
   .ks-select-sm {
     -webkit-appearance: none;
@@ -452,8 +474,10 @@ textarea,
   }
 
   @supports (appearance: base-select) {
-    select,
-    select::picker(select) {
+    .ks-select,
+    .ks-select-sm,
+    .ks-select::picker(select),
+    .ks-select-sm::picker(select) {
       appearance: base-select;
     }
 
@@ -471,7 +495,8 @@ textarea,
       padding-right: 0.6rem;
     }
 
-    select::picker(select) {
+    .ks-select::picker(select),
+    .ks-select-sm::picker(select) {
       background-color: var(--bg-elevated);
       color: var(--text-primary);
       border: 1px solid var(--border-strong);
@@ -481,7 +506,8 @@ textarea,
       box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
     }
 
-    select::picker-icon {
+    .ks-select::picker-icon,
+    .ks-select-sm::picker-icon {
       color: var(--text-muted);
       margin-inline-start: auto;
       width: 13px;
@@ -489,11 +515,13 @@ textarea,
       transition: transform 0.16s ease;
     }
 
-    select:open::picker-icon {
+    .ks-select:open::picker-icon,
+    .ks-select-sm:open::picker-icon {
       transform: rotate(180deg);
     }
 
-    select option {
+    .ks-select option,
+    .ks-select-sm option {
       padding: 6px 10px;
       border-radius: 6px;
       font-size: 13px;
@@ -502,17 +530,20 @@ textarea,
       cursor: pointer;
     }
 
-    select option:hover {
+    .ks-select option:hover,
+    .ks-select-sm option:hover {
       background-color: var(--bg-hover);
     }
 
-    select option:checked {
+    .ks-select option:checked,
+    .ks-select-sm option:checked {
       background-color: var(--bg-selected);
       color: var(--accent-primary);
       font-weight: 500;
     }
 
-    select option::checkmark {
+    .ks-select option::checkmark,
+    .ks-select-sm option::checkmark {
       color: var(--accent-primary);
     }
   }

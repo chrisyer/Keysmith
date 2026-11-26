@@ -81,8 +81,8 @@ pub fn set_main_window_compact(app: &AppHandle, compact: bool) {
                     }
                 }
             }
-            let _ = win.set_min_size(Some(tauri::LogicalSize::new(400.0_f64, 500.0_f64)));
-            let _ = win.set_size(tauri::LogicalSize::new(440.0_f64, 560.0_f64));
+            let _ = win.set_min_size(Some(tauri::LogicalSize::new(370.0_f64, 440.0_f64)));
+            let _ = win.set_size(tauri::LogicalSize::new(400.0_f64, 480.0_f64));
             let _ = win.center();
         }
     } else if state.main_window_compact.swap(false, Ordering::SeqCst) {

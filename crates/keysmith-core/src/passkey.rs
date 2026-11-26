@@ -70,16 +70,38 @@ pub fn now_rfc3339() -> String {
     Utc::now().to_rfc3339()
 }
 
-pub fn decode_b64u_or_b64(input: &str) -> Result<Vec<u8>, CoreError> {
+fn strip_encoding_prefix(input: &str) -> &str {
     let trimmed = input.trim();
-    if trimmed.is_empty() {
+    for prefix in ["base64url.", "base64.", "b64u.", "b64."] {
+        if let Some(rest) = trimmed.get(..prefix.len()) {
+            if rest.eq_ignore_ascii_case(prefix) {
+                return &trimmed[prefix.len()..];
+            }
+        }
+    }
+    trimmed
+}
+
+pub fn decode_b64u_or_b64(input: &str) -> Result<Vec<u8>, CoreError> {
+    let stripped = strip_encoding_prefix(input).trim();
+    if stripped.is_empty() {
         return Ok(Vec::new());
     }
+    let clean_owned;
+    let candidate = if stripped.chars().any(char::is_whitespace) {
+        clean_owned = stripped
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>();
+        clean_owned.as_str()
+    } else {
+        stripped
+    };
     URL_SAFE_NO_PAD
-        .decode(trimmed)
-        .or_else(|_| URL_SAFE.decode(trimmed))
-        .or_else(|_| STANDARD_NO_PAD.decode(trimmed))
-        .or_else(|_| STANDARD.decode(trimmed))
+        .decode(candidate)
+        .or_else(|_| URL_SAFE.decode(candidate))
+        .or_else(|_| STANDARD_NO_PAD.decode(candidate))
+        .or_else(|_| STANDARD.decode(candidate))
         .map_err(|e| CoreError::Validation(format!("Base64 解码失败: {e}")))
 }
 
@@ -88,11 +110,37 @@ pub fn normalize_rp_id(rp_id: &str) -> String {
     rp_id.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
-/// Bitwarden stores UUID credential IDs as hyphenated 36-char UUIDs (16 raw bytes) or Base64URL.
+/// Bitwarden stores credential IDs as hyphenated 36-char UUIDs, `b64.<base64>`, `hex.<hex>`, or Base64URL.
 pub fn decode_credential_id_bytes(cred_id: &str) -> Result<Vec<u8>, CoreError> {
     let trimmed = cred_id.trim();
-    if trimmed.len() == 36 && trimmed.contains('-') {
-        if let Ok(parsed) = Uuid::parse_str(trimmed) {
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    if let Some(prefix) = trimmed.get(..4) {
+        if prefix.eq_ignore_ascii_case("hex.") {
+            let hex_str = trimmed[4..].trim();
+            if hex_str.len() % 2 == 0 {
+                let mut out = Vec::with_capacity(hex_str.len() / 2);
+                let mut valid = true;
+                for chunk in hex_str.as_bytes().chunks_exact(2) {
+                    if let Ok(s) = std::str::from_utf8(chunk) {
+                        if let Ok(b) = u8::from_str_radix(s, 16) {
+                            out.push(b);
+                            continue;
+                        }
+                    }
+                    valid = false;
+                    break;
+                }
+                if valid {
+                    return Ok(out);
+                }
+            }
+        }
+    }
+    let without_prefix = strip_encoding_prefix(trimmed).trim();
+    if without_prefix.len() == 36 && without_prefix.contains('-') {
+        if let Ok(parsed) = Uuid::parse_str(without_prefix) {
             return Ok(parsed.as_bytes().to_vec());
         }
     }
@@ -144,6 +192,11 @@ fn decode_pkcs8_signing_key(encoded: &str) -> Result<SigningKey, CoreError> {
     let trimmed = encoded.trim();
     if trimmed.is_empty() {
         return Err(CoreError::Crypto("Passkey 缺少私钥数据".to_string()));
+    }
+    if trimmed.starts_with("2.") && trimmed.contains('|') {
+        return Err(CoreError::Crypto(
+            "Passkey 私钥尚未解密，请重新同步密码库".to_string(),
+        ));
     }
     let secret = if trimmed.starts_with("-----BEGIN") {
         p256::SecretKey::from_pkcs8_pem(trimmed)

@@ -192,13 +192,13 @@ export function AuthScreen() {
               </div>
             </div>
 
-            <label className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] cursor-pointer shrink-0">
-              <Globe size={12} />
+            <label className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--bg-card)]/70 hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] cursor-pointer shrink-0">
+              <Globe size={12} className="shrink-0" />
               <select
                 aria-label={dict.settings.languageLabel}
                 value={languageMode}
                 onChange={(e) => setLanguageMode(e.target.value as LanguageMode)}
-                className="bg-transparent focus:outline-none cursor-pointer text-xs font-medium text-[var(--text-secondary)]"
+                className="ks-select-inline text-[var(--text-secondary)]"
               >
                 <option value="system">{dict.settings.languageSystem}</option>
                 {SUPPORTED_LOCALES.map((loc) => (
