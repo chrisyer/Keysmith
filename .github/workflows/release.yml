@@ -220,9 +220,14 @@ jobs:
           path = "repo-main/Casks/keysmith.rb"
           with open(path, "r", encoding="utf-8") as fh:
               text = fh.read()
-          text = re.sub(r'version\s+"[^"]+"', f'version "{version}"', text, count=1)
-          text = re.sub(r'arm:\s+"[^"]+"', f'arm:   "{arm_sha}"', text, count=1)
-          text = re.sub(r'intel:\s+"[^"]+"', f'intel: "{intel_sha}"', text, count=1)
+          text = re.sub(r'(^\s*version\s+)"[^"]+"', rf'\g<1>"{version}"', text, count=1, flags=re.M)
+          text = re.sub(
+              r'(^\s*sha256\s+arm:\s+)"[^"]+"(,\s*\n\s*intel:\s+)"[^"]+"',
+              rf'\g<1>"{arm_sha}"\g<2>"{intel_sha}"',
+              text,
+              count=1,
+              flags=re.M,
+          )
           with open(path, "w", encoding="utf-8") as fh:
               fh.write(text)
           PY
