@@ -16,7 +16,15 @@
 
   const nativeCreate = navigator.credentials.create.bind(navigator.credentials);
   const nativeGet = navigator.credentials.get.bind(navigator.credentials);
-  const BRIDGE_TIMEOUT_MS = 20000;
+  const BRIDGE_TIMEOUT_MS = 120000;
+
+  if (typeof PublicKeyCredential !== 'undefined') {
+    try {
+      PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = async () => true;
+    } catch {
+      // Ignore if non-writable
+    }
+  }
 
   function randomNonce() {
     const bytes = new Uint8Array(16);
@@ -72,7 +80,9 @@
 
   function serializeCreateOptions(pk) {
     return {
-      rp: pk.rp ? { id: pk.rp.id || window.location.hostname, name: pk.rp.name || '' } : { id: window.location.hostname, name: '' },
+      rp: pk.rp
+        ? { id: pk.rp.id || window.location.hostname, name: pk.rp.name || '' }
+        : { id: window.location.hostname, name: '' },
       user: pk.user
         ? {
             id: bufferToBase64Url(pk.user.id),
@@ -90,13 +100,14 @@
     };
   }
 
-  function serializeGetOptions(pk) {
+  function serializeGetOptions(pk, mediation) {
     return {
       challenge: bufferToBase64Url(pk.challenge),
       rpId: pk.rpId || window.location.hostname,
       timeout: pk.timeout,
       allowCredentials: serializeDescriptorList(pk.allowCredentials),
       userVerification: pk.userVerification || 'preferred',
+      mediation: mediation || 'optional',
       extensions: pk.extensions || undefined
     };
   }
@@ -117,8 +128,13 @@
       }
       const authDataBuf = base64UrlToArrayBuffer(rawCred.response?.authenticatorData);
       const pubKeyBuf = base64UrlToArrayBuffer(rawCred.response?.publicKey);
-      const transports = Array.isArray(rawCred.response?.transports) ? rawCred.response.transports : ['internal'];
-      const pubKeyAlg = typeof rawCred.response?.publicKeyAlgorithm === 'number' ? rawCred.response.publicKeyAlgorithm : -7;
+      const transports = Array.isArray(rawCred.response?.transports)
+        ? rawCred.response.transports
+        : ['internal', 'hybrid'];
+      const pubKeyAlg =
+        typeof rawCred.response?.publicKeyAlgorithm === 'number'
+          ? rawCred.response.publicKeyAlgorithm
+          : -7;
 
       responseObj = {
         clientDataJSON: clientDataBuf,
@@ -142,9 +158,10 @@
         return null;
       }
       const rawUserHandle = rawCred.response?.userHandle;
-      const userHandleBuf = typeof rawUserHandle === 'string' && rawUserHandle.length > 0
-        ? base64UrlToArrayBuffer(rawUserHandle)
-        : null;
+      const userHandleBuf =
+        typeof rawUserHandle === 'string' && rawUserHandle.length > 0
+          ? base64UrlToArrayBuffer(rawUserHandle)
+          : null;
 
       responseObj = {
         clientDataJSON: clientDataBuf,
@@ -260,11 +277,20 @@
           return cred;
         }
       }
+      if (reply && reply.errorName) {
+        throw new DOMException(
+          reply.error || 'The operation either timed out or was not allowed.',
+          reply.errorName
+        );
+      }
       if (reply && reply.cancelled) {
-        throw new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError');
+        throw new DOMException(
+          'The operation either timed out or was not allowed.',
+          'NotAllowedError'
+        );
       }
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'NotAllowedError') {
+      if (err instanceof DOMException) {
         throw err;
       }
     }
@@ -276,10 +302,15 @@
       return nativeGet(options);
     }
 
+    const mediation = options.mediation || 'optional';
+    if (mediation === 'conditional' || mediation === 'silent') {
+      return nativeGet(options);
+    }
+
     try {
       const reply = await requestBridge(
         'PASSKEY_GET_REQUEST',
-        serializeGetOptions(options.publicKey),
+        serializeGetOptions(options.publicKey, mediation),
         options.signal
       );
       if (reply && reply.aborted) {
@@ -291,11 +322,20 @@
           return cred;
         }
       }
+      if (reply && reply.errorName) {
+        throw new DOMException(
+          reply.error || 'The operation either timed out or was not allowed.',
+          reply.errorName
+        );
+      }
       if (reply && reply.cancelled) {
-        throw new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError');
+        throw new DOMException(
+          'The operation either timed out or was not allowed.',
+          'NotAllowedError'
+        );
       }
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'NotAllowedError') {
+      if (err instanceof DOMException) {
         throw err;
       }
     }

@@ -3,6 +3,7 @@ pub mod domain;
 pub mod error;
 pub mod generator;
 pub mod importers;
+pub mod passkey;
 pub mod protocol;
 pub mod search;
 pub mod session;

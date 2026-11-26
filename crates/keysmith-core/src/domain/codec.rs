@@ -890,27 +890,56 @@ pub fn draft_to_cipher(
                             })
                         })
                         .collect::<Result<Vec<_>, CoreError>>()?;
-                    // Preserve existing Fido2Credentials unless explicitly unbound in draft.passkeys
-                    if !login.fido2_credentials.is_empty() {
-                        let kept_ids: std::collections::HashSet<&str> = draft
-                            .passkeys
-                            .iter()
-                            .map(|p| p.credential_id.as_str())
-                            .collect();
-                        let mut preserved = Vec::with_capacity(login.fido2_credentials.len());
-                        for (idx, f2) in login.fido2_credentials.drain(..).enumerate() {
-                            let decoded_id = dec_opt_or_plain(usk, f2.credential_id.as_deref());
-                            let eff_id = if decoded_id.is_empty() {
-                                format!("fido2-{idx}")
-                            } else {
-                                decoded_id
-                            };
-                            if kept_ids.contains(eff_id.as_str()) {
-                                preserved.push(f2);
-                            }
-                        }
-                        login.fido2_credentials = preserved;
+                    // Synchronize Fido2Credentials from draft.passkeys, preserving existing entries' extra fields
+                    let mut existing_by_id: std::collections::HashMap<String, CipherFido2CredentialDto> =
+                        std::collections::HashMap::new();
+                    for (idx, f2) in login.fido2_credentials.drain(..).enumerate() {
+                        let decoded_id = dec_opt_or_plain(usk, f2.credential_id.as_deref());
+                        let eff_id = if decoded_id.is_empty() {
+                            format!("fido2-{idx}")
+                        } else {
+                            decoded_id
+                        };
+                        existing_by_id.insert(eff_id, f2);
                     }
+                    let mut synced_fido2 = Vec::with_capacity(draft.passkeys.len());
+                    for pk in &draft.passkeys {
+                        if let Some(mut existing) = existing_by_id.remove(&pk.credential_id) {
+                            existing.counter = enc_opt(usk, &pk.sign_count.to_string())?;
+                            synced_fido2.push(existing);
+                        } else {
+                            let alg_name = match pk.algorithm {
+                                -8 => "EdDSA",
+                                -257 => "RS256",
+                                _ => "ECDSA",
+                            };
+                            let curve_name = match pk.algorithm {
+                                -8 => "Ed25519",
+                                -257 => "RSA",
+                                _ => "P-256",
+                            };
+                            synced_fido2.push(CipherFido2CredentialDto {
+                                credential_id: enc_opt(usk, &pk.credential_id)?,
+                                key_type: enc_opt(usk, "public-key")?,
+                                key_algorithm: enc_opt(usk, alg_name)?,
+                                key_curve: enc_opt(usk, curve_name)?,
+                                key_value: enc_opt(usk, &pk.private_key_pkcs8)?,
+                                rp_id: enc_opt(usk, &pk.rp_id)?,
+                                rp_name: enc_opt(usk, &pk.rp_name)?,
+                                counter: enc_opt(usk, &pk.sign_count.to_string())?,
+                                user_handle: enc_opt(usk, &pk.user_handle)?,
+                                user_name: enc_opt(usk, &pk.user_name)?,
+                                user_display_name: enc_opt(usk, &pk.user_display_name)?,
+                                discoverable: enc_opt(
+                                    usk,
+                                    if pk.discoverable { "true" } else { "false" },
+                                )?,
+                                creation_date: enc_opt(usk, &pk.created_at)?,
+                                extra: Default::default(),
+                            });
+                        }
+                    }
+                    login.fido2_credentials = synced_fido2;
                     next.login = Some(login);
                 }
                 3 => {

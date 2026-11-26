@@ -1686,3 +1686,187 @@ async fn reprompt_roundtrip_and_empty_trash() {
     assert_eq!(core.item_get_all_stats().unwrap().trash_count, 0);
     assert!(core.item_get(&guarded.id).unwrap().unwrap().payload.reprompt);
 }
+
+#[test]
+fn passkey_create_and_assert_es256_webauthn_valid() {
+    use keysmith_core::passkey::{
+        assert_passkey_credential, create_passkey_credential, decode_b64u_or_b64, encode_b64u,
+        passkey_matches_credential_list, rp_id_matches_origin, PasskeyAssertParams,
+        PasskeyCreateParams, KEYSMITH_AAGUID,
+    };
+    use p256::ecdsa::{signature::Verifier as _, DerSignature, VerifyingKey};
+    use p256::pkcs8::DecodePublicKey;
+    use sha2::{Digest, Sha256};
+
+    assert!(rp_id_matches_origin("github.com", "https://github.com"));
+    assert!(rp_id_matches_origin("github.com", "https://gist.github.com"));
+    assert!(rp_id_matches_origin("localhost", "http://localhost:5173"));
+    assert!(!rp_id_matches_origin("github.com", "https://notgithub.com"));
+    assert!(!rp_id_matches_origin("github.com", "http://github.com"));
+
+    let create_out = create_passkey_credential(&PasskeyCreateParams {
+        origin: "https://app.example.com".to_string(),
+        rp_id: "example.com".to_string(),
+        rp_name: "Example".to_string(),
+        user_id_b64u: encode_b64u(b"user-42"),
+        user_name: "alice@example.com".to_string(),
+        user_display_name: "Alice".to_string(),
+        challenge_b64u: encode_b64u(b"create-challenge-123"),
+        pub_key_cred_params: vec![-7, -257],
+        discoverable: true,
+    })
+    .unwrap();
+
+    assert_eq!(create_out.credential.rp_id, "example.com");
+    assert_eq!(create_out.credential.algorithm, -7);
+    assert_eq!(create_out.credential.sign_count, 0);
+    assert!(create_out.credential.discoverable);
+
+    let client_json_b64 = create_out.response_json["response"]["clientDataJSON"]
+        .as_str()
+        .unwrap();
+    let client_json: serde_json::Value =
+        serde_json::from_slice(&decode_b64u_or_b64(client_json_b64).unwrap()).unwrap();
+    assert_eq!(client_json["type"], "webauthn.create");
+    assert_eq!(client_json["origin"], "https://app.example.com");
+    assert_eq!(client_json["crossOrigin"], false);
+
+    let auth_data = decode_b64u_or_b64(
+        create_out.response_json["response"]["authenticatorData"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(&auth_data[..32], Sha256::digest(b"example.com").as_slice());
+    assert_eq!(auth_data[32], 0x5d);
+    assert_eq!(&auth_data[37..53], &KEYSMITH_AAGUID);
+
+    let spki_der = decode_b64u_or_b64(&create_out.credential.public_key_spki).unwrap();
+    let verifying_key = VerifyingKey::from_public_key_der(&spki_der).unwrap();
+
+    let id_b64u = create_out.response_json["id"].as_str().unwrap().to_string();
+    assert!(passkey_matches_credential_list(
+        &create_out.credential,
+        std::slice::from_ref(&id_b64u)
+    ));
+
+    let (next_count, assert_json) = assert_passkey_credential(
+        &create_out.credential,
+        &PasskeyAssertParams {
+            origin: "https://app.example.com".to_string(),
+            rp_id: "example.com".to_string(),
+            challenge_b64u: encode_b64u(b"assert-challenge-999"),
+        },
+    )
+    .unwrap();
+    assert_eq!(next_count, 1);
+
+    let assert_auth_data = decode_b64u_or_b64(
+        assert_json["response"]["authenticatorData"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(assert_auth_data.len(), 37);
+    assert_eq!(assert_auth_data[32], 0x1d);
+    assert_eq!(
+        u32::from_be_bytes(assert_auth_data[33..37].try_into().unwrap()),
+        1
+    );
+
+    let assert_client_data = decode_b64u_or_b64(
+        assert_json["response"]["clientDataJSON"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let mut signed_msg = Vec::new();
+    signed_msg.extend_from_slice(&assert_auth_data);
+    signed_msg.extend_from_slice(&Sha256::digest(&assert_client_data));
+    let sig_bytes =
+        decode_b64u_or_b64(assert_json["response"]["signature"].as_str().unwrap()).unwrap();
+    let sig = DerSignature::from_bytes(&sig_bytes).unwrap();
+    verifying_key.verify(&signed_msg, &sig).unwrap();
+}
+
+#[test]
+fn bitwarden_login_fido2_credentials_roundtrip_and_assert() {
+    use keysmith_core::passkey::{
+        assert_passkey_credential, create_passkey_credential, encode_b64u, PasskeyAssertParams,
+        PasskeyCreateParams,
+    };
+
+    let usk = UserSymmetricKey::from_bytes(&[17u8; 64]).unwrap();
+    let base_cipher = CipherDto {
+        id: "cipher-login-fido2".to_string(),
+        organization_id: None,
+        folder_id: None,
+        collection_ids: vec![],
+        cipher_type: 1,
+        name: Some(usk.encrypt_string("Example Login").unwrap()),
+        notes: None,
+        favorite: false,
+        login: Some(CipherLoginDto {
+            username: Some(usk.encrypt_string("alice@example.com").unwrap()),
+            password: Some(usk.encrypt_string("s3cret").unwrap()),
+            totp: None,
+            uris: vec![CipherLoginUriDto {
+                uri: Some(usk.encrypt_string("https://example.com").unwrap()),
+                uri_match: Some(0),
+                extra: Default::default(),
+            }],
+            fido2_credentials: vec![],
+            extra: Default::default(),
+        }),
+        secure_note: None,
+        card: None,
+        identity: None,
+        fields: vec![],
+        password_history: vec![],
+        attachments: vec![],
+        reprompt: Some(0),
+        revision_date: None,
+        creation_date: None,
+        deleted_date: None,
+        extra: Default::default(),
+    };
+
+    let created = create_passkey_credential(&PasskeyCreateParams {
+        origin: "https://example.com".to_string(),
+        rp_id: "example.com".to_string(),
+        rp_name: "Example".to_string(),
+        user_id_b64u: encode_b64u(b"uid-1"),
+        user_name: "alice@example.com".to_string(),
+        user_display_name: "Alice".to_string(),
+        challenge_b64u: encode_b64u(b"chal-1"),
+        pub_key_cred_params: vec![-7],
+        discoverable: true,
+    })
+    .unwrap();
+
+    let item = cipher_to_item(&base_cipher, &usk).unwrap();
+    let mut draft = item.to_draft();
+    draft.passkeys.push(created.credential.clone());
+
+    let (encoded_cipher, _) =
+        draft_to_cipher(&item.id, &draft, Some(&base_cipher), Some(&item), &usk).unwrap();
+    assert_eq!(
+        encoded_cipher.login.as_ref().unwrap().fido2_credentials.len(),
+        1
+    );
+
+    let decoded_item = cipher_to_item(&encoded_cipher, &usk).unwrap();
+    assert_eq!(decoded_item.payload.passkeys.len(), 1);
+    let restored_pk = &decoded_item.payload.passkeys[0];
+    assert_eq!(restored_pk.credential_id, created.credential.credential_id);
+    let (count, _) = assert_passkey_credential(
+        restored_pk,
+        &PasskeyAssertParams {
+            origin: "https://example.com".to_string(),
+            rp_id: "example.com".to_string(),
+            challenge_b64u: encode_b64u(b"chal-2"),
+        },
+    )
+    .unwrap();
+    assert_eq!(count, 1);
+}

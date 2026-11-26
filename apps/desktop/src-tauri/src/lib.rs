@@ -510,7 +510,7 @@ pub fn run() {
 
             // SignalR real-time sync supervisor + Unix Domain Socket IPC server
             spawn_signalr_supervisor(handle.clone(), Arc::clone(&core), signalr_poke_rx);
-            spawn_ipc_socket_server(core);
+            spawn_ipc_socket_server(handle.clone(), Arc::clone(&core));
 
             // Auto-register Native Messaging Host manifests & sync bundled browser extension
             let nmh_handle = handle;

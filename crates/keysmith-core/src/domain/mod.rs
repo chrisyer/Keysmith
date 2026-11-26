@@ -334,6 +334,30 @@ pub struct ItemDetail {
     pub payload: ItemPayload,
 }
 
+impl ItemDetail {
+    /// Convert an existing item detail into an editable draft preserving all metadata.
+    pub fn to_draft(&self) -> ItemDraft {
+        ItemDraft {
+            id: Some(self.id.clone()),
+            vault_id: self.vault_id.clone(),
+            title: self.title.clone(),
+            favorite: self.favorite,
+            category: self.payload.category,
+            subtitle: self.payload.subtitle.clone(),
+            icon: self.payload.icon.clone(),
+            tags: self.payload.tags.clone(),
+            urls: self.payload.urls.clone(),
+            sections: self.payload.sections.clone(),
+            passkeys: self.payload.passkeys.clone(),
+            notes: self.payload.notes.clone(),
+            password_history: self.payload.password_history.clone(),
+            watchtower: self.payload.watchtower,
+            archived: self.payload.archived,
+            reprompt: self.payload.reprompt,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemDraft {
