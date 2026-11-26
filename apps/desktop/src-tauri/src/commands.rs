@@ -1272,6 +1272,45 @@ pub async fn system_open_url(app: AppHandle, url: String) -> Result<(), CoreErro
 }
 
 #[tauri::command]
+pub async fn browser_integration_status(
+    app: AppHandle,
+) -> Result<crate::nmh::BrowserIntegrationStatus, CoreError> {
+    let res_dir = app.path().resource_dir().ok();
+    run_blocking(move || crate::nmh::auto_install_nmh_for_detected_browsers(res_dir.as_deref(), &[])).await
+}
+
+#[tauri::command]
+pub async fn browser_integration_configure(
+    app: AppHandle,
+    extra_extension_id: Option<String>,
+) -> Result<crate::nmh::BrowserIntegrationStatus, CoreError> {
+    let res_dir = app.path().resource_dir().ok();
+    let extras: Vec<String> = extra_extension_id
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    run_blocking(move || {
+        crate::nmh::auto_install_nmh_for_detected_browsers(res_dir.as_deref(), &extras)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn browser_open_extension_folder(app: AppHandle) -> Result<String, CoreError> {
+    let res_dir = app.path().resource_dir().ok();
+    let dir = run_blocking(move || crate::nmh::sync_bundled_extension_dir(res_dir.as_deref()))
+        .await?
+        .ok_or_else(|| CoreError::NotFound("未找到浏览器扩展目录".to_string()))?;
+    let path_str = dir.to_string_lossy().to_string();
+    std::process::Command::new("open")
+        .arg(&path_str)
+        .spawn()
+        .map_err(|e| CoreError::Internal(format!("无法在 Finder 打开扩展目录: {e}")))?;
+    Ok(path_str)
+}
+
+#[tauri::command]
 pub async fn app_check_update_info() -> Result<AppUpdateInfo, CoreError> {
     let current = env!("CARGO_PKG_VERSION").to_string();
     Ok(AppUpdateInfo {

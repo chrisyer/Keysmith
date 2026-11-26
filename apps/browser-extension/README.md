@@ -2,29 +2,18 @@
 
 Keysmith 浏览器扩展提供网页账号密码一键自动填充、TOTP 验证码复制，以及 `navigator.credentials.create` / `navigator.credentials.get` WebAuthn Passkey 拦截与桌面端联动认证。
 
-## 安装步骤
+## 零命令行自动配置
 
-1. **构建并安装 `ks` CLI**：
-   确保 `ks` 已编译并在 `PATH` 中可用（例如 `~/.cargo/bin/ks` 或 `/usr/local/bin/ks`）。
+Keysmith 扩展已在 `manifest.json` 中内置固定扩展 ID（`ianpdijhflnmmhbmjdhiombdghhpfkmg`），且 **Keysmith 桌面端每次启动都会自动为 Chrome / Edge / Arc / Brave 等浏览器注册并更新 Native Messaging 主机配置**，无需手动复制 ID 或执行终端命令。
 
-2. **在浏览器中加载扩展**：
-   - 打开 `chrome://extensions`（Edge 为 `edge://extensions`，Arc 为 `arc://extensions`）
+### 首次使用步骤
+
+1. 打开 Keysmith 桌面应用并解锁（桌面端会自动配置 Native Messaging 桥接，并在 `~/Library/Application Support/dev.keysmith.desktop/browser-extension` 同步最新扩展文件）。
+2. 在浏览器中加载扩展（仅首次需要）：
+   - 打开 `chrome://extensions`（Edge 为 `edge://extensions`，Arc 为 `arc://extensions`，Brave 为 `brave://extensions`）
    - 开启右上角 **开发者模式（Developer mode）**
    - 点击 **加载已解压的扩展程序（Load unpacked）**
-   - 选择本目录：`apps/browser-extension`
-   - 复制扩展卡片上的 **ID**（32 位字母串）
+   - 在桌面端 **设置 → 浏览器扩展** 中点击「打开扩展目录」（或直接选择上述路径 / 仓库里的 `apps/browser-extension`）
+3. 加载后即可点击工具栏 Keysmith 图标自动匹配网站、填充密码与 Passkey，无需任何额外配置。
 
-3. **注册 Chrome Native Messaging 主机**：
-   在终端运行（将 `<extension-id>` 替换为上一步复制的 ID）：
-   ```bash
-   ks install-nmh <extension-id>
-   ```
-   如需同时安装到 Edge 或 Arc：
-   ```bash
-   ks install-nmh --chrome --edge --arc <extension-id>
-   ```
-
-4. **使用**：
-   - 启动并解锁 Keysmith 桌面应用
-   - 点击浏览器工具栏 Keysmith 图标即可查看当前网站匹配的登录项并一键自动填充
-   - 当网页发起 Passkey 注册或登录时，扩展会通过 `dev.keysmith.desktop` Native Messaging 桥接转发至 Keysmith；若桌面端锁定或未匹配，将自动无感回退至浏览器原生 WebAuthn。
+> 可选 CLI 手动命令：如只需单独使用命令行版 `ks`，也可直接运行 `ks install-nmh`（未传 ID 时将自动使用默认固定 ID）。

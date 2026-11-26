@@ -37,6 +37,10 @@
       "icons/128x128@2x.png",
       "icons/icon.icns"
     ],
+    "resources": {
+      "../../browser-extension/*": "browser-extension/",
+      "../../browser-extension/icons/*": "browser-extension/icons/"
+    },
     "macOS": {
       "minimumSystemVersion": "13.0"
     }

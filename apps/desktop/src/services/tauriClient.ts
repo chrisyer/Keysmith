@@ -8,6 +8,7 @@ import type {
   AppUpdateInfo,
   AttachmentDownloadResult,
   AuthStatus,
+  BrowserIntegrationStatus,
   ExportFormat,
   ExportResult,
   GeneratorHistoryEntry,
@@ -225,6 +226,9 @@ export interface KeysmithClient {
   windowToggleGenerator(): Promise<void>;
   windowCloseGenerator(): Promise<void>;
   systemOpenUrl(url: string): Promise<void>;
+  browserIntegrationStatus(): Promise<BrowserIntegrationStatus>;
+  browserIntegrationConfigure(extraExtensionId?: string): Promise<BrowserIntegrationStatus>;
+  browserOpenExtensionFolder(): Promise<string>;
   appCheckUpdateInfo(): Promise<AppUpdateInfo>;
   appSettingsGet(): Promise<AppSettings>;
   appSettingsUpdate(patch: AppSettingsPatch): Promise<AppSettings>;
@@ -645,6 +649,20 @@ class KeysmithTauriClient implements KeysmithClient {
 
   systemOpenUrl(url: string): Promise<void> {
     return invokeCore<void>('system_open_url', { url });
+  }
+
+  browserIntegrationStatus(): Promise<BrowserIntegrationStatus> {
+    return invokeCore<BrowserIntegrationStatus>('browser_integration_status');
+  }
+
+  browserIntegrationConfigure(extraExtensionId?: string): Promise<BrowserIntegrationStatus> {
+    return invokeCore<BrowserIntegrationStatus>('browser_integration_configure', {
+      extraExtensionId: extraExtensionId?.trim() || null,
+    });
+  }
+
+  browserOpenExtensionFolder(): Promise<string> {
+    return invokeCore<string>('browser_open_extension_folder');
   }
 
   appCheckUpdateInfo(): Promise<AppUpdateInfo> {
@@ -1826,6 +1844,56 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async systemOpenUrl(url: string): Promise<void> {
     window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  async browserIntegrationStatus(): Promise<BrowserIntegrationStatus> {
+    return {
+      extensionId: 'ianpdijhflnmmhbmjdhiombdghhpfkmg',
+      hostPath: '/Applications/Keysmith.app/Contents/MacOS/keysmith-desktop',
+      extensionDir: '~/Library/Application Support/dev.keysmith.desktop/browser-extension',
+      browsers: [
+        {
+          id: 'chrome',
+          label: 'Google Chrome',
+          detected: true,
+          configured: true,
+          manifestPath:
+            '~/Library/Application Support/Google/Chrome/NativeMessagingHosts/dev.keysmith.desktop.json',
+        },
+        {
+          id: 'edge',
+          label: 'Microsoft Edge',
+          detected: false,
+          configured: false,
+          manifestPath:
+            '~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/dev.keysmith.desktop.json',
+        },
+        {
+          id: 'arc',
+          label: 'Arc',
+          detected: false,
+          configured: false,
+          manifestPath:
+            '~/Library/Application Support/Arc/User Data/NativeMessagingHosts/dev.keysmith.desktop.json',
+        },
+        {
+          id: 'brave',
+          label: 'Brave',
+          detected: false,
+          configured: false,
+          manifestPath:
+            '~/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/dev.keysmith.desktop.json',
+        },
+      ],
+    };
+  }
+
+  async browserIntegrationConfigure(_extraExtensionId?: string): Promise<BrowserIntegrationStatus> {
+    return this.browserIntegrationStatus();
+  }
+
+  async browserOpenExtensionFolder(): Promise<string> {
+    return '~/Library/Application Support/dev.keysmith.desktop/browser-extension';
   }
 
   async appCheckUpdateInfo(): Promise<AppUpdateInfo> {

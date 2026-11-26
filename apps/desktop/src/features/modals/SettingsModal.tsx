@@ -2,7 +2,10 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Check,
+  Copy,
   Fingerprint,
+  FolderOpen,
+  Globe,
   Keyboard,
   LogOut,
   Monitor,
@@ -35,6 +38,7 @@ import type {
   AccountPasskey,
   AccountSummary,
   AppUpdateInfo,
+  BrowserIntegrationStatus,
   ExportFormat,
   ImportFormat,
   ImportSummary,
@@ -98,8 +102,12 @@ export function SettingsModal() {
   const refreshAll = useVaultStore((s) => s.refreshAll);
 
   const [tab, setTab] = useState<
-    'appearance' | 'security' | 'passkeys' | 'import_export' | 'sync' | 'shortcuts'
+    'appearance' | 'security' | 'passkeys' | 'browser' | 'import_export' | 'sync' | 'shortcuts'
   >('appearance');
+  const [browserStatus, setBrowserStatus] = useState<BrowserIntegrationStatus | null>(null);
+  const [browserBusy, setBrowserBusy] = useState(false);
+  const [extraExtId, setExtraExtId] = useState('');
+  const [copiedExtId, setCopiedExtId] = useState(false);
   const [passkeyRpId, setPasskeyRpId] = useState('');
   const [passkeyUserId, setPasskeyUserId] = useState('');
   const [accountPasskeys, setAccountPasskeys] = useState<AccountPasskey[]>([]);
@@ -151,6 +159,22 @@ export function SettingsModal() {
       })
       .catch(() => {
         if (active) setAccountPasskeys([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [open, tab]);
+
+  useEffect(() => {
+    if (!open || tab !== 'browser') return;
+    let active = true;
+    void tauriClient
+      .browserIntegrationStatus()
+      .then((res) => {
+        if (active) setBrowserStatus(res);
+      })
+      .catch(() => {
+        if (active) setBrowserStatus(null);
       });
     return () => {
       active = false;
@@ -403,6 +427,7 @@ export function SettingsModal() {
                 { id: 'appearance', label: dict.settings.tabs.appearance, icon: Palette },
                 { id: 'security', label: dict.settings.tabs.security, icon: Shield },
                 { id: 'passkeys', label: dict.settings.tabs.passkeys, icon: Fingerprint },
+                { id: 'browser', label: dict.settings.tabs.browser, icon: Globe },
                 { id: 'import_export', label: dict.settings.tabs.import_export, icon: ArrowDownToLine },
                 { id: 'sync', label: dict.settings.tabs.sync, icon: RefreshCw },
                 { id: 'shortcuts', label: dict.settings.tabs.shortcuts, icon: Keyboard },
@@ -769,6 +794,203 @@ export function SettingsModal() {
                   >
                     {dict.common.save}
                   </button>
+                </form>
+              </div>
+            )}
+
+            {tab === 'browser' && (
+              <div className="flex flex-col gap-4 text-xs">
+                <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                        {dict.settings.browserSection.title}
+                      </h2>
+                      <p className="text-[11px] text-[var(--text-secondary)] mt-1 leading-relaxed">
+                        {dict.settings.browserSection.desc}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await tauriClient.browserOpenExtensionFolder();
+                          showToast({
+                            label: dict.settings.tabs.browser,
+                            text: dict.settings.browserSection.openedFolderToast,
+                            kind: 'info',
+                          });
+                        } catch (err) {
+                          showToast({
+                            label: dict.settings.tabs.browser,
+                            text: err instanceof Error ? err.message : String(err),
+                            kind: 'warning',
+                          });
+                        }
+                      }}
+                      className="min-h-[34px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white text-xs font-medium cursor-pointer"
+                    >
+                      <FolderOpen size={13} />
+                      {dict.settings.browserSection.openFolderBtn}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={browserBusy}
+                      onClick={async () => {
+                        setBrowserBusy(true);
+                        try {
+                          const res = await tauriClient.browserIntegrationConfigure(extraExtId);
+                          setBrowserStatus(res);
+                          showToast({
+                            label: dict.settings.tabs.browser,
+                            text: dict.settings.browserSection.configuredToast,
+                            kind: 'info',
+                          });
+                        } finally {
+                          setBrowserBusy(false);
+                        }
+                      }}
+                      className="min-h-[34px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+                    >
+                      <RefreshCw size={12} className={browserBusy ? 'animate-spin' : ''} />
+                      {dict.settings.browserSection.reconfigureBtn}
+                    </button>
+                  </div>
+                </div>
+
+                {browserStatus && (
+                  <>
+                    <div className="rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] divide-y divide-[var(--border-subtle)]">
+                      {browserStatus.browsers.map((b) => (
+                        <div key={b.id} className="px-3.5 py-2.5 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-medium text-[var(--text-primary)]">{b.label}</div>
+                            {b.detected && (
+                              <div className="text-[10.5px] text-[var(--text-muted)] font-mono-tabular truncate mt-0.5">
+                                {b.manifestPath}
+                              </div>
+                            )}
+                          </div>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium shrink-0 ${
+                              b.configured
+                                ? 'bg-[var(--status-success)]/12 text-[var(--status-success)]'
+                                : b.detected
+                                  ? 'bg-[var(--status-warning)]/12 text-[var(--status-warning)]'
+                                  : 'bg-[var(--bg-detail)] text-[var(--text-muted)] border border-[var(--border-subtle)]'
+                            }`}
+                          >
+                            {b.configured
+                              ? dict.settings.browserSection.configuredBadge
+                              : b.detected
+                                ? dict.settings.browserSection.detectedUnconfiguredBadge
+                                : dict.settings.browserSection.notDetectedBadge}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] text-[var(--text-secondary)]">
+                          {dict.settings.browserSection.extensionIdLabel}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <code className="font-mono-tabular text-[11px] px-2 py-0.5 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-primary)]">
+                            {browserStatus.extensionId}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void tauriClient.clipboardCopySecret(
+                                browserStatus.extensionId,
+                                dict.settings.browserSection.extensionIdLabel,
+                                false,
+                              );
+                              setCopiedExtId(true);
+                              setTimeout(() => setCopiedExtId(false), 1500);
+                            }}
+                            aria-label={dict.common.copy}
+                            className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer"
+                          >
+                            {copiedExtId ? (
+                              <Check size={12} className="text-[var(--status-success)]" />
+                            ) : (
+                              <Copy size={12} />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                      {browserStatus.extensionDir && (
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-[11px] text-[var(--text-secondary)] shrink-0">
+                            {dict.settings.browserSection.extensionDirLabel}
+                          </span>
+                          <span className="font-mono-tabular text-[10.5px] text-[var(--text-muted)] truncate">
+                            {browserStatus.extensionDir}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-1.5">
+                  <div className="font-semibold text-[var(--text-primary)]">
+                    {dict.settings.browserSection.stepsTitle}
+                  </div>
+                  <div className="text-[11px] text-[var(--text-secondary)]">
+                    {dict.settings.browserSection.step1}
+                  </div>
+                  <div className="text-[11px] text-[var(--text-secondary)]">
+                    {dict.settings.browserSection.step2}
+                  </div>
+                </div>
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setBrowserBusy(true);
+                    try {
+                      const res = await tauriClient.browserIntegrationConfigure(extraExtId);
+                      setBrowserStatus(res);
+                      showToast({
+                        label: dict.settings.tabs.browser,
+                        text: dict.settings.browserSection.configuredToast,
+                        kind: 'info',
+                      });
+                    } finally {
+                      setBrowserBusy(false);
+                    }
+                  }}
+                  className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-2"
+                >
+                  <label
+                    htmlFor="extra-browser-ext-id"
+                    className="text-[11px] font-medium text-[var(--text-secondary)]"
+                  >
+                    {dict.settings.browserSection.customIdTitle}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="extra-browser-ext-id"
+                      type="text"
+                      value={extraExtId}
+                      onChange={(e) => setExtraExtId(e.target.value)}
+                      placeholder={dict.settings.browserSection.customIdPlaceholder}
+                      className="ks-input flex-1 font-mono-tabular border-[var(--border-strong)]"
+                    />
+                    <button
+                      type="submit"
+                      disabled={browserBusy || !extraExtId.trim()}
+                      className="min-h-[34px] px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] disabled:opacity-45 border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer shrink-0"
+                    >
+                      {dict.settings.browserSection.applyExtraBtn}
+                    </button>
+                  </div>
                 </form>
               </div>
             )}

@@ -1,0 +1,510 @@
+use std::collections::BTreeSet;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+use crate::ipc_socket::{resolve_socket_path, APP_SUPPORT_DIR_NAME};
+
+pub const NMH_HOST_NAME: &str = APP_SUPPORT_DIR_NAME;
+pub const KEYSMITH_EXTENSION_ID: &str = "ianpdijhflnmmhbmjdhiombdghhpfkmg";
+const MAX_INCOMING_NMH_BYTES: usize = 16 * 1024 * 1024;
+const MAX_OUTGOING_NMH_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserInstallInfo {
+    pub id: String,
+    pub label: String,
+    pub detected: bool,
+    pub configured: bool,
+    pub manifest_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserIntegrationStatus {
+    pub extension_id: String,
+    pub host_path: String,
+    pub extension_dir: Option<String>,
+    pub browsers: Vec<BrowserInstallInfo>,
+}
+
+struct BrowserDef {
+    id: &'static str,
+    label: &'static str,
+    app_support_rel: &'static [&'static str],
+    extra_subpath: &'static [&'static str],
+}
+
+const MACOS_BROWSERS: &[BrowserDef] = &[
+    BrowserDef {
+        id: "chrome",
+        label: "Google Chrome",
+        app_support_rel: &["Google", "Chrome"],
+        extra_subpath: &[],
+    },
+    BrowserDef {
+        id: "edge",
+        label: "Microsoft Edge",
+        app_support_rel: &["Microsoft Edge"],
+        extra_subpath: &[],
+    },
+    BrowserDef {
+        id: "arc",
+        label: "Arc",
+        app_support_rel: &["Arc", "User Data"],
+        extra_subpath: &[],
+    },
+    BrowserDef {
+        id: "brave",
+        label: "Brave",
+        app_support_rel: &["BraveSoftware", "Brave-Browser"],
+        extra_subpath: &[],
+    },
+    BrowserDef {
+        id: "chromium",
+        label: "Chromium",
+        app_support_rel: &["Chromium"],
+        extra_subpath: &[],
+    },
+    BrowserDef {
+        id: "vivaldi",
+        label: "Vivaldi",
+        app_support_rel: &["Vivaldi"],
+        extra_subpath: &[],
+    },
+];
+
+impl BrowserDef {
+    fn base_dir(&self, home: &Path) -> PathBuf {
+        let mut p = home.join("Library").join("Application Support");
+        for seg in self.app_support_rel {
+            p.push(seg);
+        }
+        p
+    }
+
+    fn manifest_dir(&self, home: &Path) -> PathBuf {
+        let mut p = self.base_dir(home);
+        for seg in self.extra_subpath {
+            p.push(seg);
+        }
+        p.push("NativeMessagingHosts");
+        p
+    }
+}
+
+/// Checks CLI arguments and runs Chrome Native Messaging stdio bridge before
+/// initializing Tauri/AppKit when invoked by Chromium browsers.
+pub fn maybe_run_nmh_from_args() -> bool {
+    let Some(first_arg) = std::env::args().nth(1) else {
+        return false;
+    };
+    if first_arg.starts_with("chrome-extension://")
+        || first_arg.starts_with("moz-extension://")
+        || first_arg == "--nmh"
+        || first_arg == "nmh"
+    {
+        if let Err(err) = run_nmh_stdio() {
+            eprintln!("[keysmith-nmh] {err}");
+        }
+        return true;
+    }
+    false
+}
+
+pub fn read_nmh_message<R: Read>(reader: &mut R) -> Result<Option<Vec<u8>>, String> {
+    let mut len_buf = [0u8; 4];
+    match reader.read_exact(&mut len_buf) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(format!("Failed to read Native Messaging length prefix: {e}")),
+    }
+
+    let len = u32::from_ne_bytes(len_buf) as usize;
+    if len == 0 {
+        return Err("Native Messaging frame length cannot be 0".to_string());
+    }
+    if len > MAX_INCOMING_NMH_BYTES {
+        return Err(format!(
+            "Native Messaging frame exceeds maximum size: {len} bytes"
+        ));
+    }
+
+    let mut payload = vec![0u8; len];
+    reader
+        .read_exact(&mut payload)
+        .map_err(|e| format!("Failed to read Native Messaging payload: {e}"))?;
+    Ok(Some(payload))
+}
+
+pub fn write_nmh_message<W: Write>(writer: &mut W, payload: &[u8]) -> Result<(), String> {
+    if payload.len() > MAX_OUTGOING_NMH_BYTES {
+        return Err(format!(
+            "Outgoing Native Messaging payload exceeds 1 MiB limit ({} bytes)",
+            payload.len()
+        ));
+    }
+    let len_bytes = (payload.len() as u32).to_ne_bytes();
+    writer
+        .write_all(&len_bytes)
+        .map_err(|e| format!("Failed to write Native Messaging length prefix: {e}"))?;
+    writer
+        .write_all(payload)
+        .map_err(|e| format!("Failed to write Native Messaging payload: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Failed to flush Native Messaging stdout: {e}"))?;
+    Ok(())
+}
+
+fn forward_nmh_request(sock_path: &Path, raw_bytes: &[u8]) -> Vec<u8> {
+    let parsed: Value = match serde_json::from_slice(raw_bytes) {
+        Ok(v) => v,
+        Err(err) => {
+            return serde_json::to_vec(&json!({
+                "id": 0,
+                "ok": false,
+                "error": format!("Invalid JSON request: {err}"),
+            }))
+            .unwrap_or_default();
+        }
+    };
+    let req_id = parsed.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    let err_response = |msg: String| -> Vec<u8> {
+        serde_json::to_vec(&json!({
+            "id": req_id,
+            "ok": false,
+            "error": msg,
+        }))
+        .unwrap_or_default()
+    };
+
+    let mut line_bytes = match serde_json::to_vec(&parsed) {
+        Ok(b) => b,
+        Err(err) => return err_response(format!("Failed to encode request: {err}")),
+    };
+    line_bytes.push(b'\n');
+
+    let mut stream = match UnixStream::connect(sock_path) {
+        Ok(s) => s,
+        Err(_) => {
+            return err_response(
+                "Keysmith desktop app is not running. Please open Keysmith first.".to_string(),
+            );
+        }
+    };
+
+    if let Err(err) = stream.write_all(&line_bytes).and_then(|_| stream.flush()) {
+        return err_response(format!("Failed to communicate with Keysmith desktop: {err}"));
+    }
+
+    let mut reader = BufReader::new(stream);
+    let mut reply_line = String::new();
+    match reader.read_line(&mut reply_line) {
+        Ok(0) => err_response("Keysmith desktop closed IPC connection".to_string()),
+        Ok(_) => reply_line.trim_end().as_bytes().to_vec(),
+        Err(err) => err_response(format!("Failed to read response from Keysmith desktop: {err}")),
+    }
+}
+
+pub fn run_nmh_stdio() -> Result<(), String> {
+    let sock_path = resolve_socket_path()
+        .ok_or_else(|| "HOME is not set; cannot locate keysmith.sock".to_string())?;
+
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    let mut in_lock = stdin.lock();
+    let mut out_lock = stdout.lock();
+
+    while let Some(raw_bytes) = read_nmh_message(&mut in_lock)? {
+        let reply = forward_nmh_request(&sock_path, &raw_bytes);
+        write_nmh_message(&mut out_lock, &reply)?;
+    }
+
+    Ok(())
+}
+
+fn is_valid_extension_id(id: &str) -> bool {
+    let trimmed = id.trim();
+    !trimmed.is_empty()
+        && trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn collect_origins(existing_path: &Path, extra_extension_ids: &[String]) -> Vec<String> {
+    let mut origins = BTreeSet::new();
+    origins.insert(format!("chrome-extension://{KEYSMITH_EXTENSION_ID}/"));
+
+    for id in extra_extension_ids {
+        let clean = id.trim();
+        if is_valid_extension_id(clean) {
+            origins.insert(format!("chrome-extension://{clean}/"));
+        }
+    }
+
+    if let Ok(bytes) = std::fs::read(existing_path) {
+        if let Ok(json_val) = serde_json::from_slice::<Value>(&bytes) {
+            if let Some(arr) = json_val.get("allowed_origins").and_then(|v| v.as_array()) {
+                for entry in arr {
+                    if let Some(s) = entry.as_str() {
+                        if s.starts_with("chrome-extension://") && s.ends_with('/') {
+                            origins.insert(s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    origins.into_iter().collect()
+}
+
+pub fn resolve_extension_install_dir(home: &Path) -> PathBuf {
+    home.join("Library")
+        .join("Application Support")
+        .join(APP_SUPPORT_DIR_NAME)
+        .join("browser-extension")
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst)
+        .map_err(|e| format!("Failed to create {}: {e}", dst.display()))?;
+    let entries = std::fs::read_dir(src)
+        .map_err(|e| format!("Failed to read {}: {e}", src.display()))?;
+
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str.starts_with('.') {
+            continue;
+        }
+        let src_path = entry.path();
+        let dst_path = dst.join(&name);
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path).map_err(|e| {
+                format!(
+                    "Failed to copy {} to {}: {e}",
+                    src_path.display(),
+                    dst_path.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn locate_source_extension_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
+    if let Some(res) = resource_dir {
+        let bundled = res.join("browser-extension");
+        if bundled.join("manifest.json").is_file() {
+            return Some(bundled);
+        }
+    }
+    let dev_fallback = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("browser-extension");
+    if dev_fallback.join("manifest.json").is_file() {
+        return Some(dev_fallback);
+    }
+    None
+}
+
+/// Copies the bundled `browser-extension` directory to a stable non-bundle path under
+/// Application Support so Chromium's "Load unpacked" picker can always select it cleanly.
+pub fn sync_bundled_extension_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let dst = resolve_extension_install_dir(&home);
+    if let Some(src) = locate_source_extension_dir(resource_dir) {
+        if copy_dir_recursive(&src, &dst).is_ok() {
+            return Some(dst);
+        }
+    }
+    if dst.join("manifest.json").is_file() {
+        return Some(dst);
+    }
+    locate_source_extension_dir(resource_dir)
+}
+
+pub fn auto_install_nmh_in_home(
+    home: &Path,
+    host_path: &Path,
+    extension_dir: Option<&Path>,
+    extra_extension_ids: &[String],
+) -> BrowserIntegrationStatus {
+    let host_str = host_path.to_string_lossy().to_string();
+    let mut browsers = Vec::with_capacity(MACOS_BROWSERS.len());
+
+    for def in MACOS_BROWSERS {
+        let base = def.base_dir(home);
+        let detected = base.is_dir();
+        let manifest_path = def.manifest_dir(home).join(format!("{NMH_HOST_NAME}.json"));
+
+        let configured = if detected {
+            let origins = collect_origins(&manifest_path, extra_extension_ids);
+            let manifest = json!({
+                "name": NMH_HOST_NAME,
+                "description": "Keysmith Desktop Native Messaging Host",
+                "path": host_str,
+                "type": "stdio",
+                "allowed_origins": origins,
+            });
+            match manifest_path
+                .parent()
+                .ok_or_else(|| "Invalid manifest dir".to_string())
+                .and_then(|dir| {
+                    std::fs::create_dir_all(dir)
+                        .map_err(|e| format!("Failed to create {}: {e}", dir.display()))
+                })
+                .and_then(|_| {
+                    serde_json::to_vec_pretty(&manifest)
+                        .map_err(|e| format!("Failed to serialize NMH JSON: {e}"))
+                })
+                .and_then(|bytes| {
+                    std::fs::write(&manifest_path, bytes)
+                        .map_err(|e| format!("Failed to write {}: {e}", manifest_path.display()))
+                }) {
+                Ok(()) => true,
+                Err(err) => {
+                    eprintln!("[keysmith-nmh] failed for {}: {err}", def.label);
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        browsers.push(BrowserInstallInfo {
+            id: def.id.to_string(),
+            label: def.label.to_string(),
+            detected,
+            configured,
+            manifest_path: manifest_path.to_string_lossy().to_string(),
+        });
+    }
+
+    BrowserIntegrationStatus {
+        extension_id: KEYSMITH_EXTENSION_ID.to_string(),
+        host_path: host_str,
+        extension_dir: extension_dir.map(|p| p.to_string_lossy().to_string()),
+        browsers,
+    }
+}
+
+pub fn auto_install_nmh_for_detected_browsers(
+    resource_dir: Option<&Path>,
+    extra_extension_ids: &[String],
+) -> BrowserIntegrationStatus {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    let host_path = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .unwrap_or_else(|_| PathBuf::from("keysmith-desktop"));
+    let ext_dir = sync_bundled_extension_dir(resource_dir);
+    auto_install_nmh_in_home(&home, &host_path, ext_dir.as_deref(), extra_extension_ids)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+    use sha2::{Digest, Sha256};
+    use std::io::Cursor;
+
+    fn compute_chrome_ext_id_from_b64_key(b64_key: &str) -> String {
+        let der = B64.decode(b64_key).unwrap();
+        let digest = Sha256::digest(&der);
+        let mut out = String::with_capacity(32);
+        for &b in &digest[..16] {
+            out.push((b'a' + (b >> 4)) as char);
+            out.push((b'a' + (b & 0x0f)) as char);
+        }
+        out
+    }
+
+    #[test]
+    fn manifest_key_matches_fixed_extension_id() {
+        let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("browser-extension")
+            .join("manifest.json");
+        let parsed: Value =
+            serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+        let b64_key = parsed["key"].as_str().expect("manifest.json must have key");
+        assert_eq!(compute_chrome_ext_id_from_b64_key(b64_key), KEYSMITH_EXTENSION_ID);
+    }
+
+    #[test]
+    fn auto_install_writes_only_detected_browsers_and_preserves_custom_origins() {
+        let temp_home = std::env::temp_dir().join(format!("ks_desktop_nmh_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_home);
+
+        // Simulate Chrome & Arc installed on this Mac, Edge/Brave not installed
+        let chrome_dir = temp_home.join("Library/Application Support/Google/Chrome");
+        let chrome_nmh = chrome_dir.join("NativeMessagingHosts");
+        let arc_dir = temp_home.join("Library/Application Support/Arc/User Data");
+        std::fs::create_dir_all(&chrome_nmh).unwrap();
+        std::fs::create_dir_all(&arc_dir).unwrap();
+
+        // Pre-existing custom extension origin in Chrome manifest
+        let custom_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        std::fs::write(
+            chrome_nmh.join(format!("{NMH_HOST_NAME}.json")),
+            serde_json::to_vec_pretty(&json!({
+                "name": NMH_HOST_NAME,
+                "path": "/old/path/ks",
+                "type": "stdio",
+                "allowed_origins": [format!("chrome-extension://{custom_id}/")]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let host_bin = PathBuf::from("/Applications/Keysmith.app/Contents/MacOS/keysmith-desktop");
+        let ext_dir = temp_home.join("Library/Application Support/dev.keysmith.desktop/browser-extension");
+        let status = auto_install_nmh_in_home(&temp_home, &host_bin, Some(&ext_dir), &[]);
+
+        assert_eq!(status.extension_id, KEYSMITH_EXTENSION_ID);
+        let chrome_info = status.browsers.iter().find(|b| b.id == "chrome").unwrap();
+        assert!(chrome_info.detected && chrome_info.configured);
+        let arc_info = status.browsers.iter().find(|b| b.id == "arc").unwrap();
+        assert!(arc_info.detected && arc_info.configured);
+        let edge_info = status.browsers.iter().find(|b| b.id == "edge").unwrap();
+        assert!(!edge_info.detected && !edge_info.configured);
+
+        let written_chrome: Value = serde_json::from_slice(
+            &std::fs::read(&chrome_info.manifest_path).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(written_chrome["path"], host_bin.to_string_lossy().as_ref());
+        let origins = written_chrome["allowed_origins"].as_array().unwrap();
+        assert!(origins
+            .iter()
+            .any(|v| v.as_str() == Some(&format!("chrome-extension://{KEYSMITH_EXTENSION_ID}/"))));
+        assert!(origins
+            .iter()
+            .any(|v| v.as_str() == Some(&format!("chrome-extension://{custom_id}/"))));
+
+        let _ = std::fs::remove_dir_all(&temp_home);
+    }
+
+    #[test]
+    fn nmh_framing_roundtrip() {
+        let msg = br#"{"id":1,"method":"status","params":{}}"#;
+        let mut buf = Vec::new();
+        write_nmh_message(&mut buf, msg).unwrap();
+        let mut cursor = Cursor::new(buf);
+        assert_eq!(read_nmh_message(&mut cursor).unwrap().unwrap(), msg);
+        assert!(read_nmh_message(&mut cursor).unwrap().is_none());
+    }
+}

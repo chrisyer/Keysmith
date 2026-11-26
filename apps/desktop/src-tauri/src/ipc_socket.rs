@@ -13,7 +13,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use url::Url;
 
-const APP_SUPPORT_DIR_NAME: &str = "dev.keysmith.desktop";
+pub const APP_SUPPORT_DIR_NAME: &str = "dev.keysmith.desktop";
 const SOCKET_FILE_NAME: &str = "keysmith.sock";
 
 #[derive(Debug, Deserialize)]

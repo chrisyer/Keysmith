@@ -7,6 +7,7 @@ use serde_json::json;
 use crate::socket_client::{RpcRequest, RpcResponse, SocketClient, APP_SUPPORT_DIR_NAME};
 
 pub const NMH_HOST_NAME: &str = APP_SUPPORT_DIR_NAME;
+pub const DEFAULT_EXTENSION_ID: &str = "ianpdijhflnmmhbmjdhiombdghhpfkmg";
 const MAX_INCOMING_NMH_BYTES: usize = 16 * 1024 * 1024;
 const MAX_OUTGOING_NMH_BYTES: usize = 1024 * 1024;
 
@@ -107,6 +108,7 @@ pub enum BrowserTarget {
     Chrome,
     Edge,
     Arc,
+    Brave,
 }
 
 impl BrowserTarget {
@@ -115,6 +117,7 @@ impl BrowserTarget {
             Self::Chrome => "Google Chrome",
             Self::Edge => "Microsoft Edge",
             Self::Arc => "Arc",
+            Self::Brave => "Brave",
         }
     }
 
@@ -131,6 +134,10 @@ impl BrowserTarget {
             Self::Arc => app_support
                 .join("Arc")
                 .join("User Data")
+                .join("NativeMessagingHosts"),
+            Self::Brave => app_support
+                .join("BraveSoftware")
+                .join("Brave-Browser")
                 .join("NativeMessagingHosts"),
         }
     }

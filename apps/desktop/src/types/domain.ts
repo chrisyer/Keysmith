@@ -491,3 +491,18 @@ export interface SendUpdateInput {
   disabled?: boolean;
   hideEmail?: boolean;
 }
+
+export interface BrowserInstallInfo {
+  id: string;
+  label: string;
+  detected: boolean;
+  configured: boolean;
+  manifestPath: string;
+}
+
+export interface BrowserIntegrationStatus {
+  extensionId: string;
+  hostPath: string;
+  extensionDir?: string | null;
+  browsers: BrowserInstallInfo[];
+}

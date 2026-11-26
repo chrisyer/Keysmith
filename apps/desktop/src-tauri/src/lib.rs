@@ -2,6 +2,7 @@ pub mod commands;
 pub mod events;
 pub mod ipc_socket;
 pub mod macos;
+pub mod nmh;
 
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
@@ -508,8 +509,18 @@ pub fn run() {
             });
 
             // SignalR real-time sync supervisor + Unix Domain Socket IPC server
-            spawn_signalr_supervisor(handle, Arc::clone(&core), signalr_poke_rx);
+            spawn_signalr_supervisor(handle.clone(), Arc::clone(&core), signalr_poke_rx);
             spawn_ipc_socket_server(core);
+
+            // Auto-register Native Messaging Host manifests & sync bundled browser extension
+            let nmh_handle = handle;
+            tauri::async_runtime::spawn_blocking(move || {
+                let res_dir = nmh_handle.path().resource_dir().ok();
+                let _ = crate::nmh::auto_install_nmh_for_detected_browsers(
+                    res_dir.as_deref(),
+                    &[],
+                );
+            });
 
             Ok(())
         })
@@ -596,6 +607,9 @@ pub fn run() {
             commands::window_hide_quick_access,
             commands::window_focus_main_item,
             commands::system_open_url,
+            commands::browser_integration_status,
+            commands::browser_integration_configure,
+            commands::browser_open_extension_folder,
             commands::app_check_update_info,
             commands::app_settings_get,
             commands::app_settings_update,

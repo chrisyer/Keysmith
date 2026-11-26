@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use keysmith_cli::nmh::{install_nmh_manifests, run_nmh, BrowserTarget};
+use keysmith_cli::nmh::{install_nmh_manifests, run_nmh, BrowserTarget, DEFAULT_EXTENSION_ID};
 use keysmith_cli::socket_client::SocketClient;
 use keysmith_cli::ssh_agent::run_ssh_agent;
 
@@ -55,7 +55,7 @@ enum Commands {
     },
     /// Run Chrome Native Messaging Host stdio bridge
     Nmh,
-    /// Install Chrome/Edge/Arc Native Messaging Host manifest
+    /// Install Chrome/Edge/Arc/Brave Native Messaging Host manifest
     InstallNmh {
         #[arg(long)]
         chrome: bool,
@@ -63,7 +63,9 @@ enum Commands {
         edge: bool,
         #[arg(long)]
         arc: bool,
-        extension_id: String,
+        #[arg(long)]
+        brave: bool,
+        extension_id: Option<String>,
     },
 }
 
@@ -180,6 +182,7 @@ async fn main() -> Result<()> {
             chrome,
             edge,
             arc,
+            brave,
             extension_id,
         } => {
             let home = PathBuf::from(
@@ -198,7 +201,15 @@ async fn main() -> Result<()> {
             if arc {
                 targets.push(BrowserTarget::Arc);
             }
-            let written = install_nmh_manifests(&home, &exe, &extension_id, &targets)?;
+            if brave {
+                targets.push(BrowserTarget::Brave);
+            }
+            let target_ext_id = extension_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(DEFAULT_EXTENSION_ID);
+            let written = install_nmh_manifests(&home, &exe, target_ext_id, &targets)?;
             for path in written {
                 println!("Installed Native Messaging manifest: {}", path.display());
             }
