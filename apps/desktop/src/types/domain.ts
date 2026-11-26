@@ -401,6 +401,20 @@ export interface ExportResult {
   content: string;
 }
 
+export interface CollectionInfo {
+  id: string;
+  organizationId: string;
+  name: string;
+  readOnly: boolean;
+}
+
+export interface OrganizationInfo {
+  id: string;
+  name: string;
+  hasKey: boolean;
+  collections: CollectionInfo[];
+}
+
 export interface AppUpdateInfo {
   currentVersion: string;
   channel?: string;

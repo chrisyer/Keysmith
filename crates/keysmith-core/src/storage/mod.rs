@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::{AccountPasskey, DEFAULT_QUICK_ACCESS_SHORTCUT};
 use crate::error::CoreError;
-use crate::protocol::{CipherDto, CollectionDto, FolderDto, SendDto};
+use crate::protocol::{CipherDto, CollectionDto, FolderDto, OrganizationDto, SendDto};
 
 #[derive(Debug, Clone)]
 pub struct StoredAccount {
@@ -95,6 +95,15 @@ pub struct StoredVault {
     pub revision_date: String,
     pub dirty_op: Option<String>,
     pub is_organization: bool,
+    pub organization_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredOrganization {
+    pub id: String,
+    pub account_id: String,
+    pub name: String,
+    pub key_enc: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -328,7 +337,16 @@ impl Storage {
                 name_enc TEXT NOT NULL,
                 revision_date TEXT NOT NULL,
                 dirty_op TEXT,
-                is_organization INTEGER NOT NULL DEFAULT 0
+                is_organization INTEGER NOT NULL DEFAULT 0,
+                organization_id TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS organizations (
+                id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                key_enc TEXT,
+                PRIMARY KEY (id, account_id)
             );
 
             CREATE TABLE IF NOT EXISTS ciphers (
@@ -405,6 +423,7 @@ impl Storage {
             "ALTER TABLE accounts ADD COLUMN launch_at_login INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE accounts ADD COLUMN last_master_password_unlock_at TEXT",
             "ALTER TABLE vaults ADD COLUMN is_organization INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE vaults ADD COLUMN organization_id TEXT",
         ];
         for sql in account_alters {
             Self::exec_alter_ignore_dup(&conn, sql)?;
@@ -625,6 +644,11 @@ impl Storage {
             .map_err(|e| CoreError::Storage(e.to_string()))?;
             conn.execute("DELETE FROM sends WHERE account_id = ?1", params![account_id])
                 .map_err(|e| CoreError::Storage(e.to_string()))?;
+            conn.execute(
+                "DELETE FROM organizations WHERE account_id = ?1",
+                params![account_id],
+            )
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
         }
         conn.execute("DELETE FROM accounts WHERE id = ?1", params![account_id])
             .map_err(|e| CoreError::Storage(e.to_string()))?;
@@ -638,7 +662,7 @@ impl Storage {
             .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
         if clear_cache {
             conn.execute_batch(
-                "DELETE FROM ciphers; DELETE FROM vaults; DELETE FROM account_passkeys; DELETE FROM generator_history; DELETE FROM local_attachments; DELETE FROM sends; DELETE FROM accounts;",
+                "DELETE FROM ciphers; DELETE FROM vaults; DELETE FROM organizations; DELETE FROM account_passkeys; DELETE FROM generator_history; DELETE FROM local_attachments; DELETE FROM sends; DELETE FROM accounts;",
             )
             .map_err(|e| CoreError::Storage(format!("清空本地缓存失败: {e}")))?;
         } else {
@@ -671,13 +695,14 @@ impl Storage {
             let rev = f.revision_date.clone().unwrap_or_default();
             tx.execute(
                 r#"
-                INSERT INTO vaults (id, account_id, name_enc, revision_date, dirty_op, is_organization)
-                VALUES (?1, ?2, ?3, ?4, NULL, 0)
+                INSERT INTO vaults (id, account_id, name_enc, revision_date, dirty_op, is_organization, organization_id)
+                VALUES (?1, ?2, ?3, ?4, NULL, 0, NULL)
                 ON CONFLICT(id) DO UPDATE SET
                     name_enc = excluded.name_enc,
                     revision_date = excluded.revision_date,
                     dirty_op = NULL,
-                    is_organization = 0
+                    is_organization = 0,
+                    organization_id = NULL
                 WHERE vaults.dirty_op IS NULL
                 "#,
                 params![f.id, account_id, f.name, rev],
@@ -688,14 +713,15 @@ impl Storage {
         for c in collections {
             tx.execute(
                 r#"
-                INSERT INTO vaults (id, account_id, name_enc, revision_date, dirty_op, is_organization)
-                VALUES (?1, ?2, ?3, '', NULL, 1)
+                INSERT INTO vaults (id, account_id, name_enc, revision_date, dirty_op, is_organization, organization_id)
+                VALUES (?1, ?2, ?3, '', NULL, 1, ?4)
                 ON CONFLICT(id) DO UPDATE SET
                     name_enc = excluded.name_enc,
                     is_organization = 1,
+                    organization_id = excluded.organization_id,
                     dirty_op = NULL
                 "#,
-                params![c.id, account_id, c.name],
+                params![c.id, account_id, c.name, c.organization_id],
             )
             .map_err(|e| CoreError::Storage(format!("写入组织集合失败: {e}")))?;
         }
@@ -705,6 +731,77 @@ impl Storage {
         Ok(())
     }
 
+    pub fn replace_synced_organizations(
+        &self,
+        account_id: &str,
+        orgs: &[OrganizationDto],
+    ) -> Result<(), CoreError> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| CoreError::Storage(format!("开启事务失败: {e}")))?;
+        tx.execute(
+            "DELETE FROM organizations WHERE account_id = ?1",
+            params![account_id],
+        )
+        .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+        for org in orgs {
+            tx.execute(
+                r#"
+                INSERT INTO organizations (id, account_id, name, key_enc)
+                VALUES (?1, ?2, ?3, ?4)
+                ON CONFLICT(id, account_id) DO UPDATE SET
+                    name = excluded.name,
+                    key_enc = excluded.key_enc
+                "#,
+                params![
+                    org.id,
+                    account_id,
+                    org.name.clone().unwrap_or_default(),
+                    org.key
+                ],
+            )
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
+        }
+
+        tx.commit()
+            .map_err(|e| CoreError::Storage(format!("提交事务失败: {e}")))?;
+        Ok(())
+    }
+
+    pub fn list_organizations(
+        &self,
+        account_id: &str,
+    ) -> Result<Vec<StoredOrganization>, CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
+        let mut stmt = conn
+            .prepare("SELECT id, account_id, name, key_enc FROM organizations WHERE account_id = ?1")
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![account_id], |row| {
+                Ok(StoredOrganization {
+                    id: row.get(0)?,
+                    account_id: row.get(1)?,
+                    name: row.get(2)?,
+                    key_enc: row.get(3)?,
+                })
+            })
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| CoreError::Storage(e.to_string()))?);
+        }
+        Ok(out)
+    }
+
     pub fn upsert_vault(&self, v: &StoredVault) -> Result<(), CoreError> {
         let conn = self
             .conn
@@ -712,13 +809,14 @@ impl Storage {
             .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
         conn.execute(
             r#"
-            INSERT INTO vaults (id, account_id, name_enc, revision_date, dirty_op, is_organization)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO vaults (id, account_id, name_enc, revision_date, dirty_op, is_organization, organization_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             ON CONFLICT(id) DO UPDATE SET
                 name_enc = excluded.name_enc,
                 revision_date = excluded.revision_date,
                 dirty_op = excluded.dirty_op,
-                is_organization = excluded.is_organization
+                is_organization = excluded.is_organization,
+                organization_id = excluded.organization_id
             "#,
             params![
                 v.id,
@@ -726,7 +824,8 @@ impl Storage {
                 v.name_enc,
                 v.revision_date,
                 v.dirty_op,
-                if v.is_organization { 1 } else { 0 }
+                if v.is_organization { 1 } else { 0 },
+                v.organization_id
             ],
         )
         .map_err(|e| CoreError::Storage(format!("保存文件夹失败: {e}")))?;
@@ -750,7 +849,7 @@ impl Storage {
             .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, account_id, name_enc, revision_date, dirty_op, is_organization FROM vaults WHERE account_id = ?1",
+                "SELECT id, account_id, name_enc, revision_date, dirty_op, is_organization, organization_id FROM vaults WHERE account_id = ?1",
             )
             .map_err(|e| CoreError::Storage(format!("查询文件夹失败: {e}")))?;
         let rows = stmt
@@ -762,6 +861,7 @@ impl Storage {
                     revision_date: row.get(3)?,
                     dirty_op: row.get(4)?,
                     is_organization: row.get::<_, i64>(5)? != 0,
+                    organization_id: row.get(6)?,
                 })
             })
             .map_err(|e| CoreError::Storage(format!("读取文件夹行失败: {e}")))?;

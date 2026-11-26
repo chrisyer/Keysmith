@@ -1962,3 +1962,128 @@ fn passkey_normalization_credential_id_variants_and_cross_origin_assert() {
     .unwrap();
     assert_eq!(&auth_data[..32], Sha256::digest(b"paypal.com").as_slice());
 }
+
+#[tokio::test]
+async fn semver_compare_rsa_org_key_and_offline_revision_preservation() {
+    use keysmith_core::crypto::{
+        decrypt_org_symmetric_key, decrypt_rsa_oaep, encrypt_bytes, UserSymmetricKey,
+    };
+    use keysmith_core::protocol::is_newer_semver;
+    use rsa::pkcs8::EncodePrivateKey;
+    use rsa::{Oaep, RsaPrivateKey};
+    use sha1::Sha1;
+
+    // 1. Semver checker
+    assert!(is_newer_semver("0.1.3", "v0.1.4"));
+    assert!(is_newer_semver("0.1.3", "0.2.0"));
+    assert!(is_newer_semver("0.1.3", "1.0.0"));
+    assert!(!is_newer_semver("0.1.3", "v0.1.3"));
+    assert!(!is_newer_semver("0.1.3", "0.1.2"));
+
+    // 2. RSA-2048 OAEP-SHA1 org symmetric key decryption
+    let mut rng = rand::rngs::OsRng;
+    let rsa_priv = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+    let priv_der = rsa_priv.to_pkcs8_der().unwrap();
+    let user_usk = UserSymmetricKey::from_bytes(&[42u8; 64]).unwrap();
+    let encrypted_priv_key =
+        encrypt_bytes(priv_der.as_bytes(), user_usk.enc_key(), user_usk.mac_key()).unwrap();
+
+    let org_key_raw = [77u8; 64];
+    let org_cipher = rsa_priv
+        .to_public_key()
+        .encrypt(&mut rng, Oaep::new::<Sha1>(), &org_key_raw)
+        .unwrap();
+    let org_key_enc = format!("4.{}", B64.encode(&org_cipher));
+
+    let direct_decrypted = decrypt_rsa_oaep(&org_key_enc, priv_der.as_bytes()).unwrap();
+    assert_eq!(direct_decrypted.as_slice(), &org_key_raw);
+
+    let org_usk =
+        decrypt_org_symmetric_key(&org_key_enc, &encrypted_priv_key, &user_usk).unwrap();
+    let enc_secret = org_usk.encrypt_string("Org Shared Secret").unwrap();
+    assert_eq!(org_usk.decrypt_string(&enc_secret).unwrap().as_str(), "Org Shared Secret");
+
+    // 3. Offline-first revisionDate preservation + all-8-locale language persistence
+    let storage = Storage::open_in_memory().unwrap();
+    let kdf = keysmith_core::crypto::KdfConfig {
+        kdf: 0,
+        kdf_iterations: 1000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    };
+    let mk = derive_master_key("master-pw-123", "offline@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let protected = protect_user_symmetric_key(&usk, &smk).unwrap();
+    let acc = make_test_account(
+        "acc-offline-1",
+        "offline@example.com",
+        "https://vault.example.com",
+        &kdf,
+        protected,
+    );
+    storage.upsert_account(&acc).unwrap();
+
+    let synced_cipher = CipherDto {
+        id: "cipher-offline-1".to_string(),
+        organization_id: None,
+        folder_id: None,
+        collection_ids: vec![],
+        cipher_type: 1,
+        name: Some(usk.encrypt_string("Original Site").unwrap()),
+        notes: Some(usk.encrypt_string("v1").unwrap()),
+        favorite: false,
+        login: Some(CipherLoginDto {
+            username: Some(usk.encrypt_string("alice").unwrap()),
+            password: Some(usk.encrypt_string("old-pw").unwrap()),
+            totp: None,
+            uris: vec![],
+            fido2_credentials: vec![],
+            extra: Default::default(),
+        }),
+        secure_note: None,
+        card: None,
+        identity: None,
+        fields: vec![],
+        password_history: vec![],
+        attachments: vec![],
+        reprompt: Some(0),
+        revision_date: Some("2026-01-01T00:00:00Z".to_string()),
+        creation_date: Some("2026-01-01T00:00:00Z".to_string()),
+        deleted_date: None,
+        extra: Default::default(),
+    };
+    storage
+        .replace_synced_ciphers_clean(&acc.id, std::slice::from_ref(&synced_cipher))
+        .unwrap();
+
+    let core = AppCore::with_storage(
+        storage.clone(),
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    core.session_unlock_password("master-pw-123").await.unwrap();
+
+    let loaded = core.item_get("cipher-offline-1").unwrap().unwrap();
+    let mut update_draft = loaded.to_draft();
+    update_draft.notes = "v2-offline".to_string();
+    let updated = core.item_update(&loaded.id, update_draft).await.unwrap();
+    assert_eq!(updated.payload.notes, "v2-offline");
+
+    let stored_rows = storage.list_ciphers(&acc.id).unwrap();
+    let stored_row = stored_rows.iter().find(|r| r.id == "cipher-offline-1").unwrap();
+    assert_eq!(stored_row.dirty_op.as_deref(), Some("update"));
+    assert_eq!(stored_row.revision_date, "2026-01-01T00:00:00Z");
+
+    // Language setting supports all 8 locales
+    let updated_settings = core
+        .app_settings_update(keysmith_core::domain::AppSettingsPatch {
+            language: Some("ja".to_string()),
+            theme: None,
+            custom_shortcuts: None,
+            last_server_url: None,
+        })
+        .unwrap();
+    assert_eq!(updated_settings.language, "ja");
+}

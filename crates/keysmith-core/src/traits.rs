@@ -18,6 +18,13 @@ pub trait BiometricKeyStore: Send + Sync {
 
     /// Remove the stored unlock key for the given account.
     fn delete_unlock_key(&self, account_id: &str) -> Result<(), CoreError>;
+
+    /// Perform interactive biometric verification (without reading the stored unlock key) for reprompt protection.
+    fn verify_user(&self, _reason: &str) -> Result<(), CoreError> {
+        Err(CoreError::Biometric(
+            "Biometric authentication is not supported on this platform".to_string(),
+        ))
+    }
 }
 
 /// Platform abstraction for secure clipboard operations with concealed/transient marking.
@@ -43,7 +50,9 @@ impl BiometricKeyStore for NoopBiometricKeyStore {
     }
 
     fn save_unlock_key(&self, _account_id: &str, _key: &[u8]) -> Result<(), CoreError> {
-        Err(CoreError::Biometric("当前环境不支持生物识别钥匙串".to_string()))
+        Err(CoreError::Biometric(
+            "Biometric keychain is not supported in this environment".to_string(),
+        ))
     }
 
     fn load_unlock_key(
@@ -51,7 +60,9 @@ impl BiometricKeyStore for NoopBiometricKeyStore {
         _account_id: &str,
         _reason: &str,
     ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
-        Err(CoreError::Biometric("当前环境不支持生物识别钥匙串".to_string()))
+        Err(CoreError::Biometric(
+            "Biometric keychain is not supported in this environment".to_string(),
+        ))
     }
 
     fn delete_unlock_key(&self, _account_id: &str) -> Result<(), CoreError> {

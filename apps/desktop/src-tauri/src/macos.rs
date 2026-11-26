@@ -200,6 +200,10 @@ impl BiometricKeyStore for MacosBiometricKeyStore {
     fn delete_unlock_key(&self, account_id: &str) -> Result<(), CoreError> {
         macos_impl::keychain_delete(account_id)
     }
+
+    fn verify_user(&self, reason: &str) -> Result<(), CoreError> {
+        macos_impl::biometry_authenticate(reason)
+    }
 }
 
 pub fn clipboard_read_image_png_base64() -> Option<String> {
@@ -620,19 +624,29 @@ mod macos_impl {
 
 #[cfg(not(target_os = "macos"))]
 mod macos_impl {
+    use std::io::Cursor;
     use std::sync::Arc;
 
+    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
     use keysmith_core::error::CoreError;
     use sha2::{Digest, Sha256};
     use tauri::{AppHandle, Manager, WebviewWindow};
     use zeroize::Zeroizing;
 
-    pub fn pasteboard_write(text: &str, _is_sensitive: bool) -> Result<(), CoreError> {
-        let mut clipboard = arboard::Clipboard::new()
-            .map_err(|e| CoreError::Clipboard(format!("访问系统剪贴板失败: {e}")))?;
-        clipboard
-            .set_text(text.to_string())
-            .map_err(|e| CoreError::Clipboard(format!("写入剪贴板失败: {e}")))
+    pub fn pasteboard_write(text: &str, is_sensitive: bool) -> Result<(), CoreError> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::windows_native::pasteboard_write(text, is_sensitive);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = is_sensitive;
+            let mut clipboard = arboard::Clipboard::new()
+                .map_err(|e| CoreError::Clipboard(format!("Failed to access clipboard: {e}")))?;
+            clipboard
+                .set_text(text.to_string())
+                .map_err(|e| CoreError::Clipboard(format!("Failed to write clipboard: {e}")))
+        }
     }
 
     pub fn pasteboard_clear_if_matches(expected_digest: &[u8; 32]) -> Result<(), CoreError> {
@@ -657,7 +671,19 @@ mod macos_impl {
     }
 
     pub fn pasteboard_read_image_png_base64() -> Option<String> {
-        None
+        let mut clipboard = arboard::Clipboard::new().ok()?;
+        let img = clipboard.get_image().ok()?;
+        let rgba = image::RgbaImage::from_raw(
+            img.width as u32,
+            img.height as u32,
+            img.bytes.into_owned(),
+        )?;
+        let dyn_img = image::DynamicImage::ImageRgba8(rgba);
+        let mut png_bytes = Vec::new();
+        dyn_img
+            .write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+            .ok()?;
+        Some(B64.encode(png_bytes))
     }
 
     pub fn set_app_dock_icon(_png_bytes: &[u8]) {}
@@ -679,8 +705,12 @@ mod macos_impl {
     pub fn apply_window_vibrancy(_window: &WebviewWindow, _enabled: bool) {}
 
     pub fn register_sleep_and_screen_lock_observers(
-        _on_trigger: Arc<dyn Fn(&'static str) + Send + Sync>,
+        on_trigger: Arc<dyn Fn(&'static str) + Send + Sync>,
     ) {
+        #[cfg(target_os = "windows")]
+        crate::windows_native::register_sleep_and_screen_lock_observers(on_trigger);
+        #[cfg(not(target_os = "windows"))]
+        let _ = on_trigger;
     }
 
     pub fn set_launch_at_login(enabled: bool) -> Result<(), CoreError> {
@@ -691,16 +721,18 @@ mod macos_impl {
             const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
             if enabled {
                 let exe = std::env::current_exe().map_err(|e| {
-                    CoreError::Internal(format!("无法获取可执行文件路径: {e}"))
+                    CoreError::Internal(format!("Failed to resolve executable path: {e}"))
                 })?;
                 let quoted = format!("\"{}\"", exe.to_string_lossy());
                 let status = std::process::Command::new("reg")
                     .args(["add", RUN_KEY, "/v", "Keysmith", "/t", "REG_SZ", "/d", &quoted, "/f"])
                     .creation_flags(CREATE_NO_WINDOW)
                     .status()
-                    .map_err(|e| CoreError::Internal(format!("设置开机自启失败: {e}")))?;
+                    .map_err(|e| CoreError::Internal(format!("Failed to configure launch at login: {e}")))?;
                 if !status.success() {
-                    return Err(CoreError::Internal("写入 Windows 注册表开机启动项失败".to_string()));
+                    return Err(CoreError::Internal(
+                        "Failed to write Windows Registry Run entry".to_string(),
+                    ));
                 }
             } else {
                 let _ = std::process::Command::new("reg")
@@ -718,22 +750,67 @@ mod macos_impl {
     }
 
     pub fn biometry_is_available() -> bool {
-        false
+        #[cfg(target_os = "windows")]
+        {
+            return crate::windows_native::biometry_is_available();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            false
+        }
     }
 
-    pub fn biometry_authenticate(_reason: &str) -> Result<(), CoreError> {
-        Err(CoreError::Biometric("仅 macOS 支持 Touch ID".to_string()))
+    pub fn biometry_authenticate(reason: &str) -> Result<(), CoreError> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::windows_native::biometry_authenticate(reason);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = reason;
+            Err(CoreError::Biometric(
+                "Biometric authentication is not supported on this platform".to_string(),
+            ))
+        }
     }
 
-    pub fn keychain_save(_account_id: &str, _key: &[u8]) -> Result<(), CoreError> {
-        Err(CoreError::Biometric("仅 macOS 支持 Keychain".to_string()))
+    pub fn keychain_save(account_id: &str, key: &[u8]) -> Result<(), CoreError> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::windows_native::keychain_save(account_id, key);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (account_id, key);
+            Err(CoreError::Biometric(
+                "Biometric keychain is not supported on this platform".to_string(),
+            ))
+        }
     }
 
-    pub fn keychain_load(_account_id: &str) -> Result<Zeroizing<Vec<u8>>, CoreError> {
-        Err(CoreError::Biometric("仅 macOS 支持 Keychain".to_string()))
+    pub fn keychain_load(account_id: &str) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::windows_native::keychain_load(account_id);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = account_id;
+            Err(CoreError::Biometric(
+                "Biometric keychain is not supported on this platform".to_string(),
+            ))
+        }
     }
 
-    pub fn keychain_delete(_account_id: &str) -> Result<(), CoreError> {
-        Ok(())
+    pub fn keychain_delete(account_id: &str) -> Result<(), CoreError> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::windows_native::keychain_delete(account_id);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = account_id;
+            Ok(())
+        }
     }
 }

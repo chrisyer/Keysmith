@@ -229,7 +229,15 @@ async fn dispatch_rpc(
     match method {
         "status" => {
             let state = core.session_get_state();
-            serde_json::to_value(state).map_err(|e| e.to_string())
+            let mut val = serde_json::to_value(state).map_err(|e| e.to_string())?;
+            let language = core
+                .app_settings_get()
+                .map(|s| s.language)
+                .unwrap_or_else(|_| "en".to_string());
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert("language".to_string(), Value::String(language));
+            }
+            Ok(val)
         }
         "list" | "search" => {
             let query = params
@@ -246,8 +254,10 @@ async fn dispatch_rpc(
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(items).map_err(|e| e.to_string())
         }
-        "get" | "item_get" => rpc_get(core, params),
-        "totp" => rpc_totp(core, params),
+        "get" | "item_get" => rpc_get(core, params).await,
+        "totp" => rpc_totp(core, params).await,
+        "item_update_quick" => rpc_item_update_quick(app, core, params).await,
+        "item_trash" => rpc_item_trash(app, core, params).await,
         "generate" => rpc_generate(core, params),
         "clipboard_copy" => rpc_clipboard_copy(core, params),
         "url_match" => rpc_url_match(core, params),
@@ -444,7 +454,7 @@ fn extract_credentials(item: &ItemDetail) -> (Option<String>, Option<String>, Op
     (username, password, totp)
 }
 
-fn rpc_get(core: &AppCore, params: &Value) -> Result<Value, String> {
+async fn rpc_get(core: &AppCore, params: &Value) -> Result<Value, String> {
     let id_or_title = params
         .get("idOrTitle")
         .or_else(|| params.get("itemId"))
@@ -453,7 +463,17 @@ fn rpc_get(core: &AppCore, params: &Value) -> Result<Value, String> {
     let item = find_item_by_id_or_title(core, id_or_title)?;
 
     if item.payload.reprompt {
-        return Err("该条目已启用主密码重验证，请在 Keysmith 桌面端查看".to_string());
+        let verify_bio = params
+            .get("verifyBiometric")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if verify_bio {
+            core.session_verify_biometric_reprompt(None)
+                .await
+                .map_err(|e| e.to_string())?;
+        } else {
+            return Err("This item requires master password reprompt".to_string());
+        }
     }
 
     if let Some(field_name) = params
@@ -524,7 +544,7 @@ fn rpc_get(core: &AppCore, params: &Value) -> Result<Value, String> {
     Ok(val)
 }
 
-fn rpc_totp(core: &AppCore, params: &Value) -> Result<Value, String> {
+async fn rpc_totp(core: &AppCore, params: &Value) -> Result<Value, String> {
     let id_or_title = params
         .get("idOrTitle")
         .or_else(|| params.get("itemId"))
@@ -532,12 +552,149 @@ fn rpc_totp(core: &AppCore, params: &Value) -> Result<Value, String> {
         .ok_or_else(|| "缺少 idOrTitle 参数".to_string())?;
     let item = find_item_by_id_or_title(core, id_or_title)?;
     if item.payload.reprompt {
-        return Err("该条目已启用主密码重验证，请在 Keysmith 桌面端查看验证码".to_string());
+        let verify_bio = params
+            .get("verifyBiometric")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if verify_bio {
+            core.session_verify_biometric_reprompt(None)
+                .await
+                .map_err(|e| e.to_string())?;
+        } else {
+            return Err("This item requires master password reprompt".to_string());
+        }
     }
     let (_, _, totp_opt) = extract_credentials(&item);
     let secret = totp_opt.ok_or_else(|| format!("条目「{}」未配置 TOTP", item.title))?;
     let code = core.totp_compute(&secret).map_err(|e| e.to_string())?;
     serde_json::to_value(code).map_err(|e| e.to_string())
+}
+
+async fn rpc_item_update_quick(
+    app: &AppHandle,
+    core: &Arc<AppCore>,
+    params: &Value,
+) -> Result<Value, String> {
+    require_unlocked(core)?;
+    let item_id = params
+        .get("itemId")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "Missing itemId parameter".to_string())?;
+    let existing = core
+        .item_get(item_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Item not found: {item_id}"))?;
+
+    if existing.payload.reprompt {
+        let verify_bio = params
+            .get("verifyBiometric")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if verify_bio {
+            core.session_verify_biometric_reprompt(None)
+                .await
+                .map_err(|e| e.to_string())?;
+        } else {
+            return Err("This item requires master password reprompt".to_string());
+        }
+    }
+
+    let mut draft = existing.to_draft();
+    if let Some(title) = params
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        draft.title = title.to_string();
+    }
+    if let Some(username) = params.get("username").and_then(|v| v.as_str()) {
+        upsert_section_field(
+            &mut draft.sections,
+            FieldPurpose::Username,
+            "用户名",
+            FieldType::Text,
+            false,
+            username.trim(),
+        );
+    }
+    if let Some(password) = params.get("password").and_then(|v| v.as_str()) {
+        upsert_section_field(
+            &mut draft.sections,
+            FieldPurpose::Password,
+            "密码",
+            FieldType::Password,
+            true,
+            password,
+        );
+    }
+    if let Some(notes) = params.get("notes").and_then(|v| v.as_str()) {
+        draft.notes = notes.to_string();
+    }
+    if let Some(url_str) = params.get("url").and_then(|v| v.as_str()) {
+        let trimmed_url = url_str.trim();
+        if trimmed_url.is_empty() {
+            if !draft.urls.is_empty() {
+                draft.urls.remove(0);
+            }
+        } else if let Some(first) = draft.urls.first_mut() {
+            first.uri = trimmed_url.to_string();
+        } else {
+            draft.urls.push(ItemUrl {
+                id: format!("u-{}", new_uuid()),
+                uri: trimmed_url.to_string(),
+                label: None,
+                match_rule: UrlMatchRule::Domain,
+            });
+        }
+    }
+
+    let updated = core
+        .item_update(&existing.id, draft)
+        .await
+        .map_err(|e| e.to_string())?;
+    emit_data_changed(app, false, vec![updated.id.clone()], Vec::new());
+    let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+    Ok(json!({ "updated": true, "id": updated.id, "title": updated.title }))
+}
+
+async fn rpc_item_trash(
+    app: &AppHandle,
+    core: &Arc<AppCore>,
+    params: &Value,
+) -> Result<Value, String> {
+    require_unlocked(core)?;
+    let item_id = params
+        .get("itemId")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "Missing itemId parameter".to_string())?;
+    let existing = core
+        .item_get(item_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Item not found: {item_id}"))?;
+    if existing.payload.reprompt {
+        let verify_bio = params
+            .get("verifyBiometric")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if verify_bio {
+            core.session_verify_biometric_reprompt(None)
+                .await
+                .map_err(|e| e.to_string())?;
+        } else {
+            return Err("This item requires master password reprompt".to_string());
+        }
+    }
+    core.item_trash(&existing.id)
+        .await
+        .map_err(|e| e.to_string())?;
+    emit_data_changed(app, true, Vec::new(), vec![existing.id.clone()]);
+    let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+    Ok(json!({ "trashed": true, "id": existing.id }))
 }
 
 fn parse_url_host(raw: &str) -> Option<(Url, String)> {
@@ -1532,7 +1689,17 @@ async fn rpc_passkey_assert(
         .ok_or_else(|| format!("未找到条目: {item_id}"))?;
 
     if item.payload.reprompt {
-        return Err("该 Passkey 条目已启用主密码重验证，暂不支持网页自动签名".to_string());
+        let verify_bio = params
+            .get("verifyBiometric")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if verify_bio {
+            core.session_verify_biometric_reprompt(None)
+                .await
+                .map_err(|e| e.to_string())?;
+        } else {
+            return Err("This passkey requires master password reprompt".to_string());
+        }
     }
 
     let pk_idx = item

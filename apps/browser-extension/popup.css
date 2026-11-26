@@ -480,6 +480,35 @@ body {
   background: var(--bg-hover);
 }
 
+.btn-danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.textarea-input {
+  width: 100%;
+  min-height: 68px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+}
+
+.textarea-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
 .btn-sm {
   padding: 4px 8px;
   font-size: 11.5px;

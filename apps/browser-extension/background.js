@@ -256,9 +256,17 @@ function privacyClear(setting) {
   });
 }
 
+function getPrivacyServicesApi() {
+  if (typeof browser !== 'undefined' && browser.privacy?.services) {
+    return browser.privacy.services;
+  }
+  return chrome.privacy?.services || null;
+}
+
 async function applyBrowserPasswordManagerControl(enabled) {
-  const pwSetting = chrome.privacy?.services?.passwordSavingEnabled;
-  const cardSetting = chrome.privacy?.services?.autofillCreditCardEnabled;
+  const services = getPrivacyServicesApi();
+  const pwSetting = services?.passwordSavingEnabled;
+  const cardSetting = services?.autofillCreditCardEnabled;
   if (!pwSetting) return;
 
   if (enabled) {
@@ -279,7 +287,7 @@ async function getBrowserPasswordManagerControlStatus() {
   const hasManifestPrivacy = Boolean(
     chrome.runtime?.getManifest?.()?.permissions?.includes('privacy')
   );
-  const pwSetting = chrome.privacy?.services?.passwordSavingEnabled;
+  const pwSetting = getPrivacyServicesApi()?.passwordSavingEnabled;
   if (!pwSetting) {
     return {
       supported: false,
@@ -524,7 +532,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message?.type) {
       case 'STATUS': {
-        sendResponse(await rpcRaw('status', {}));
+        const st = await rpcRaw('status', {});
+        if (st.ok && st.result?.language && self.KeysmithI18n?.syncFromDesktop) {
+          await self.KeysmithI18n.syncFromDesktop(st.result.language);
+        }
+        sendResponse(st);
         break;
       }
       case 'URL_MATCH': {
@@ -534,6 +546,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'GET_PAGE_AUTOFILL_DATA': {
         const targetUrl = message.url || sender?.tab?.url || '';
         const st = await rpcRaw('status', {});
+        if (st.ok && st.result?.language && self.KeysmithI18n?.syncFromDesktop) {
+          await self.KeysmithI18n.syncFromDesktop(st.result.language);
+        }
         if (!st.connected) {
           sendResponse({ connected: false, status: 'Disconnected', matches: [] });
           break;
@@ -560,11 +575,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
       }
       case 'ITEM_GET': {
-        sendResponse(await rpcRaw('get', { idOrTitle: message.itemId }));
+        sendResponse(
+          await rpcRaw('get', {
+            idOrTitle: message.itemId,
+            verifyBiometric: Boolean(message.verifyBiometric)
+          })
+        );
         break;
       }
       case 'TOTP': {
-        sendResponse(await rpcRaw('totp', { idOrTitle: message.itemId }));
+        sendResponse(
+          await rpcRaw('totp', {
+            idOrTitle: message.itemId,
+            verifyBiometric: Boolean(message.verifyBiometric)
+          })
+        );
+        break;
+      }
+      case 'ITEM_UPDATE_QUICK': {
+        const res = await rpcRaw('item_update_quick', {
+          itemId: message.itemId || '',
+          title: message.title,
+          username: message.username,
+          password: message.password,
+          url: message.url,
+          notes: message.notes,
+          verifyBiometric: Boolean(message.verifyBiometric)
+        });
+        await refreshActiveTabBadge();
+        sendResponse(res);
+        break;
+      }
+      case 'ITEM_TRASH': {
+        const res = await rpcRaw('item_trash', {
+          itemId: message.itemId || '',
+          verifyBiometric: Boolean(message.verifyBiometric)
+        });
+        await refreshActiveTabBadge();
+        sendResponse(res);
         break;
       }
       case 'GENERATE': {
@@ -754,6 +802,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             origin: message.origin || '',
             itemId: message.itemId || '',
             credentialId: message.credentialId || '',
+            verifyBiometric: Boolean(message.verifyBiometric),
             options: message.options || {}
           })
         );

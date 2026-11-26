@@ -47,29 +47,12 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Validate browser extension syntax & fixed ID
-        run: |
-          for f in apps/browser-extension/*.js; do
-            node --check "$f"
-          done
-          node -e '
-            const fs = require("fs");
-            const crypto = require("crypto");
-            const manifest = JSON.parse(fs.readFileSync("apps/browser-extension/manifest.json", "utf8"));
-            const digest = crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest();
-            const map = "abcdefghijklmnop";
-            let id = "";
-            for (let i = 0; i < 16; i++) {
-              id += map[digest[i] >> 4] + map[digest[i] & 15];
-            }
-            if (id !== "ianpdijhflnmmhbmjdhiombdghhpfkmg") {
-              throw new Error("Extension ID mismatch: " + id);
-            }
-            console.log("Verified fixed Extension ID:", id);
-          '
+      - name: Validate browser extension syntax, manifests & WebAuthn hooks
+        run: node scripts/test-extension.mjs
 
-      - name: Typecheck & build desktop frontend
+      - name: Run frontend unit tests, typecheck & build
         run: |
+          npm --prefix apps/desktop run test
           npm --prefix apps/desktop run typecheck
           npm --prefix apps/desktop run build
 

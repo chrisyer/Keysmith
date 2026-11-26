@@ -5,13 +5,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use keysmith_core::crypto::KdfConfig;
 use keysmith_core::domain::{
     AccountPasskey, AccountPasskeyListResponse, AccountProfileResponse, AppSettings,
-    AppSettingsPatch, AttachmentDownloadResult, AuthStatus, ExportResult, GeneratorHistoryEntry,
-    GeneratorOptions, GeneratorResult, ImportSummary, ItemAttachment, ItemDetail, ItemDraft,
-    ItemFilter, ItemStats, ItemSummary, SendCreateFileInput, SendCreateTextInput, SendItem,
-    SendUpdateInput, ServerCheckResult, SessionPreferencesPatch, SessionState, SshKeyPair,
-    SyncStateKind, SyncStatus, TotpCode, Vault, WatchtowerFlagsPatch, WatchtowerReport,
+    AppSettingsPatch, AppUpdateInfo, AttachmentDownloadResult, AuthStatus, ExportResult,
+    GeneratorHistoryEntry, GeneratorOptions, GeneratorResult, ImportSummary, ItemAttachment,
+    ItemDetail, ItemDraft, ItemFilter, ItemStats, ItemSummary, OrganizationInfo,
+    SendCreateFileInput, SendCreateTextInput, SendItem, SendUpdateInput, ServerCheckResult,
+    SessionPreferencesPatch, SessionState, SshKeyPair, SyncStateKind, SyncStatus, TotpCode, Vault,
+    WatchtowerFlagsPatch, WatchtowerReport,
 };
 use keysmith_core::error::CoreError;
+use keysmith_core::protocol::check_github_latest_release;
 use keysmith_core::AppCore;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
@@ -59,21 +61,6 @@ pub struct AccountSummaryDto {
     pub is_active: bool,
     pub kdf_type: String,
     pub last_sync_at: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppUpdateInfo {
-    pub current_version: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_version: Option<String>,
-    pub update_available: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub release_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checked_at: Option<String>,
 }
 
 pub fn emit_session_state(app: &AppHandle, state: &SessionState, reason: &str) {
@@ -1327,16 +1314,42 @@ pub async fn browser_open_extension_folder(app: AppHandle) -> Result<String, Cor
 }
 
 #[tauri::command]
+pub async fn organization_list(state: State<'_, AppState>) -> Result<Vec<OrganizationInfo>, CoreError> {
+    let core = Arc::clone(&state.core);
+    run_blocking(move || core.organization_list()).await?
+}
+
+#[tauri::command]
+pub async fn item_share_to_organization(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    item_id: String,
+    organization_id: String,
+    collection_ids: Vec<String>,
+) -> Result<ItemDetail, CoreError> {
+    let updated = state
+        .core
+        .item_share_to_organization(&item_id, &organization_id, collection_ids)
+        .await?;
+    emit_data_changed(&app, true, vec![updated.id.clone()], Vec::new());
+    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    Ok(updated)
+}
+
+#[tauri::command]
 pub async fn app_check_update_info() -> Result<AppUpdateInfo, CoreError> {
     let current = env!("CARGO_PKG_VERSION").to_string();
-    Ok(AppUpdateInfo {
-        current_version: current.clone(),
-        latest_version: Some(current.clone()),
-        update_available: false,
-        release_url: None,
-        notes: Some(format!("v{current}")),
-        checked_at: None,
-    })
+    match check_github_latest_release("chrisyer/Keysmith", &current).await {
+        Ok(info) => Ok(info),
+        Err(err) => Ok(AppUpdateInfo {
+            current_version: current.clone(),
+            latest_version: Some(current),
+            update_available: false,
+            release_url: Some("https://github.com/chrisyer/Keysmith/releases/latest".to_string()),
+            notes: Some(err.to_string()),
+            checked_at: Some(keysmith_core::passkey::now_rfc3339()),
+        }),
+    }
 }
 
 #[tauri::command]

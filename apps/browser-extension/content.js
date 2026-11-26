@@ -149,6 +149,36 @@
       }
     }
 
+    if (
+      ['text', 'tel', 'number', 'password'].includes(type) &&
+      (hasAc('cc-number') ||
+        hasAc('cc-name') ||
+        hasAc('cc-exp') ||
+        hasAc('cc-exp-month') ||
+        hasAc('cc-exp-year') ||
+        hasAc('cc-csc') ||
+        /(card.?num|cc.?num|card.?holder|cc.?name|cvv|cvc|csc|expir|valid thru|卡号|持卡人|安全码)/.test(
+          hints
+        ))
+    ) {
+      return 'card';
+    }
+
+    if (
+      ['text', 'email', 'tel'].includes(type) &&
+      (hasAc('given-name') ||
+        hasAc('family-name') ||
+        hasAc('street-address') ||
+        hasAc('address-line1') ||
+        hasAc('postal-code') ||
+        hasAc('country') ||
+        /(first.?name|last.?name|street|address.?line|postal|zip.?code|收货地址|邮政编码)/.test(
+          hints
+        ))
+    ) {
+      return 'identity';
+    }
+
     return null;
   }
 
@@ -871,6 +901,119 @@
       return;
     }
 
+    if (kind === 'card' || kind === 'identity') {
+      if (!data.connected || data.status !== 'Unlocked') {
+        const unlockBtn = document.createElement('button');
+        unlockBtn.type = 'button';
+        unlockBtn.className = 'ks-dd-row';
+        const meta = document.createElement('div');
+        meta.className = 'ks-dd-meta';
+        const tEl = document.createElement('div');
+        tEl.className = 'ks-dd-title';
+        tEl.textContent = data.connected ? t('ddLockedTitle') : t('ddDisconnectedTitle');
+        const s = document.createElement('div');
+        s.className = 'ks-dd-sub';
+        s.textContent = data.connected ? t('ddClickOpenDesktop') : t('ddStartDesktopApp');
+        meta.append(tEl, s);
+        unlockBtn.appendChild(meta);
+        unlockBtn.addEventListener('mousedown', (e) => e.preventDefault());
+        unlockBtn.addEventListener('click', async () => {
+          await sendMsg({ type: 'OPEN_DESKTOP' });
+          closeDropdown();
+        });
+        dd.appendChild(unlockBtn);
+      } else {
+        const extraRes = await sendMsg({ type: 'CARDS_AND_IDENTITIES' });
+        const entries =
+          kind === 'card'
+            ? extraRes.result?.cards || []
+            : extraRes.result?.identities || [];
+        if (entries.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'ks-dd-empty';
+          empty.textContent = t('ddNoSavedCreds');
+          dd.appendChild(empty);
+        } else {
+          for (const entry of entries.slice(0, 6)) {
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'ks-dd-row';
+            const meta = document.createElement('div');
+            meta.className = 'ks-dd-meta';
+            const titleEl = document.createElement('div');
+            titleEl.className = 'ks-dd-title';
+            titleEl.textContent =
+              entry.title || (kind === 'card' ? t('creditCardDefault') : t('profileDefault'));
+            const subEl = document.createElement('div');
+            subEl.className = 'ks-dd-sub';
+            subEl.textContent =
+              kind === 'card'
+                ? entry.maskedNumber || entry.holder || ''
+                : entry.fullName || entry.email || entry.phone || '';
+            meta.append(titleEl, subEl);
+            row.appendChild(meta);
+            const pill = document.createElement('span');
+            pill.className = 'ks-pill';
+            pill.textContent = entry.reprompt
+              ? t('repromptBadge')
+              : kind === 'card'
+                ? t('cardLabel')
+                : t('identityLabel');
+            row.appendChild(pill);
+            row.addEventListener('mousedown', (e) => e.preventDefault());
+            row.addEventListener('click', async () => {
+              let fillPayload = entry;
+              if (entry.reprompt) {
+                const bio = await sendMsg({
+                  type: 'ITEM_GET',
+                  itemId: entry.id,
+                  verifyBiometric: true
+                });
+                if (!bio.ok || !bio.result) {
+                  showToast(t('ddItemRepromptDesktop', { title: entry.title || t('ddUnnamed') }), 'warn');
+                  await sendMsg({ type: 'OPEN_DESKTOP' });
+                  closeDropdown();
+                  return;
+                }
+                if (kind === 'card') {
+                  const fields = (bio.result.sections || []).flatMap((sec) => sec.fields || []);
+                  const findF = (p, hint) =>
+                    fields.find((f) => f.purpose === p || (f.label || '').toLowerCase().includes(hint))?.value || '';
+                  fillPayload = {
+                    ...entry,
+                    number: findF('card_number', 'number') || findF('card_number', '卡号') || entry.number,
+                    cvv: findF('card_cvv', 'cvv') || entry.cvv,
+                  };
+                }
+              }
+              const res =
+                kind === 'card'
+                  ? autofillCreditCard(fillPayload)
+                  : autofillIdentity(fillPayload);
+              showToast(
+                res.ok
+                  ? t(kind === 'card' ? 'ddCardFilled' : 'ddIdentFilled', {
+                      title: entry.title || t('ddUnnamed')
+                    })
+                  : res.error || t('ddCouldNotFill'),
+                res.ok ? 'success' : 'warn'
+              );
+              closeDropdown();
+            });
+            dd.appendChild(row);
+          }
+        }
+      }
+
+      dropdownContainer.appendChild(dd);
+      const ddHeight = dd.getBoundingClientRect().height || 200;
+      if (spaceBelow < ddHeight + 10 && rect.top > ddHeight + 12) {
+        dd.style.top = '';
+        dd.style.bottom = `${window.innerHeight - rect.top + 6}px`;
+      }
+      return;
+    }
+
     if (!data.connected || data.status !== 'Unlocked') {
       const unlockBtn = document.createElement('button');
       unlockBtn.type = 'button';
@@ -928,32 +1071,43 @@
 
         row.addEventListener('mousedown', (e) => e.preventDefault());
         row.addEventListener('click', async () => {
+          let fillItem = item;
+          let verifyBiometric = false;
           if (item.reprompt) {
-            showToast(t('ddItemRepromptDesktop', { title: item.title || t('ddUnnamed') }), 'warn');
-            await sendMsg({ type: 'OPEN_DESKTOP' });
-            closeDropdown();
-            return;
+            const gRes = await sendMsg({
+              type: 'ITEM_GET',
+              itemId: item.id,
+              verifyBiometric: true
+            });
+            if (!gRes.ok || !gRes.result) {
+              showToast(t('ddItemRepromptDesktop', { title: item.title || t('ddUnnamed') }), 'warn');
+              await sendMsg({ type: 'OPEN_DESKTOP' });
+              closeDropdown();
+              return;
+            }
+            fillItem = gRes.result;
+            verifyBiometric = true;
           }
-          let totp = item.totp || '';
-          if (!totp && item.hasTotp) {
-            const tRes = await sendMsg({ type: 'TOTP', itemId: item.id });
+          let totp = fillItem.totp || '';
+          if (!totp && (fillItem.hasTotp || item.hasTotp)) {
+            const tRes = await sendMsg({ type: 'TOTP', itemId: item.id, verifyBiometric });
             if (tRes.ok && tRes.result?.code) {
               totp = tRes.result.code;
             }
           }
-          const res = autofillLogin(item.username || '', item.password || '', totp, input);
+          const res = autofillLogin(fillItem.username || '', fillItem.password || '', totp, input);
           if (totp) {
             await sendMsg({
               type: 'COPY_SECRET',
               value: totp,
-              label: `${item.title} 2FA`
+              label: `${fillItem.title || item.title} 2FA`
             });
           }
           if (res.ok) {
             showToast(
               totp
                 ? t('ddFilledWithTotp', { code: totp })
-                : t('ddFilledItem', { title: item.title || t('ddUnnamed') }),
+                : t('ddFilledItem', { title: fillItem.title || item.title || t('ddUnnamed') }),
               'success'
             );
           } else {
@@ -996,7 +1150,8 @@
             const hasConditionalPk = Boolean(activeConditionalPasskey?.passkeys?.length);
             if (
               (cachedPageData.status === 'Unlocked' && cachedPageData.matches.length > 0) ||
-              hasConditionalPk
+              hasConditionalPk ||
+              (cachedPageData.status === 'Unlocked' && (kind === 'card' || kind === 'identity'))
             ) {
               openDropdownForInput(inp, kind);
             }
@@ -1056,6 +1211,49 @@
 
   const programmaticFills = new WeakMap();
   let lastSubmittedCapture = null;
+  let lastStepUser = null;
+
+  function rememberStepUsername(username) {
+    const clean = (username || '').trim();
+    if (!clean) return;
+    const entry = { origin: window.location.origin, username: clean, ts: Date.now() };
+    lastStepUser = entry;
+    try {
+      sessionStorage.setItem('__ks_step_user', JSON.stringify(entry));
+    } catch {
+      // Ignore storage access restriction
+    }
+  }
+
+  function recallStepUsername() {
+    const now = Date.now();
+    if (lastStepUser && lastStepUser.origin === window.location.origin && now - lastStepUser.ts < 120000) {
+      return lastStepUser.username;
+    }
+    try {
+      const raw = sessionStorage.getItem('__ks_step_user');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.origin === window.location.origin && now - (parsed.ts || 0) < 120000) {
+          return parsed.username || '';
+        }
+      }
+    } catch {
+      // Ignore storage parse/access errors
+    }
+    return '';
+  }
+
+  function pickCapturedPasswordInput(inputs) {
+    const pwInputs = inputs.filter(
+      (el) => el.type === 'password' && el.value.length > 0 && !wasJustAutofilled(el)
+    );
+    if (pwInputs.length === 0) return null;
+    if (pwInputs.length === 1) return pwInputs[0];
+    // Multi-password form (registration or change-password): prefer explicit new-password or last distinct password
+    const newPw = pwInputs.find((el) => classifyAuthField(el, inputs) === 'new-password');
+    return newPw || pwInputs[pwInputs.length - 1];
+  }
 
   function markProgrammaticFill(input) {
     programmaticFills.set(input, Date.now());
@@ -1070,16 +1268,19 @@
     if (!input || wasJustAutofilled(input)) return;
     const scope = input.form || input.closest('div, section, main') || document;
     const inputs = Array.from(scope.querySelectorAll('input')).filter(isVisible);
-    const pw = inputs.find((el) => el.type === 'password' && el.value.length > 0);
-    if (!pw || wasJustAutofilled(pw)) return;
     const userEl = inputs.find(
       (el) => classifyAuthField(el, inputs) === 'username' && el.value.trim().length > 0
     );
+    if (userEl && !wasJustAutofilled(userEl)) {
+      rememberStepUsername(userEl.value);
+    }
+    const pw = pickCapturedPasswordInput(inputs);
+    if (!pw) return;
     lastSubmittedCapture = {
       url: window.location.href,
       origin: window.location.origin,
       title: document.title || window.location.hostname,
-      username: userEl ? userEl.value.trim() : '',
+      username: (userEl ? userEl.value.trim() : '') || recallStepUsername(),
       password: pw.value
     };
   }
@@ -1184,16 +1385,16 @@
       targetNode?.closest?.('div, section, main') ||
       document;
     const inputs = Array.from(scope.querySelectorAll('input'));
-    const pw = inputs.find((el) => el.type === 'password' && el.value.length > 0);
-    if (pw && wasJustAutofilled(pw)) {
-      return;
-    }
     const userEl = inputs.find(
       (el) =>
         ['text', 'email', 'tel'].includes((el.type || 'text').toLowerCase()) &&
         classifyAuthField(el, inputs) === 'username' &&
         el.value.trim().length > 0
     );
+    if (userEl && !wasJustAutofilled(userEl)) {
+      rememberStepUsername(userEl.value);
+    }
+    const pw = pickCapturedPasswordInput(inputs);
 
     const creds =
       pw && pw.value
@@ -1201,7 +1402,7 @@
             url: window.location.href,
             origin: window.location.origin,
             title: document.title || window.location.hostname,
-            username: userEl ? userEl.value.trim() : '',
+            username: (userEl ? userEl.value.trim() : '') || recallStepUsername(),
             password: pw.value
           }
         : lastSubmittedCapture;
@@ -1263,15 +1464,12 @@
   async function assertConditionalPasskey(pk) {
     if (!activeConditionalPasskey) return false;
     const req = activeConditionalPasskey;
-    if (pk.reprompt) {
-      showToast(t('pkErrRepromptAssert'), 'warn');
-      return false;
-    }
     const res = await sendMsg({
       type: 'PASSKEY_ASSERT',
       origin: req.origin,
       itemId: pk.itemId,
       credentialId: pk.credentialId,
+      verifyBiometric: Boolean(pk.reprompt),
       options: req.options
     });
     if (res.ok && res.result?.handled && res.result?.credential) {
@@ -1705,10 +1903,6 @@
         btn.appendChild(pill);
 
         btn.addEventListener('click', async () => {
-          if (pk.reprompt) {
-            showToast(t('pkErrRepromptAssert'), 'warn');
-            return;
-          }
           btn.disabled = true;
           pill.textContent = t('pkPillSigning');
           const res = await sendMsg({
@@ -1716,6 +1910,7 @@
             origin,
             itemId: pk.itemId,
             credentialId: pk.credentialId,
+            verifyBiometric: Boolean(pk.reprompt),
             options
           });
           closeModal();

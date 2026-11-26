@@ -3,6 +3,8 @@ pub mod events;
 pub mod ipc_socket;
 pub mod macos;
 pub mod nmh;
+#[cfg(target_os = "windows")]
+pub mod windows_native;
 
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
@@ -768,6 +770,8 @@ pub fn run() {
             commands::vault_delete,
             commands::vault_import,
             commands::vault_export,
+            commands::organization_list,
+            commands::item_share_to_organization,
             commands::item_list,
             commands::item_get_all_stats,
             commands::item_get,

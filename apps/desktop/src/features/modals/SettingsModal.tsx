@@ -1198,9 +1198,19 @@ export function SettingsModal() {
                 <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="font-semibold text-[var(--text-primary)]">{dict.settings.appVersion}</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">
-                      {updateInfo ? `v${updateInfo.currentVersion}` : 'v0.1.0'}
+                    <div className="text-[11px] text-[var(--text-secondary)] mt-0.5 flex flex-wrap items-center gap-2">
+                      <span>{updateInfo ? `v${updateInfo.currentVersion}` : 'v0.1.3'}</span>
+                      {updateInfo?.updateAvailable && updateInfo.latestVersion && (
+                        <span className="px-1.5 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-primary)] font-medium">
+                          {fmt(dict.settings.newVersionAvailable, { version: updateInfo.latestVersion })}
+                        </span>
+                      )}
                     </div>
+                    {updateInfo?.updateAvailable && updateInfo.notes && (
+                      <div className="text-[11px] text-[var(--text-muted)] mt-1 line-clamp-2">
+                        {updateInfo.notes}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {updateInfo?.updateAvailable && updateInfo.releaseUrl && (

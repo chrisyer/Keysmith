@@ -9,9 +9,10 @@ use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use pbkdf2::pbkdf2_hmac;
 use rand::{rngs::OsRng, RngCore};
-use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
-use rsa::RsaPrivateKey;
+use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
+use rsa::{Oaep, RsaPrivateKey};
 use serde::{Deserialize, Serialize};
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
@@ -416,6 +417,51 @@ pub fn generate_rsa_keypair(usk: &UserSymmetricKey) -> Result<(String, String), 
     // Zeroize private key bytes buffer if mutable
     let _ = &mut private_der;
     Ok((public_b64, encrypted_priv))
+}
+
+/// Decrypt a Bitwarden RSA-OAEP EncString (`3.<b64>` / `4.<b64>` / `5.<b64>` / `6.<b64>`)
+/// using a PKCS#8 DER-encoded RSA private key.
+pub fn decrypt_rsa_oaep(
+    enc_str: &str,
+    private_key_pkcs8_der: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+    let trimmed = enc_str.trim();
+    let (type_str, payload) = trimmed
+        .split_once('.')
+        .ok_or_else(|| CoreError::Crypto("Invalid RSA EncString format".to_string()))?;
+    let cipher_part = payload.split('|').next().unwrap_or(payload).trim();
+    let ciphertext = B64
+        .decode(cipher_part)
+        .map_err(|e| CoreError::Crypto(format!("RSA ciphertext Base64 decode failed: {e}")))?;
+
+    let private_key = RsaPrivateKey::from_pkcs8_der(private_key_pkcs8_der)
+        .map_err(|e| CoreError::Crypto(format!("RSA private key PKCS#8 decode failed: {e}")))?;
+
+    let plaintext = match type_str.trim() {
+        "3" | "5" => private_key
+            .decrypt(Oaep::new::<Sha256>(), &ciphertext)
+            .map_err(|e| CoreError::Crypto(format!("RSA-OAEP-SHA256 decrypt failed: {e}")))?,
+        "4" | "6" => private_key
+            .decrypt(Oaep::new::<Sha1>(), &ciphertext)
+            .map_err(|e| CoreError::Crypto(format!("RSA-OAEP-SHA1 decrypt failed: {e}")))?,
+        other => {
+            return Err(CoreError::Crypto(format!(
+                "Unsupported RSA EncString cipher type: {other}"
+            )))
+        }
+    };
+    Ok(Zeroizing::new(plaintext))
+}
+
+/// Decrypt an Organization's 64-byte symmetric key using the user's encrypted RSA private key.
+pub fn decrypt_org_symmetric_key(
+    org_key_enc: &str,
+    encrypted_private_key: &str,
+    usk: &UserSymmetricKey,
+) -> Result<UserSymmetricKey, CoreError> {
+    let priv_der = decrypt_bytes(encrypted_private_key, usk.enc_key(), usk.mac_key())?;
+    let org_key_bytes = decrypt_rsa_oaep(org_key_enc, &priv_der)?;
+    UserSymmetricKey::from_bytes(&org_key_bytes)
 }
 
 /// Generate a random 128-bit (16-byte) Bitwarden Send secret seed.

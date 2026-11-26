@@ -590,6 +590,105 @@ pub struct SyncResponse {
     pub organizations: Vec<OrganizationDto>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CipherSharePayload {
+    pub cipher: CipherCreateUpdatePayload,
+    pub collection_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CipherCollectionsPayload {
+    pub collection_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GitHubReleaseDto {
+    #[serde(default)]
+    tag_name: String,
+    #[serde(default)]
+    html_url: String,
+    #[serde(default)]
+    body: Option<String>,
+}
+
+/// Compare two semver strings (with optional leading `v` or `-prerelease` suffix).
+pub fn is_newer_semver(current: &str, latest: &str) -> bool {
+    let parse_triple = |raw: &str| -> Option<(u64, u64, u64)> {
+        let stripped = raw.trim().trim_start_matches(['v', 'V']);
+        let core = stripped.split('-').next().unwrap_or(stripped);
+        let mut parts = core.split('.');
+        let maj = parts.next()?.parse::<u64>().ok()?;
+        let min = parts.next().unwrap_or("0").parse::<u64>().ok()?;
+        let patch = parts.next().unwrap_or("0").parse::<u64>().ok()?;
+        Some((maj, min, patch))
+    };
+    match (parse_triple(current), parse_triple(latest)) {
+        (Some(c), Some(l)) => l > c,
+        _ => false,
+    }
+}
+
+/// Query GitHub Releases latest endpoint for newer application versions.
+pub async fn check_github_latest_release(
+    repo: &str,
+    current_version: &str,
+) -> Result<crate::domain::AppUpdateInfo, CoreError> {
+    let clean_current = current_version.trim().trim_start_matches(['v', 'V']).to_string();
+    let checked_at = Some(chrono::Utc::now().to_rfc3339());
+    let http = Client::builder()
+        .user_agent(format!("Keysmith/{clean_current}"))
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .unwrap_or_else(|_| Client::new());
+
+    let url = format!("https://api.github.com/repos/{}/releases/latest", repo.trim());
+    let resp = http
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| CoreError::Network(e.to_string()))?;
+
+    if !resp.status().is_success() {
+        return Err(CoreError::Network(format!(
+            "GitHub Releases returned HTTP {}",
+            resp.status().as_u16()
+        )));
+    }
+
+    let dto: GitHubReleaseDto = resp
+        .json()
+        .await
+        .map_err(|e| CoreError::Network(format!("Failed to parse release metadata: {e}")))?;
+
+    let latest_clean = dto.tag_name.trim().trim_start_matches(['v', 'V']).to_string();
+    let update_available = is_newer_semver(&clean_current, &latest_clean);
+    let release_url = if dto.html_url.trim().is_empty() {
+        Some(format!("https://github.com/{}/releases/latest", repo.trim()))
+    } else {
+        Some(dto.html_url)
+    };
+    let notes = dto
+        .body
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty());
+
+    Ok(crate::domain::AppUpdateInfo {
+        current_version: clean_current,
+        latest_version: if latest_clean.is_empty() {
+            None
+        } else {
+            Some(latest_clean)
+        },
+        update_available,
+        release_url,
+        notes,
+        checked_at,
+    })
+}
+
 #[derive(Clone)]
 pub struct VaultwardenClient {
     http: Client,
@@ -998,6 +1097,66 @@ impl VaultwardenClient {
         resp.json()
             .await
             .map_err(|e| CoreError::Network(format!("解析条目响应失败: {e}")))
+    }
+
+    pub async fn share_cipher(
+        &self,
+        server_url: &str,
+        access_token: &str,
+        id: &str,
+        cipher: &CipherDto,
+        collection_ids: &[String],
+    ) -> Result<CipherDto, CoreError> {
+        let base = Self::normalize_base_url(server_url)?;
+        let payload = CipherSharePayload {
+            cipher: CipherCreateUpdatePayload::from(cipher),
+            collection_ids: collection_ids.to_vec(),
+        };
+        let resp = self
+            .http
+            .put(format!("{base}/api/ciphers/{id}/share"))
+            .bearer_auth(access_token)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| CoreError::Network(e.to_string()))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(Self::map_http_status_err(status, "共享条目至组织失败", &text));
+        }
+        resp.json()
+            .await
+            .map_err(|e| CoreError::Network(format!("解析组织条目响应失败: {e}")))
+    }
+
+    pub async fn update_cipher_collections(
+        &self,
+        server_url: &str,
+        access_token: &str,
+        id: &str,
+        collection_ids: &[String],
+    ) -> Result<CipherDto, CoreError> {
+        let base = Self::normalize_base_url(server_url)?;
+        let payload = CipherCollectionsPayload {
+            collection_ids: collection_ids.to_vec(),
+        };
+        let resp = self
+            .http
+            .put(format!("{base}/api/ciphers/{id}/collections"))
+            .bearer_auth(access_token)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| CoreError::Network(e.to_string()))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(Self::map_http_status_err(status, "更新组织集合失败", &text));
+        }
+        resp.json()
+            .await
+            .map_err(|e| CoreError::Network(format!("解析集合更新响应失败: {e}")))
     }
 
     pub async fn trash_cipher(

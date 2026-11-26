@@ -273,6 +273,20 @@
       pkLockedWaiting: 'Waiting for Keysmith unlock… Once unlocked, your passkeys will appear automatically.',
       pkBtnRetry: 'Check Again',
       newGenPasswordLabel: 'Generated Password',
+      repromptBiometricBtn: 'Verify with Touch ID / Biometrics',
+      repromptVerifying: 'Verifying...',
+      repromptFailed: 'Biometric verification failed or cancelled',
+      btnEdit: 'Edit',
+      btnDelete: 'Delete',
+      btnSaveChanges: 'Save Changes',
+      confirmDeleteItem: 'Move "{title}" to trash?',
+      toastItemUpdated: 'Item updated',
+      toastItemDeleted: 'Moved to trash',
+      labelWebsiteUrl: 'Website URL',
+      ddCardsTitle: 'Credit Cards',
+      ddIdentitiesTitle: 'Identities',
+      ddCardFilled: 'Filled card: {title}',
+      ddIdentFilled: 'Filled identity: {title}',
 
       // Background Context Menus & NMH Errors
       errNmhTimeout: 'Timed out connecting to Keysmith desktop',
@@ -519,6 +533,20 @@
       pkLockedWaiting: '等待 Keysmith 解锁… 解锁后将自动加载您的通行密钥。',
       pkBtnRetry: '重新检测',
       newGenPasswordLabel: '新生成密码',
+      repromptBiometricBtn: '使用 Touch ID / 生物识别验证',
+      repromptVerifying: '正在验证...',
+      repromptFailed: '生物识别验证失败或已取消',
+      btnEdit: '编辑',
+      btnDelete: '删除',
+      btnSaveChanges: '保存修改',
+      confirmDeleteItem: '确认将「{title}」移入回收站？',
+      toastItemUpdated: '条目已更新',
+      toastItemDeleted: '已移入回收站',
+      labelWebsiteUrl: '网站地址',
+      ddCardsTitle: '银行卡快捷填充',
+      ddIdentitiesTitle: '身份信息快捷填充',
+      ddCardFilled: '已填充银行卡：{title}',
+      ddIdentFilled: '已填充身份信息：{title}',
       errNmhTimeout: '连接 Keysmith 桌面端超时',
       errNmhConnect: '无法连接 Keysmith Native Messaging 主机',
       errNmhNotRunning: 'Keysmith 桌面端未运行或 Native Messaging Host 未配置',
@@ -761,6 +789,20 @@
       pkLockedWaiting: '等待 Keysmith 解鎖… 解鎖後將自動載入您的通行金鑰。',
       pkBtnRetry: '重新偵測',
       newGenPasswordLabel: '新產生密碼',
+      repromptBiometricBtn: '使用 Touch ID / 生物辨識驗證',
+      repromptVerifying: '正在驗證...',
+      repromptFailed: '生物辨識驗證失敗或已取消',
+      btnEdit: '編輯',
+      btnDelete: '刪除',
+      btnSaveChanges: '儲存變更',
+      confirmDeleteItem: '確認將「{title}」移至垃圾桶？',
+      toastItemUpdated: '項目已更新',
+      toastItemDeleted: '已移至垃圾桶',
+      labelWebsiteUrl: '網站網址',
+      ddCardsTitle: '信用卡快速填入',
+      ddIdentitiesTitle: '身分資訊快速填入',
+      ddCardFilled: '已填入信用卡：{title}',
+      ddIdentFilled: '已填入身分資訊：{title}',
       errNmhTimeout: '連線 Keysmith 桌面端逾時',
       errNmhConnect: '無法連線 Keysmith Native Messaging 主機',
       errNmhNotRunning: 'Keysmith 桌面端未執行或 Native Messaging Host 未設定',
@@ -1003,6 +1045,20 @@
       pkLockedWaiting: 'Keysmith のロック解除を待機中… 解除後にパスキーが自動的に表示されます。',
       pkBtnRetry: '再確認',
       newGenPasswordLabel: '生成されたパスワード',
+      repromptBiometricBtn: 'Touch ID / 生体認証で確認',
+      repromptVerifying: '確認中...',
+      repromptFailed: '生体認証に失敗またはキャンセルされました',
+      btnEdit: '編集',
+      btnDelete: '削除',
+      btnSaveChanges: '変更を保存',
+      confirmDeleteItem: '「{title}」をゴミ箱に移動しますか？',
+      toastItemUpdated: '項目を更新しました',
+      toastItemDeleted: 'ゴミ箱に移動しました',
+      labelWebsiteUrl: 'Webサイト URL',
+      ddCardsTitle: 'クレジットカード',
+      ddIdentitiesTitle: '個人情報・住所',
+      ddCardFilled: 'カードを入力しました: {title}',
+      ddIdentFilled: '個人情報を入力しました: {title}',
       errNmhTimeout: 'Keysmith デスクトップへの接続がタイムアウトしました',
       errNmhConnect: 'Native Messaging ホストに接続できません',
       errNmhNotRunning: 'Keysmith デスクトップが未起動、または Native Messaging が未設定です',
@@ -1245,6 +1301,20 @@
       pkLockedWaiting: 'Keysmith 잠금 해제 대기 중… 잠금을 해제하면 패스키가 자동으로 표시됩니다.',
       pkBtnRetry: '다시 확인',
       newGenPasswordLabel: '새로 생성된 비밀번호',
+      repromptBiometricBtn: 'Touch ID / 생체 인식으로 확인',
+      repromptVerifying: '확인 중...',
+      repromptFailed: '생체 인식 확인 실패 또는 취소됨',
+      btnEdit: '편집',
+      btnDelete: '삭제',
+      btnSaveChanges: '변경사항 저장',
+      confirmDeleteItem: '"{title}" 항목을 휴지통으로 이동할까요?',
+      toastItemUpdated: '항목이 업데이트되었습니다',
+      toastItemDeleted: '휴지통으로 이동되었습니다',
+      labelWebsiteUrl: '웹사이트 URL',
+      ddCardsTitle: '카드 자동 채우기',
+      ddIdentitiesTitle: '신원 정보 자동 채우기',
+      ddCardFilled: '카드 입력 완료: {title}',
+      ddIdentFilled: '신원 정보 입력 완료: {title}',
       errNmhTimeout: 'Keysmith 데스크톱 연결 시간 초과',
       errNmhConnect: 'Native Messaging 호스트에 연결할 수 없습니다',
       errNmhNotRunning: 'Keysmith 데스크톱이 실행 중이 아니거나 호스트가 구성되지 않았습니다',
@@ -1487,6 +1557,20 @@
       pkLockedWaiting: 'Warte auf Entsperrung von Keysmith… Danach werden Ihre Passkeys automatisch geladen.',
       pkBtnRetry: 'Erneut prüfen',
       newGenPasswordLabel: 'Generiertes Passwort',
+      repromptBiometricBtn: 'Mit Touch ID / Biometrie bestätigen',
+      repromptVerifying: 'Wird überprüft...',
+      repromptFailed: 'Biometrische Prüfung fehlgeschlagen oder abgebrochen',
+      btnEdit: 'Bearbeiten',
+      btnDelete: 'Löschen',
+      btnSaveChanges: 'Änderungen speichern',
+      confirmDeleteItem: '„{title}“ in den Papierkorb verschieben?',
+      toastItemUpdated: 'Eintrag aktualisiert',
+      toastItemDeleted: 'In den Papierkorb verschoben',
+      labelWebsiteUrl: 'Website-URL',
+      ddCardsTitle: 'Kreditkarten',
+      ddIdentitiesTitle: 'Identitäten',
+      ddCardFilled: 'Karte ausgefüllt: {title}',
+      ddIdentFilled: 'Identität ausgefüllt: {title}',
       errNmhTimeout: 'Zeitüberschreitung bei Verbindung zu Keysmith Desktop',
       errNmhConnect: 'Verbindung zum Native-Messaging-Host fehlgeschlagen',
       errNmhNotRunning: 'Keysmith Desktop läuft nicht oder Host ist nicht konfiguriert',
@@ -1729,6 +1813,20 @@
       pkLockedWaiting: 'En attente du déverrouillage de Keysmith… Vos passkeys apparaîtront automatiquement.',
       pkBtnRetry: 'Revérifier',
       newGenPasswordLabel: 'Mot de passe généré',
+      repromptBiometricBtn: 'Vérifier par Touch ID / biométrie',
+      repromptVerifying: 'Vérification...',
+      repromptFailed: 'Échec ou annulation de la biométrie',
+      btnEdit: 'Modifier',
+      btnDelete: 'Supprimer',
+      btnSaveChanges: 'Enregistrer',
+      confirmDeleteItem: 'Déplacer « {title} » vers la corbeille ?',
+      toastItemUpdated: 'Élément mis à jour',
+      toastItemDeleted: 'Déplacé vers la corbeille',
+      labelWebsiteUrl: 'URL du site',
+      ddCardsTitle: 'Cartes bancaires',
+      ddIdentitiesTitle: 'Identités',
+      ddCardFilled: 'Carte remplie : {title}',
+      ddIdentFilled: 'Identité remplie : {title}',
       errNmhTimeout: 'Délai dépassé vers Keysmith Desktop',
       errNmhConnect: 'Impossible de joindre l’hôte Native Messaging',
       errNmhNotRunning: 'Keysmith Desktop arrêté ou Native Messaging non configuré',
@@ -1971,6 +2069,20 @@
       pkLockedWaiting: 'Esperando el desbloqueo de Keysmith… Tus passkeys aparecerán automáticamente.',
       pkBtnRetry: 'Comprobar de nuevo',
       newGenPasswordLabel: 'Contraseña generada',
+      repromptBiometricBtn: 'Verificar con Touch ID / biometría',
+      repromptVerifying: 'Verificando...',
+      repromptFailed: 'Error o cancelación biométrica',
+      btnEdit: 'Editar',
+      btnDelete: 'Eliminar',
+      btnSaveChanges: 'Guardar cambios',
+      confirmDeleteItem: '¿Mover "{title}" a la papelera?',
+      toastItemUpdated: 'Elemento actualizado',
+      toastItemDeleted: 'Movido a la papelera',
+      labelWebsiteUrl: 'URL del sitio web',
+      ddCardsTitle: 'Tarjetas de crédito',
+      ddIdentitiesTitle: 'Identidades',
+      ddCardFilled: 'Tarjeta rellenada: {title}',
+      ddIdentFilled: 'Identidad rellenada: {title}',
       errNmhTimeout: 'Tiempo de espera agotado con Keysmith Escritorio',
       errNmhConnect: 'No se pudo conectar al host Native Messaging',
       errNmhNotRunning: 'Keysmith Escritorio no está abierto o falta configurar Native Messaging',
@@ -2129,6 +2241,38 @@
     });
   }
 
+  var LAST_DESKTOP_LANG_KEY = 'lastDesktopLanguage';
+
+  function syncFromDesktop(desktopLang) {
+    if (!desktopLang || typeof desktopLang !== 'string') return Promise.resolve(currentLocale);
+    var normalized = normalizeMode(desktopLang);
+    return new Promise(function (resolve) {
+      try {
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.get([STORAGE_KEY, LAST_DESKTOP_LANG_KEY], function (data) {
+            var prevDesktop = data ? data[LAST_DESKTOP_LANG_KEY] : undefined;
+            if (prevDesktop !== normalized) {
+              var payload = {};
+              payload[LAST_DESKTOP_LANG_KEY] = normalized;
+              payload[STORAGE_KEY] = normalized;
+              applyStoredMode(normalized);
+              chrome.storage.local.set(payload, function () {
+                notifyListeners();
+                resolve(currentLocale);
+              });
+              return;
+            }
+            resolve(currentLocale);
+          });
+          return;
+        }
+      } catch (_) {
+        // ignore
+      }
+      resolve(currentLocale);
+    });
+  }
+
   // Begin hydrating stored locale immediately
   void ready();
 
@@ -2147,6 +2291,7 @@
       return currentLocale;
     },
     setLanguageMode: setLanguageMode,
+    syncFromDesktop: syncFromDesktop,
     onChange: function (fn) {
       if (typeof fn === 'function') listeners.push(fn);
     }

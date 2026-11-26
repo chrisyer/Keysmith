@@ -19,6 +19,8 @@ const detailCatBadgeEl = document.getElementById('detail-cat-badge');
 const detailTitleEl = document.getElementById('detail-title');
 const detailSubtitleEl = document.getElementById('detail-subtitle');
 const detailFillBtn = document.getElementById('detail-fill-btn');
+const detailEditBtn = document.getElementById('detail-edit-btn');
+const detailDeleteBtn = document.getElementById('detail-delete-btn');
 const detailBodyEl = document.getElementById('detail-body');
 
 const settingsViewEl = document.getElementById('settings-view');
@@ -194,14 +196,23 @@ async function autofillSummaryItem(item, isVaultSummary = false) {
     showToast(t('toastTabUnsupported'));
     return;
   }
-  if (item.reprompt) {
-    showToast(t('toastRepromptDesktop'));
-    await sendBg({ type: 'FOCUS_DESKTOP_ITEM', itemId: item.id });
-    return;
-  }
 
   let detail = item;
-  if (isVaultSummary || (!item.password && item.hasPassword)) {
+  let verifyBiometric = false;
+  if (item.reprompt) {
+    const bioRes = await sendBg({
+      type: 'ITEM_GET',
+      itemId: item.id,
+      verifyBiometric: true
+    });
+    if (!bioRes.ok || !bioRes.result) {
+      showToast(t('toastRepromptDesktop'));
+      await sendBg({ type: 'FOCUS_DESKTOP_ITEM', itemId: item.id });
+      return;
+    }
+    detail = bioRes.result;
+    verifyBiometric = true;
+  } else if (isVaultSummary || (!item.password && item.hasPassword)) {
     const g = await sendBg({ type: 'ITEM_GET', itemId: item.id });
     if (!g.ok || !g.result) {
       showToast(g.error || t('toastReadCredError'));
@@ -212,7 +223,7 @@ async function autofillSummaryItem(item, isVaultSummary = false) {
 
   let totp = detail.totp || '';
   if (!totp && (detail.hasTotp || item.hasTotp)) {
-    const tRes = await sendBg({ type: 'TOTP', itemId: item.id });
+    const tRes = await sendBg({ type: 'TOTP', itemId: item.id, verifyBiometric });
     if (tRes.ok && tRes.result?.code) {
       totp = tRes.result.code;
     }
@@ -235,10 +246,12 @@ async function autofillSummaryItem(item, isVaultSummary = false) {
 
 // ==================== Item Detail View ====================
 
-async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null) {
+async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null, verifyBiometric = false) {
   hideAllMainViews();
   detailViewEl.classList.remove('hidden');
   detailBodyEl.textContent = '';
+  if (detailEditBtn) detailEditBtn.classList.add('hidden');
+  if (detailDeleteBtn) detailDeleteBtn.classList.add('hidden');
 
   const fallbackTitle = fallbackSummary?.title || cardOrIdent?.data?.title || t('detailLoadingTitle');
   detailTitleEl.textContent = fallbackTitle;
@@ -256,10 +269,10 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
         ? t('identityLabel')
         : t('itemLabel'));
 
-  if (fallbackSummary?.reprompt || cardOrIdent?.data?.reprompt) {
+  if (!verifyBiometric && (fallbackSummary?.reprompt || cardOrIdent?.data?.reprompt)) {
     currentDetailItem = { id: itemId, reprompt: true };
     detailFillBtn.classList.add('hidden');
-    renderRepromptDetailCard(itemId);
+    renderRepromptDetailCard(itemId, fallbackSummary, cardOrIdent);
     return;
   }
 
@@ -268,14 +281,14 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
   loadingCard.textContent = t('detailLoadingCard');
   detailBodyEl.appendChild(loadingCard);
 
-  const resp = await sendBg({ type: 'ITEM_GET', itemId });
+  const resp = await sendBg({ type: 'ITEM_GET', itemId, verifyBiometric });
   detailBodyEl.textContent = '';
 
   if (!resp.ok || !resp.result) {
     currentDetailItem = { id: itemId, reprompt: true };
     if ((resp.error || '').includes('重验证') || (resp.error || '').toLowerCase().includes('reprompt')) {
       detailFillBtn.classList.add('hidden');
-      renderRepromptDetailCard(itemId);
+      renderRepromptDetailCard(itemId, fallbackSummary, cardOrIdent);
     } else {
       const errCard = document.createElement('div');
       errCard.className = 'card empty-state';
@@ -286,10 +299,39 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
   }
 
   const detail = resp.result;
-  currentDetailItem = detail;
+  detail.reprompt = Boolean(detail.reprompt || detail.payload?.reprompt);
+  currentDetailItem = { ...detail, _verifiedBiometric: verifyBiometric };
   detailTitleEl.textContent = detail.title || t('unnamedItem');
   detailSubtitleEl.textContent = detail.username || detail.subtitle || fallbackSummary?.subtitle || '';
-  detailCatBadgeEl.textContent = getCategoryLabel(detail.category);
+  detailCatBadgeEl.textContent = getCategoryLabel(detail.category || detail.payload?.category);
+
+  if (detailEditBtn) {
+    detailEditBtn.classList.remove('hidden');
+    detailEditBtn.onclick = () => renderDetailEditForm(detail, fallbackSummary, cardOrIdent, verifyBiometric);
+  }
+  if (detailDeleteBtn) {
+    detailDeleteBtn.classList.remove('hidden');
+    detailDeleteBtn.onclick = async () => {
+      if (!globalThis.confirm(t('confirmDeleteItem', { title: detail.title || t('unnamedItem') }))) {
+        return;
+      }
+      const delRes = await sendBg({
+        type: 'ITEM_TRASH',
+        itemId: detail.id,
+        verifyBiometric: verifyBiometric || Boolean(detail.reprompt)
+      });
+      if (delRes.ok) {
+        showToast(t('toastItemDeleted'));
+        switchTab(currentTabName);
+        await loadCurrentSite();
+        if (currentTabName === 'vault') {
+          await loadVaultSearch();
+        }
+      } else {
+        showToast(delRes.error || t('toastSaveFailed'));
+      }
+    };
+  }
 
   const canFillLogin = Boolean(detail.username || detail.password || detail.hasTotp);
   const canFillCard = detail.category === 'credit_card' || cardOrIdent?.kind === 'card';
@@ -323,7 +365,7 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
 
   // 1. Live 2FA TOTP Card (if configured)
   if (detail.hasTotp || detail.totp) {
-    renderLiveTotpCard(detail.id);
+    renderLiveTotpCard(detail.id, verifyBiometric);
   }
 
   // 2. Sections & Fields
@@ -497,7 +539,7 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
   }
 }
 
-function renderRepromptDetailCard(itemId) {
+function renderRepromptDetailCard(itemId, fallbackSummary = null, cardOrIdent = null) {
   const card = document.createElement('div');
   card.className = 'card';
   const title = document.createElement('div');
@@ -506,16 +548,142 @@ function renderRepromptDetailCard(itemId) {
   const desc = document.createElement('p');
   desc.className = 'card-desc';
   desc.textContent = t('repromptCardDesc');
+  const btnRow = document.createElement('div');
+  btnRow.className = 'btn-row';
+
+  const bioBtn = document.createElement('button');
+  bioBtn.type = 'button';
+  bioBtn.className = 'btn btn-primary btn-sm btn-flex';
+  bioBtn.textContent = t('repromptBiometricBtn');
+  bioBtn.addEventListener('click', async () => {
+    bioBtn.disabled = true;
+    bioBtn.textContent = t('repromptVerifying');
+    const resp = await sendBg({ type: 'ITEM_GET', itemId, verifyBiometric: true });
+    if (resp.ok && resp.result) {
+      await openDetailView(itemId, fallbackSummary, cardOrIdent, true);
+    } else {
+      bioBtn.disabled = false;
+      bioBtn.textContent = t('repromptBiometricBtn');
+      showToast(resp.error || t('repromptFailed'));
+    }
+  });
+
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'btn btn-primary btn-sm';
+  btn.className = 'btn btn-secondary btn-sm';
   btn.textContent = t('repromptCardBtn');
   btn.addEventListener('click', () => void sendBg({ type: 'FOCUS_DESKTOP_ITEM', itemId }));
-  card.append(title, desc, btn);
+  btnRow.append(bioBtn, btn);
+  card.append(title, desc, btnRow);
   detailBodyEl.appendChild(card);
 }
 
-function renderLiveTotpCard(itemId) {
+function renderDetailEditForm(detail, fallbackSummary, cardOrIdent, verifyBiometric) {
+  stopTotpTimer();
+  detailBodyEl.textContent = '';
+  const form = document.createElement('form');
+  form.className = 'card';
+
+  const mkField = (labelText, value, type = 'text') => {
+    const grp = document.createElement('div');
+    grp.className = 'field-group';
+    const lbl = document.createElement('label');
+    lbl.textContent = labelText;
+    const inp = document.createElement('input');
+    inp.type = type;
+    inp.className = 'text-input';
+    inp.value = value || '';
+    grp.append(lbl, inp);
+    form.appendChild(grp);
+    return inp;
+  };
+
+  const titleInput = mkField(t('labelName'), detail.title || '');
+  const userInput = mkField(t('labelUsernameEmail'), detail.username || '');
+
+  const pwGroup = document.createElement('div');
+  pwGroup.className = 'field-group';
+  const pwLbl = document.createElement('label');
+  pwLbl.textContent = t('labelPassword');
+  const pwRow = document.createElement('div');
+  pwRow.className = 'inline-input-row';
+  const pwInput = document.createElement('input');
+  pwInput.type = 'text';
+  pwInput.className = 'text-input mono';
+  pwInput.value = detail.password || '';
+  const genBtn = document.createElement('button');
+  genBtn.type = 'button';
+  genBtn.className = 'btn btn-secondary btn-sm';
+  genBtn.textContent = t('btnGenerate');
+  genBtn.addEventListener('click', async () => {
+    const gRes = await sendBg({
+      type: 'GENERATE',
+      options: { mode: 'password', length: 20, includeDigits: true, includeSymbols: true, excludeAmbiguous: true }
+    });
+    if (gRes.ok && gRes.result?.value) {
+      pwInput.value = gRes.result.value;
+    }
+  });
+  pwRow.append(pwInput, genBtn);
+  pwGroup.append(pwLbl, pwRow);
+  form.appendChild(pwGroup);
+
+  const firstUrl = detail.payload?.urls?.[0]?.uri || detail.urls?.[0]?.uri || '';
+  const urlInput = mkField(t('labelWebsiteUrl'), firstUrl, 'url');
+
+  const notesGrp = document.createElement('div');
+  notesGrp.className = 'field-group';
+  const notesLbl = document.createElement('label');
+  notesLbl.textContent = t('labelNotes');
+  const notesArea = document.createElement('textarea');
+  notesArea.className = 'textarea-input';
+  notesArea.value = detail.payload?.notes ?? detail.notes ?? '';
+  notesGrp.append(notesLbl, notesArea);
+  form.appendChild(notesGrp);
+
+  const btnRow = document.createElement('div');
+  btnRow.className = 'btn-row';
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'submit';
+  saveBtn.className = 'btn btn-primary btn-sm btn-flex';
+  saveBtn.textContent = t('btnSaveChanges');
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'btn btn-secondary btn-sm';
+  cancelBtn.textContent = t('btnCancel');
+  cancelBtn.addEventListener('click', () => {
+    void openDetailView(detail.id, fallbackSummary, cardOrIdent, verifyBiometric);
+  });
+  btnRow.append(saveBtn, cancelBtn);
+  form.appendChild(btnRow);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    saveBtn.disabled = true;
+    const res = await sendBg({
+      type: 'ITEM_UPDATE_QUICK',
+      itemId: detail.id,
+      title: titleInput.value.trim(),
+      username: userInput.value,
+      password: pwInput.value,
+      url: urlInput.value.trim(),
+      notes: notesArea.value,
+      verifyBiometric: verifyBiometric || Boolean(detail.reprompt)
+    });
+    saveBtn.disabled = false;
+    if (res.ok) {
+      showToast(t('toastItemUpdated'));
+      await openDetailView(detail.id, fallbackSummary, cardOrIdent, verifyBiometric);
+      await loadCurrentSite();
+    } else {
+      showToast(res.error || t('toastSaveFailed'));
+    }
+  });
+
+  detailBodyEl.appendChild(form);
+}
+
+function renderLiveTotpCard(itemId, verifyBiometric = false) {
   const card = document.createElement('div');
   card.className = 'card';
   const st = document.createElement('div');
@@ -546,7 +714,7 @@ function renderLiveTotpCard(itemId) {
 
   let remaining = 0;
   async function refreshTotp() {
-    const res = await sendBg({ type: 'TOTP', itemId });
+    const res = await sendBg({ type: 'TOTP', itemId, verifyBiometric });
     if (res.ok && res.result?.code) {
       latestCode = res.result.code;
       codeEl.textContent = res.result.formattedCode || res.result.code;
@@ -568,8 +736,15 @@ function renderLiveTotpCard(itemId) {
 
 // ==================== Settings View ====================
 
+function getLocalPrivacyServicesApi() {
+  if (typeof browser !== 'undefined' && browser.privacy?.services) {
+    return browser.privacy.services;
+  }
+  return chrome.privacy?.services || null;
+}
+
 function getLocalPrivacySettingApi() {
-  return chrome.privacy?.services?.passwordSavingEnabled || null;
+  return getLocalPrivacyServicesApi()?.passwordSavingEnabled || null;
 }
 
 function privacyApiGet(setting) {
@@ -660,8 +835,9 @@ async function getPrivacyStatusUnified() {
 }
 
 async function setPrivacyControlUnified(enabled) {
-  const pwSetting = getLocalPrivacySettingApi();
-  const cardSetting = chrome.privacy?.services?.autofillCreditCardEnabled || null;
+  const services = getLocalPrivacyServicesApi();
+  const pwSetting = services?.passwordSavingEnabled || null;
+  const cardSetting = services?.autofillCreditCardEnabled || null;
   if (pwSetting) {
     try {
       await chrome.storage.local.set({ takeoverBrowserPasswordManager: Boolean(enabled) });
@@ -1080,6 +1256,11 @@ async function init() {
   addTitleInput.value = activeTab?.url ? extractHostname(activeTab.url) : '';
 
   const st = await sendBg({ type: 'STATUS' });
+  if (st.ok && st.result?.language && i18n?.syncFromDesktop) {
+    await i18n.syncFromDesktop(st.result.language);
+    i18n.applyDom(document);
+    updateGeneratorControlsForMode();
+  }
   const connected = Boolean(st.connected);
   const sessionStatus = st.result?.status || 'Disconnected';
   renderStatus(connected, sessionStatus);

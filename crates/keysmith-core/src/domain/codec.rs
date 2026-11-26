@@ -15,9 +15,9 @@ use crate::domain::{
 };
 use crate::error::CoreError;
 use crate::protocol::{
-    CipherDto, CipherFido2CredentialDto, CipherFieldDto, CipherIdentityDto, CipherLoginUriDto,
-    CipherPasswordHistoryDto, CipherSecureNoteDto, CollectionDto, FolderDto, SendCreateUpdatePayload,
-    SendDto, SendFileDto, SendTextDto,
+    CipherDto, CipherFido2CredentialDto, CipherFieldDto, CipherIdentityDto, CipherLoginDto,
+    CipherLoginUriDto, CipherPasswordHistoryDto, CipherSecureNoteDto, CollectionDto, FolderDto,
+    SendCreateUpdatePayload, SendDto, SendFileDto, SendTextDto,
 };
 
 fn dec_opt(usk: &UserSymmetricKey, val: Option<&str>) -> String {
@@ -740,6 +740,63 @@ fn target_bw_cipher_type(category: ItemCategory) -> u8 {
     }
 }
 
+fn build_fido2_credentials_dto(
+    usk: &UserSymmetricKey,
+    passkeys: &[PasskeyCredential],
+    existing: Vec<CipherFido2CredentialDto>,
+) -> Result<Vec<CipherFido2CredentialDto>, CoreError> {
+    let mut existing_by_id: std::collections::HashMap<String, CipherFido2CredentialDto> =
+        std::collections::HashMap::new();
+    for (idx, f2) in existing.into_iter().enumerate() {
+        let decoded_id = dec_opt_or_plain(usk, f2.credential_id.as_deref());
+        let eff_id = if decoded_id.is_empty() {
+            format!("fido2-{idx}")
+        } else {
+            decoded_id
+        };
+        existing_by_id.insert(eff_id, f2);
+    }
+
+    let mut synced_fido2 = Vec::with_capacity(passkeys.len());
+    for pk in passkeys {
+        if let Some(mut prev) = existing_by_id.remove(&pk.credential_id) {
+            prev.counter = enc_opt(usk, &pk.sign_count.to_string())?;
+            synced_fido2.push(prev);
+        } else {
+            let alg_name = match pk.algorithm {
+                -8 => "EdDSA",
+                -257 => "RS256",
+                _ => "ECDSA",
+            };
+            let curve_name = match pk.algorithm {
+                -8 => "Ed25519",
+                -257 => "RSA",
+                _ => "P-256",
+            };
+            synced_fido2.push(CipherFido2CredentialDto {
+                credential_id: enc_opt(usk, &pk.credential_id)?,
+                key_type: enc_opt(usk, "public-key")?,
+                key_algorithm: enc_opt(usk, alg_name)?,
+                key_curve: enc_opt(usk, curve_name)?,
+                key_value: enc_opt(usk, &pk.private_key_pkcs8)?,
+                rp_id: enc_opt(usk, &pk.rp_id)?,
+                rp_name: enc_opt(usk, &pk.rp_name)?,
+                counter: enc_opt(usk, &pk.sign_count.to_string())?,
+                user_handle: enc_opt(usk, &pk.user_handle)?,
+                user_name: enc_opt(usk, &pk.user_name)?,
+                user_display_name: enc_opt(usk, &pk.user_display_name)?,
+                discoverable: enc_opt(
+                    usk,
+                    if pk.discoverable { "true" } else { "false" },
+                )?,
+                creation_date: enc_opt(usk, &pk.created_at)?,
+                extra: Default::default(),
+            });
+        }
+    }
+    Ok(synced_fido2)
+}
+
 /// Encode an `ItemDraft` into a `CipherDto` for local storage and Vaultwarden upload.
 pub fn draft_to_cipher(
     id: &str,
@@ -891,55 +948,9 @@ pub fn draft_to_cipher(
                         })
                         .collect::<Result<Vec<_>, CoreError>>()?;
                     // Synchronize Fido2Credentials from draft.passkeys, preserving existing entries' extra fields
-                    let mut existing_by_id: std::collections::HashMap<String, CipherFido2CredentialDto> =
-                        std::collections::HashMap::new();
-                    for (idx, f2) in login.fido2_credentials.drain(..).enumerate() {
-                        let decoded_id = dec_opt_or_plain(usk, f2.credential_id.as_deref());
-                        let eff_id = if decoded_id.is_empty() {
-                            format!("fido2-{idx}")
-                        } else {
-                            decoded_id
-                        };
-                        existing_by_id.insert(eff_id, f2);
-                    }
-                    let mut synced_fido2 = Vec::with_capacity(draft.passkeys.len());
-                    for pk in &draft.passkeys {
-                        if let Some(mut existing) = existing_by_id.remove(&pk.credential_id) {
-                            existing.counter = enc_opt(usk, &pk.sign_count.to_string())?;
-                            synced_fido2.push(existing);
-                        } else {
-                            let alg_name = match pk.algorithm {
-                                -8 => "EdDSA",
-                                -257 => "RS256",
-                                _ => "ECDSA",
-                            };
-                            let curve_name = match pk.algorithm {
-                                -8 => "Ed25519",
-                                -257 => "RSA",
-                                _ => "P-256",
-                            };
-                            synced_fido2.push(CipherFido2CredentialDto {
-                                credential_id: enc_opt(usk, &pk.credential_id)?,
-                                key_type: enc_opt(usk, "public-key")?,
-                                key_algorithm: enc_opt(usk, alg_name)?,
-                                key_curve: enc_opt(usk, curve_name)?,
-                                key_value: enc_opt(usk, &pk.private_key_pkcs8)?,
-                                rp_id: enc_opt(usk, &pk.rp_id)?,
-                                rp_name: enc_opt(usk, &pk.rp_name)?,
-                                counter: enc_opt(usk, &pk.sign_count.to_string())?,
-                                user_handle: enc_opt(usk, &pk.user_handle)?,
-                                user_name: enc_opt(usk, &pk.user_name)?,
-                                user_display_name: enc_opt(usk, &pk.user_display_name)?,
-                                discoverable: enc_opt(
-                                    usk,
-                                    if pk.discoverable { "true" } else { "false" },
-                                )?,
-                                creation_date: enc_opt(usk, &pk.created_at)?,
-                                extra: Default::default(),
-                            });
-                        }
-                    }
-                    login.fido2_credentials = synced_fido2;
+                    let prev_f2 = std::mem::take(&mut login.fido2_credentials);
+                    login.fido2_credentials =
+                        build_fido2_credentials_dto(usk, &draft.passkeys, prev_f2)?;
                     next.login = Some(login);
                 }
                 3 => {
@@ -1018,6 +1029,79 @@ pub fn draft_to_cipher(
 
             return Ok((next, item));
         }
+    }
+
+    // Emit native Bitwarden Login (type=1) with fido2Credentials when creating a new Login with Passkeys
+    if prev_cipher.is_none()
+        && draft.category == ItemCategory::Login
+        && !draft.passkeys.is_empty()
+        && !draft.archived
+        && draft.tags.is_empty()
+        && draft.sections.len() <= 1
+    {
+        let all_fields: Vec<&ItemField> = draft
+            .sections
+            .iter()
+            .flat_map(|s| s.fields.iter())
+            .collect();
+        let username = all_fields
+            .iter()
+            .find(|f| f.purpose == Some(FieldPurpose::Username))
+            .map(|f| f.value.as_str())
+            .unwrap_or("");
+        let password = all_fields
+            .iter()
+            .find(|f| f.purpose == Some(FieldPurpose::Password))
+            .map(|f| f.value.as_str())
+            .unwrap_or("");
+        let totp = all_fields
+            .iter()
+            .find(|f| f.field_type == FieldType::Totp || f.purpose == Some(FieldPurpose::Totp))
+            .map(|f| f.value.as_str())
+            .unwrap_or("");
+        let uris = draft
+            .urls
+            .iter()
+            .filter(|u| !u.uri.trim().is_empty())
+            .map(|u| {
+                Ok(CipherLoginUriDto {
+                    uri: Some(usk.encrypt_string(&u.uri)?),
+                    uri_match: unmap_bw_uri_match(u.match_rule),
+                    extra: Default::default(),
+                })
+            })
+            .collect::<Result<Vec<_>, CoreError>>()?;
+        let fido2_credentials = build_fido2_credentials_dto(usk, &draft.passkeys, Vec::new())?;
+        let cipher = CipherDto {
+            id: id.to_string(),
+            organization_id: None,
+            folder_id,
+            collection_ids: Vec::new(),
+            cipher_type: 1,
+            name: Some(usk.encrypt_string(&title)?),
+            notes: enc_opt(usk, &draft.notes)?,
+            favorite: draft.favorite,
+            login: Some(CipherLoginDto {
+                username: enc_opt(usk, username)?,
+                password: enc_opt(usk, password)?,
+                totp: enc_opt(usk, totp)?,
+                uris,
+                fido2_credentials,
+                extra: Default::default(),
+            }),
+            secure_note: None,
+            card: None,
+            identity: None,
+            fields: Vec::new(),
+            password_history: Vec::new(),
+            attachments: Vec::new(),
+            reprompt: Some(if draft.reprompt { 1 } else { 0 }),
+            revision_date: Some(now),
+            creation_date: Some(created_at),
+            deleted_date: None,
+            extra: Default::default(),
+        };
+        return Ok((cipher, item));
     }
 
     // Keysmith Schema v1 envelope

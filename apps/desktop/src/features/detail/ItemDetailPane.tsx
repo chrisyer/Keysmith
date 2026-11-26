@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Archive,
+  Building2,
   Check,
   ChevronDown,
   ChevronRight,
@@ -37,7 +38,7 @@ import { TEMPLATE_MAP } from '../../services/templates';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
-import type { AttachmentDownloadResult, ItemDetail, ItemField } from '../../types/domain';
+import type { AttachmentDownloadResult, ItemDetail, ItemField, OrganizationInfo } from '../../types/domain';
 import { extractDomain, formatCardNumber, formatDateTime, maskCardNumber } from '../../utils/format';
 import { openExternalUrl } from '../../utils/opener';
 import { formatShortcutMac } from '../../utils/shortcuts';
@@ -256,6 +257,11 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [confirmUnbindCredId, setConfirmUnbindCredId] = useState<string | null>(null);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
+  const [shareOrgOpen, setShareOrgOpen] = useState(false);
+  const [orgs, setOrgs] = useState<OrganizationInfo[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState('');
+  const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
+  const [sharingOrg, setSharingOrg] = useState(false);
   const [uploadingAtt, setUploadingAtt] = useState(false);
   const [previewAtt, setPreviewAtt] = useState<AttachmentDownloadResult | null>(null);
   const [repromptPw, setRepromptPw] = useState('');
@@ -694,6 +700,38 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                         ))}
                     </div>
                   )}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      menuRef.current?.hidePopover?.();
+                      try {
+                        const list = await tauriClient.organizationList();
+                        const usable = list.filter((o) => o.hasKey && o.collections.length > 0);
+                        setOrgs(usable);
+                        if (usable.length > 0) {
+                          setSelectedOrgId(usable[0].id);
+                          setSelectedCollectionIds([usable[0].collections[0].id]);
+                          setShareOrgOpen(true);
+                        } else {
+                          showToast({
+                            label: dict.detail.shareToOrg,
+                            text: dict.detail.noOrgsAvailable,
+                            kind: 'info',
+                          });
+                        }
+                      } catch (err) {
+                        showToast({
+                          label: dict.detail.shareToOrg,
+                          text: err instanceof Error ? err.message : dict.detail.noOrgsAvailable,
+                          kind: 'info',
+                        });
+                      }
+                    }}
+                    className="px-2.5 py-2 rounded-lg hover:bg-[var(--bg-hover)] text-left flex items-center gap-2 text-[var(--text-primary)] cursor-pointer"
+                  >
+                    <Building2 size={13} />
+                    <span>{dict.detail.shareToOrg}</span>
+                  </button>
                   <button
                     type="button"
                     onClick={async () => {
@@ -1374,6 +1412,120 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
           <span>{fmt(dict.detail.createdAt, { time: formatDateTime(item.createdAt) })}</span>
         </div>
       </div>
+
+      {shareOrgOpen && (
+        <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-2xl p-4 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
+                <Building2 size={15} className="text-[var(--accent-primary)]" />
+                <span>{dict.detail.shareToOrg}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShareOrgOpen(false)}
+                className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1">
+                {dict.detail.selectOrg}
+              </label>
+              <select
+                value={selectedOrgId}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  setSelectedOrgId(nextId);
+                  const found = orgs.find((o) => o.id === nextId);
+                  setSelectedCollectionIds(
+                    found && found.collections.length > 0 ? [found.collections[0].id] : [],
+                  );
+                }}
+                className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-strong)] text-xs text-[var(--text-primary)]"
+              >
+                {orgs.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1">
+                {dict.detail.selectCollections}
+              </label>
+              <div className="max-h-36 overflow-y-auto flex flex-col gap-1 border border-[var(--border-subtle)] rounded-lg p-2 bg-[var(--bg-detail)]">
+                {(orgs.find((o) => o.id === selectedOrgId)?.collections ?? []).map((col) => {
+                  const checked = selectedCollectionIds.includes(col.id);
+                  return (
+                    <label
+                      key={col.id}
+                      className="flex items-center gap-2 text-xs text-[var(--text-primary)] cursor-pointer py-0.5"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          setSelectedCollectionIds((prev) =>
+                            e.target.checked
+                              ? [...prev, col.id]
+                              : prev.filter((id) => id !== col.id),
+                          );
+                        }}
+                      />
+                      <span className="truncate">{col.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShareOrgOpen(false)}
+                className="px-3 py-1.5 rounded-lg border border-[var(--border-strong)] text-xs text-[var(--text-secondary)] cursor-pointer"
+              >
+                {dict.common.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={sharingOrg || !selectedOrgId || selectedCollectionIds.length === 0}
+                onClick={async () => {
+                  setSharingOrg(true);
+                  try {
+                    await tauriClient.itemShareToOrganization(
+                      item.id,
+                      selectedOrgId,
+                      selectedCollectionIds,
+                    );
+                    await refreshItems(getFilter());
+                    await selectItem(item.id);
+                    setShareOrgOpen(false);
+                    showToast({
+                      label: dict.detail.shareToOrg,
+                      text: dict.detail.shareSuccess,
+                      kind: 'info',
+                    });
+                  } catch (err) {
+                    showToast({
+                      label: dict.detail.shareToOrg,
+                      text: err instanceof Error ? err.message : String(err),
+                      kind: 'info',
+                    });
+                  } finally {
+                    setSharingOrg(false);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-xs font-medium text-white cursor-pointer"
+              >
+                {dict.detail.shareConfirm}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

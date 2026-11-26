@@ -24,6 +24,7 @@ import type {
   ItemStats,
   ItemSummary,
   KdfConfig,
+  OrganizationInfo,
   SendCreateFileInput,
   SendCreateTextInput,
   SendItem,
@@ -163,6 +164,12 @@ export interface KeysmithClient {
     masterPassword: string,
     exportPassphrase?: string,
   ): Promise<ExportResult>;
+  organizationList(): Promise<OrganizationInfo[]>;
+  itemShareToOrganization(
+    itemId: string,
+    organizationId: string,
+    collectionIds: string[],
+  ): Promise<ItemDetail>;
 
   itemList(filter?: ItemFilter): Promise<ItemSummary[]>;
   itemGetAllStats(): Promise<ItemStats>;
@@ -434,6 +441,22 @@ class KeysmithTauriClient implements KeysmithClient {
       format,
       masterPassword,
       exportPassphrase: exportPassphrase ?? null,
+    });
+  }
+
+  organizationList(): Promise<OrganizationInfo[]> {
+    return invokeCore<OrganizationInfo[]>('organization_list');
+  }
+
+  itemShareToOrganization(
+    itemId: string,
+    organizationId: string,
+    collectionIds: string[],
+  ): Promise<ItemDetail> {
+    return invokeCore<ItemDetail>('item_share_to_organization', {
+      itemId,
+      organizationId,
+      collectionIds,
     });
   }
 
@@ -1894,6 +1917,20 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async browserOpenExtensionFolder(): Promise<string> {
     return '~/Library/Application Support/dev.keysmith.desktop/browser-extension';
+  }
+
+  async organizationList(): Promise<OrganizationInfo[]> {
+    return [];
+  }
+
+  async itemShareToOrganization(
+    itemId: string,
+    _organizationId: string,
+    _collectionIds: string[],
+  ): Promise<ItemDetail> {
+    const existing = await this.itemGet(itemId);
+    if (!existing) throw new Error('Item not found');
+    return existing;
   }
 
   async appCheckUpdateInfo(): Promise<AppUpdateInfo> {

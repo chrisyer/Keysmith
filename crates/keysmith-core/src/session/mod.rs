@@ -14,10 +14,10 @@ use tokio::sync::Mutex as AsyncMutex;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{
-    decrypt_bytes, derive_master_key, derive_master_password_hash, derive_send_key, encrypt_bytes,
-    encrypt_send_buffer, generate_rsa_keypair, generate_send_seed, normalize_email,
-    protect_user_symmetric_key, stretch_master_key, unprotect_user_symmetric_key, KdfConfig,
-    UserSymmetricKey,
+    decrypt_bytes, decrypt_org_symmetric_key, derive_master_key, derive_master_password_hash,
+    derive_send_key, encrypt_bytes, encrypt_send_buffer, generate_rsa_keypair, generate_send_seed,
+    normalize_email, protect_user_symmetric_key, stretch_master_key, unprotect_user_symmetric_key,
+    KdfConfig, UserSymmetricKey,
 };
 use crate::domain::codec::{
     cipher_to_item, collection_to_vault, decode_send_dto, draft_to_cipher, encode_send_payload,
@@ -26,20 +26,20 @@ use crate::domain::codec::{
 use crate::domain::{
     format_size_bytes, item_to_summary, AccountPasskey, AccountPasskeyListResponse,
     AccountProfileResponse, AccountSummary, AppSettings, AppSettingsPatch,
-    AttachmentDownloadResult, AuthStatus, ExportResult, FieldType, GeneratorHistoryEntry,
-    GeneratorOptions, GeneratorResult, ImportSummary, ItemAttachment, ItemCategory, ItemDetail,
-    ItemDraft, ItemFilter, ItemStats, ItemSummary, SendCreateFileInput, SendCreateTextInput,
-    SendItem, SendType, SendUpdateInput, ServerCheckResult, SessionPreferencesPatch, SessionState,
-    SortBy, SshIdentity, SshKeyPair, SyncStateKind, SyncStatus, TagCount, TotpCode, Vault,
-    WatchtowerFlagsPatch, WatchtowerReport, DEFAULT_PERSONAL_VAULT_ID,
-    DEFAULT_QUICK_ACCESS_SHORTCUT,
+    AttachmentDownloadResult, AuthStatus, CollectionInfo, ExportResult, FieldType,
+    GeneratorHistoryEntry, GeneratorOptions, GeneratorResult, ImportSummary, ItemAttachment,
+    ItemCategory, ItemDetail, ItemDraft, ItemFilter, ItemStats, ItemSummary, OrganizationInfo,
+    SendCreateFileInput, SendCreateTextInput, SendItem, SendType, SendUpdateInput,
+    ServerCheckResult, SessionPreferencesPatch, SessionState, SortBy, SshIdentity, SshKeyPair,
+    SyncStateKind, SyncStatus, TagCount, TotpCode, Vault, WatchtowerFlagsPatch, WatchtowerReport,
+    DEFAULT_PERSONAL_VAULT_ID, DEFAULT_QUICK_ACCESS_SHORTCUT,
 };
 use crate::error::CoreError;
 use crate::generator::generate_secret;
 use crate::importers::{build_export_content, parse_import_payload};
 use crate::protocol::{
-    CipherDto, CollectionDto, FolderDto, RegisterKeysRequest, RegisterRequest, SendDto,
-    SendFileDto, VaultwardenClient,
+    CipherDto, CollectionDto, FolderDto, OrganizationDto, RegisterKeysRequest, RegisterRequest,
+    SendDto, SendFileDto, VaultwardenClient,
 };
 use crate::search::score_search_query;
 use crate::ssh::{ssh_fingerprint_from_public, ssh_generate_ed25519, ssh_sign_ed25519};
@@ -55,11 +55,39 @@ const KEYSMITH_ACCOUNT_RP_ID: &str = "keysmith.local";
 const APPLE_TOUCH_ID_AAGUID: &str = "adce0002-35bc-c60a-648b-0b25f1f05503";
 const YUBIKEY_5_AAGUID: &str = "ee882879-721c-4913-9775-3dfcce97072a";
 
+pub fn localized_biometric_reason(lang: &str, kind: &str) -> &'static str {
+    let norm = lang.trim();
+    if kind == "reprompt" {
+        return match norm {
+            "zh-CN" | "zh" => "验证身份以访问受主密码重验证保护的条目",
+            "zh-TW" | "zh-HK" => "驗證身分以存取受主密碼重驗證保護的項目",
+            "ja" => "マスターパスワード再確認項目へアクセスするため認証してください",
+            "ko" => "마스터 비밀번호 재확인 보호 항목에 접근하려면 인증하세요",
+            "de" => "Authentifizieren Sie sich für diesen geschützten Eintrag",
+            "fr" => "Authentifiez-vous pour accéder à cet élément protégé",
+            "es" => "Autentíquese para acceder a este elemento protegido",
+            _ => "Authenticate to access this protected Keysmith item",
+        };
+    }
+    match norm {
+        "zh-CN" | "zh" => "解锁 Keysmith 保险库",
+        "zh-TW" | "zh-HK" => "解鎖 Keysmith 保險庫",
+        "ja" => "Keysmith 保管庫のロックを解除",
+        "ko" => "Keysmith 금고 잠금 해제",
+        "de" => "Keysmith-Tresor entsperren",
+        "fr" => "Déverrouiller le coffre Keysmith",
+        "es" => "Desbloquear el almacén de Keysmith",
+        _ => "Unlock Keysmith Vault",
+    }
+}
+
 struct UnlockedMemory {
     usk: UserSymmetricKey,
+    org_keys: HashMap<String, UserSymmetricKey>,
     ciphers: HashMap<String, CipherDto>,
     items: HashMap<String, ItemDetail>,
     vaults: Vec<Vault>,
+    organizations: Vec<OrganizationInfo>,
     sends: HashMap<String, SendItem>,
     send_dtos: HashMap<String, SendDto>,
     send_seeds: HashMap<String, Zeroizing<[u8; 16]>>,
@@ -96,7 +124,9 @@ impl Drop for UnlockedMemory {
         }
         self.items.clear();
         self.ciphers.clear();
+        self.org_keys.clear();
         self.vaults.clear();
+        self.organizations.clear();
         self.sends.clear();
         self.send_dtos.clear();
         self.send_seeds.clear();
@@ -251,6 +281,21 @@ impl AppCore {
         let stored_vaults = storage.list_vaults(account_id)?;
         let stored_ciphers = storage.list_ciphers(account_id)?;
         let stored_sends = storage.list_sends(account_id)?;
+        let stored_orgs = storage.list_organizations(account_id)?;
+        let enc_priv_opt = storage
+            .load_account_by_id(account_id)?
+            .and_then(|a| a.encrypted_private_key);
+
+        let mut org_keys: HashMap<String, UserSymmetricKey> = HashMap::new();
+        if let Some(enc_priv) = enc_priv_opt.as_deref() {
+            for org in &stored_orgs {
+                if let Some(key_enc) = org.key_enc.as_deref().filter(|s| !s.trim().is_empty()) {
+                    if let Ok(org_usk) = decrypt_org_symmetric_key(key_enc, enc_priv, &usk) {
+                        org_keys.insert(org.id.clone(), org_usk);
+                    }
+                }
+            }
+        }
 
         let mut ciphers = HashMap::new();
         let mut items = HashMap::new();
@@ -262,7 +307,12 @@ impl AppCore {
             }
             let dto: CipherDto = serde_json::from_str(&sc.raw_json)
                 .map_err(|e| CoreError::Storage(format!("解析本地密文 JSON 失败: {e}")))?;
-            let item = cipher_to_item(&dto, &usk)?;
+            let eff_usk = dto
+                .organization_id
+                .as_ref()
+                .and_then(|oid| org_keys.get(oid))
+                .unwrap_or(&usk);
+            let item = cipher_to_item(&dto, eff_usk)?;
             if item.deleted_at.is_none() && !item.payload.archived {
                 *counts_by_vault.entry(item.vault_id.clone()).or_insert(0) += 1;
             }
@@ -280,20 +330,35 @@ impl AppCore {
             item_count: *counts_by_vault.get(DEFAULT_PERSONAL_VAULT_ID).unwrap_or(&0),
         }];
 
+        let mut collections_by_org: HashMap<String, Vec<CollectionInfo>> = HashMap::new();
         for sv in stored_vaults {
             if sv.dirty_op.as_deref() == Some("delete") {
                 continue;
             }
             let count = *counts_by_vault.get(&sv.id).unwrap_or(&0);
             if sv.is_organization {
+                let eff_usk = sv
+                    .organization_id
+                    .as_ref()
+                    .and_then(|oid| org_keys.get(oid))
+                    .unwrap_or(&usk);
                 let col = CollectionDto {
                     id: sv.id.clone(),
-                    organization_id: None,
+                    organization_id: sv.organization_id.clone(),
                     name: sv.name_enc,
                     read_only: false,
                     extra: Default::default(),
                 };
-                vaults.push(collection_to_vault(&col, &usk, count));
+                let vault = collection_to_vault(&col, eff_usk, count);
+                if let Some(oid) = sv.organization_id.clone() {
+                    collections_by_org.entry(oid.clone()).or_default().push(CollectionInfo {
+                        id: col.id.clone(),
+                        organization_id: oid,
+                        name: vault.name.clone(),
+                        read_only: false,
+                    });
+                }
+                vaults.push(vault);
             } else {
                 let dto = FolderDto {
                     id: sv.id.clone(),
@@ -303,6 +368,20 @@ impl AppCore {
                 vaults.push(folder_to_vault(&dto, &usk, count)?);
             }
         }
+
+        let organizations: Vec<OrganizationInfo> = stored_orgs
+            .into_iter()
+            .map(|o| OrganizationInfo {
+                has_key: org_keys.contains_key(&o.id),
+                collections: collections_by_org.remove(&o.id).unwrap_or_default(),
+                id: o.id.clone(),
+                name: if o.name.trim().is_empty() {
+                    o.id
+                } else {
+                    o.name
+                },
+            })
+            .collect();
 
         let mut sends = HashMap::new();
         let mut send_dtos = HashMap::new();
@@ -319,9 +398,11 @@ impl AppCore {
 
         Ok(UnlockedMemory {
             usk,
+            org_keys,
             ciphers,
             items,
             vaults,
+            organizations,
             sends,
             send_dtos,
             send_seeds,
@@ -506,11 +587,17 @@ impl AppCore {
         let collections = sync_resp.collections;
         let ciphers = sync_resp.ciphers;
         let sends = sync_resp.sends;
+        let orgs: Vec<OrganizationDto> = if !sync_resp.organizations.is_empty() {
+            sync_resp.organizations
+        } else {
+            sync_resp.profile.organizations
+        };
 
         let (usk, unlocked) = tokio::task::spawn_blocking(move || {
             let usk = unprotect_user_symmetric_key(&protected_key, &smk)?;
             storage.clear_account_data(&account_clone.id, true)?;
             storage.upsert_account(&account_clone)?;
+            storage.replace_synced_organizations(&account_clone.id, &orgs)?;
             storage.replace_synced_vaults_clean(&account_clone.id, &folders, &collections)?;
             storage.replace_synced_ciphers_clean(&account_clone.id, &ciphers)?;
             storage.replace_synced_sends(&account_clone.id, &sends)?;
@@ -906,19 +993,62 @@ impl AppCore {
         let storage = self.storage.clone();
         let account_id = account.id.clone();
         let server_url = account.server_url.clone();
+        let prompt_lang = self
+            .app_settings_get()
+            .map(|s| s.language)
+            .unwrap_or_else(|_| "en".to_string());
+        let prompt_reason = localized_biometric_reason(&prompt_lang, "unlock");
 
         let unlocked = tokio::task::spawn_blocking(move || {
-            let key_bytes = biometric.load_unlock_key(&account_id, "解锁 Keysmith 保险库")?;
+            let key_bytes = biometric.load_unlock_key(&account_id, prompt_reason)?;
             let usk = UserSymmetricKey::from_bytes(&key_bytes)?;
             Self::load_unlocked_from_storage_sync(&storage, &account_id, &server_url, usk)
         })
         .await
-        .map_err(|e| CoreError::Internal(format!("生物识别解锁任务失败: {e}")))??;
+        .map_err(|e| CoreError::Internal(format!("Biometric unlock task failed: {e}")))??;
 
         let mut guard = self.write_state()?;
         guard.unlocked = Some(unlocked);
         guard.last_activity = Instant::now();
         Ok(Self::build_session_state(&guard, self.biometric.is_available()))
+    }
+
+    pub async fn session_verify_biometric_reprompt(
+        &self,
+        custom_reason: Option<&str>,
+    ) -> Result<(), CoreError> {
+        let account_enabled = {
+            let guard = self.read_state()?;
+            let acc = guard
+                .account
+                .as_ref()
+                .ok_or_else(|| CoreError::InvalidState("No active account".to_string()))?;
+            if guard.unlocked.is_none() {
+                return Err(CoreError::InvalidState("Vault is locked".to_string()));
+            }
+            acc.biometric_enabled
+        };
+
+        if !account_enabled || !self.biometric.is_available() {
+            return Err(CoreError::Biometric(
+                "Biometric verification is unavailable".to_string(),
+            ));
+        }
+
+        let prompt_lang = self
+            .app_settings_get()
+            .map(|s| s.language)
+            .unwrap_or_else(|_| "en".to_string());
+        let reason = custom_reason
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| localized_biometric_reason(&prompt_lang, "reprompt"))
+            .to_string();
+
+        let biometric = Arc::clone(&self.biometric);
+        tokio::task::spawn_blocking(move || biometric.verify_user(&reason))
+            .await
+            .map_err(|e| CoreError::Internal(format!("Biometric verification task failed: {e}")))?
     }
 
     pub fn session_lock(&self, _reason: &str) -> Result<(), CoreError> {
@@ -1025,6 +1155,7 @@ impl AppCore {
             revision_date,
             dirty_op,
             is_organization: false,
+            organization_id: None,
         })?;
 
         let vault = Vault {
@@ -1110,6 +1241,7 @@ impl AppCore {
             revision_date,
             dirty_op,
             is_organization: false,
+            organization_id: None,
         })?;
 
         let mut guard = self.write_state()?;
@@ -1189,6 +1321,7 @@ impl AppCore {
                 revision_date: Utc::now().to_rfc3339(),
                 dirty_op: Some("delete".to_string()),
                 is_organization: false,
+                organization_id: None,
             })?;
         }
 
@@ -1453,7 +1586,7 @@ impl AppCore {
     }
 
     pub async fn item_update(&self, id: &str, draft: ItemDraft) -> Result<ItemDetail, CoreError> {
-        let (mut account, mut cipher, item, was_offline_create) = {
+        let (mut account, mut cipher, item, was_offline_create, prev_revision_date) = {
             let guard = self.read_state()?;
             let acc = guard
                 .account
@@ -1468,7 +1601,12 @@ impl AppCore {
                 .get(id)
                 .ok_or_else(|| CoreError::NotFound("条目不存在".to_string()))?;
             let prev_cipher = unlocked.ciphers.get(id);
-            let (c, it) = draft_to_cipher(id, &draft, prev_cipher, Some(prev_item), &unlocked.usk)?;
+            let prev_rev = prev_cipher.and_then(|c| c.revision_date.clone());
+            let eff_usk = prev_cipher
+                .and_then(|c| c.organization_id.as_ref())
+                .and_then(|oid| unlocked.org_keys.get(oid))
+                .unwrap_or(&unlocked.usk);
+            let (c, it) = draft_to_cipher(id, &draft, prev_cipher, Some(prev_item), eff_usk)?;
 
             let pending_create = self
                 .storage
@@ -1479,7 +1617,7 @@ impl AppCore {
                 .as_deref()
                 == Some("create");
 
-            (acc, c, it, pending_create)
+            (acc, c, it, pending_create, prev_rev)
         };
 
         let mut dirty_op = Some(if was_offline_create { "create" } else { "update" });
@@ -1506,6 +1644,13 @@ impl AppCore {
             if let Ok(remote) = res {
                 cipher = remote;
                 dirty_op = None;
+            }
+        }
+
+        // Preserve base server revision_date when queuing an offline update so sync_now detects true conflicts accurately
+        if dirty_op == Some("update") {
+            if let Some(prev_rev) = prev_revision_date {
+                cipher.revision_date = Some(prev_rev);
             }
         }
 
@@ -1992,6 +2137,7 @@ impl AppCore {
                             revision_date: remote.revision_date.unwrap_or_default(),
                             dirty_op: None,
                             is_organization: false,
+                            organization_id: None,
                         })?;
                     }
                 }
@@ -2019,6 +2165,7 @@ impl AppCore {
                             revision_date: remote.revision_date.unwrap_or_default(),
                             dirty_op: None,
                             is_organization: false,
+                            organization_id: None,
                         })?;
                     }
                 }
@@ -2232,8 +2379,14 @@ impl AppCore {
         let collections = sync_resp.collections;
         let ciphers = sync_resp.ciphers;
         let sends = sync_resp.sends;
+        let orgs: Vec<OrganizationDto> = if !sync_resp.organizations.is_empty() {
+            sync_resp.organizations
+        } else {
+            sync_resp.profile.organizations
+        };
 
         let (pending_count, refreshed_unlocked) = tokio::task::spawn_blocking(move || {
+            storage.replace_synced_organizations(&account_clone.id, &orgs)?;
             storage.replace_synced_vaults_clean(&account_clone.id, &folders, &collections)?;
             storage.replace_synced_ciphers_clean(&account_clone.id, &ciphers)?;
             storage.replace_synced_sends(&account_clone.id, &sends)?;
@@ -3579,6 +3732,99 @@ impl AppCore {
         Ok(())
     }
 
+    // --- Organizations & Collections ---
+
+    pub fn organization_list(&self) -> Result<Vec<OrganizationInfo>, CoreError> {
+        let guard = self.read_state()?;
+        let unlocked = guard
+            .unlocked
+            .as_ref()
+            .ok_or_else(|| CoreError::InvalidState("Vault is locked".to_string()))?;
+        Ok(unlocked.organizations.clone())
+    }
+
+    pub async fn item_share_to_organization(
+        &self,
+        item_id: &str,
+        organization_id: &str,
+        collection_ids: Vec<String>,
+    ) -> Result<ItemDetail, CoreError> {
+        let org_id = organization_id.trim().to_string();
+        if org_id.is_empty() || collection_ids.is_empty() {
+            return Err(CoreError::Validation(
+                "Organization ID and at least one collection are required".to_string(),
+            ));
+        }
+
+        let (mut account, mut org_cipher, org_usk) = {
+            let guard = self.read_state()?;
+            let acc = guard
+                .account
+                .clone()
+                .ok_or_else(|| CoreError::InvalidState("No active account".to_string()))?;
+            let unlocked = guard
+                .unlocked
+                .as_ref()
+                .ok_or_else(|| CoreError::InvalidState("Vault is locked".to_string()))?;
+            let item = unlocked
+                .items
+                .get(item_id)
+                .ok_or_else(|| CoreError::NotFound("Item not found".to_string()))?;
+            let org_usk = unlocked
+                .org_keys
+                .get(&org_id)
+                .cloned()
+                .ok_or_else(|| {
+                    CoreError::Crypto(
+                        "Missing decrypted organization symmetric key; re-sync or log in again"
+                            .to_string(),
+                    )
+                })?;
+            let draft = Self::item_to_draft(item);
+            let (mut c, _) = draft_to_cipher(&item.id, &draft, None, Some(item), &org_usk)?;
+            c.organization_id = Some(org_id.clone());
+            c.folder_id = None;
+            c.collection_ids = collection_ids.clone();
+            (acc, c, org_usk)
+        };
+
+        if account.access_token.is_none() {
+            return Err(CoreError::InvalidState(
+                "Sharing to an organization requires server connectivity".to_string(),
+            ));
+        }
+
+        let client = self.client.clone();
+        let server_url = account.server_url.clone();
+        let item_id_owned = item_id.to_string();
+        let cipher_clone = org_cipher.clone();
+        let col_ids_clone = collection_ids.clone();
+
+        org_cipher = self
+            .with_fresh_token(&mut account, move |tok| {
+                let client = client.clone();
+                let server_url = server_url.clone();
+                let id = item_id_owned.clone();
+                let c = cipher_clone.clone();
+                let cols = col_ids_clone.clone();
+                async move { client.share_cipher(&server_url, &tok, &id, &c, &cols).await }
+            })
+            .await?;
+
+        self.storage.upsert_cipher(&account.id, &org_cipher, None)?;
+        let updated_item = cipher_to_item(&org_cipher, &org_usk)?;
+
+        let mut guard = self.write_state()?;
+        if let Some(unlocked) = &mut guard.unlocked {
+            unlocked.ciphers.insert(org_cipher.id.clone(), org_cipher);
+            unlocked
+                .items
+                .insert(updated_item.id.clone(), updated_item.clone());
+            Self::recompute_vault_counts(unlocked);
+        }
+        Ok(updated_item)
+    }
+
     // --- App Settings & Storage Maintenance ---
 
     pub fn app_settings_get(&self) -> Result<AppSettings, CoreError> {
@@ -3586,8 +3832,13 @@ impl AppCore {
         let language = raw
             .get("language")
             .cloned()
-            .filter(|v| matches!(v.as_str(), "system" | "zh-CN" | "en"))
-            .unwrap_or_else(|| "system".to_string());
+            .filter(|v| {
+                matches!(
+                    v.as_str(),
+                    "system" | "en" | "zh-CN" | "zh-TW" | "ja" | "ko" | "de" | "fr" | "es"
+                )
+            })
+            .unwrap_or_else(|| "en".to_string());
         let theme = raw
             .get("theme")
             .cloned()
@@ -3612,7 +3863,10 @@ impl AppCore {
 
     pub fn app_settings_update(&self, patch: AppSettingsPatch) -> Result<AppSettings, CoreError> {
         if let Some(lang) = patch.language {
-            if matches!(lang.as_str(), "system" | "zh-CN" | "en") {
+            if matches!(
+                lang.as_str(),
+                "system" | "en" | "zh-CN" | "zh-TW" | "ja" | "ko" | "de" | "fr" | "es"
+            ) {
                 self.storage.set_app_setting("language", &lang)?;
             }
         }
