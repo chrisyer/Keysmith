@@ -1,18 +1,29 @@
 import {
   BadgeCheck,
+  BadgePercent,
+  Bitcoin,
+  BookUser,
+  Car,
   CreditCard,
   Database,
+  FileArchive,
   FileText,
   Fingerprint,
   Globe,
+  HeartPulse,
   KeyRound,
+  Landmark,
   Server,
   Terminal,
   UserCheck,
   Webhook,
+  Wifi,
 } from 'lucide-react';
-import type { ItemCategory, ItemIcon } from '../types/domain';
+import { useEffect, useState } from 'react';
+import { tauriClient } from '../services/tauriClient';
 import { TEMPLATE_MAP } from '../services/templates';
+import { useSessionStore } from '../stores/sessionStore';
+import type { ItemCategory, ItemIcon } from '../types/domain';
 
 const DOMAIN_BRANDS: Record<string, { bg: string; fg: string; label: string }> = {
   'github.com': { bg: '#24292F', fg: '#FFFFFF', label: 'GH' },
@@ -28,6 +39,79 @@ const DOMAIN_BRANDS: Record<string, { bg: string; fg: string; label: string }> =
   'jetbrains.com': { bg: '#000000', fg: '#FF318C', label: 'JB' },
 };
 
+const faviconCache = new Map<string, string | null>();
+const faviconInflight = new Map<string, Promise<string | null>>();
+
+function loadFavicon(host: string): Promise<string | null> {
+  const key = host.trim().toLowerCase();
+  if (!key) return Promise.resolve(null);
+  if (faviconCache.has(key)) {
+    return Promise.resolve(faviconCache.get(key) ?? null);
+  }
+  const existing = faviconInflight.get(key);
+  if (existing) return existing;
+
+  const p = tauriClient
+    .faviconFetch(key)
+    .then((res) => {
+      const valid = res && res.startsWith('data:image/') ? res : null;
+      faviconCache.set(key, valid);
+      return valid;
+    })
+    .catch(() => {
+      faviconCache.set(key, null);
+      return null;
+    })
+    .finally(() => {
+      faviconInflight.delete(key);
+    });
+  faviconInflight.set(key, p);
+  return p;
+}
+
+export function getCategoryIconComponent(category: ItemCategory) {
+  switch (category) {
+    case 'login':
+      return Globe;
+    case 'password':
+      return KeyRound;
+    case 'secure_note':
+      return FileText;
+    case 'credit_card':
+      return CreditCard;
+    case 'identity':
+      return UserCheck;
+    case 'api_credential':
+      return Webhook;
+    case 'database':
+      return Database;
+    case 'server':
+      return Server;
+    case 'ssh_key':
+      return Terminal;
+    case 'software_license':
+      return BadgeCheck;
+    case 'passkey':
+      return Fingerprint;
+    case 'bank_account':
+      return Landmark;
+    case 'crypto_wallet':
+      return Bitcoin;
+    case 'wifi_router':
+      return Wifi;
+    case 'passport':
+      return BookUser;
+    case 'driver_license':
+      return Car;
+    case 'membership':
+      return BadgePercent;
+    case 'medical_record':
+      return HeartPulse;
+    case 'document':
+      return FileArchive;
+  }
+}
+
 interface ItemIconBadgeProps {
   icon?: ItemIcon;
   category: ItemCategory;
@@ -36,6 +120,32 @@ interface ItemIconBadgeProps {
 }
 
 export function ItemIconBadge({ icon, category, title, size = 'md' }: ItemIconBadgeProps) {
+  const faviconEnabled = useSessionStore((s) => s.faviconEnabled);
+  const host = icon?.kind === 'domain' ? icon.host.trim().toLowerCase() : '';
+  const [faviconSrc, setFaviconSrc] = useState<string | null>(() =>
+    host && faviconEnabled ? (faviconCache.get(host) ?? null) : null,
+  );
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+    if (!host || !faviconEnabled) {
+      setFaviconSrc(null);
+      return;
+    }
+    if (faviconCache.has(host)) {
+      setFaviconSrc(faviconCache.get(host) ?? null);
+      return;
+    }
+    let active = true;
+    void loadFavicon(host).then((uri) => {
+      if (active) setFaviconSrc(uri);
+    });
+    return () => {
+      active = false;
+    };
+  }, [host, faviconEnabled]);
+
   const sizeClass =
     size === 'sm'
       ? 'w-7 h-7 rounded-lg text-[11px]'
@@ -46,7 +156,23 @@ export function ItemIconBadge({ icon, category, title, size = 'md' }: ItemIconBa
   const iconSize = size === 'sm' ? 14 : size === 'lg' ? 22 : 17;
 
   if (icon?.kind === 'domain') {
-    const brand = DOMAIN_BRANDS[icon.host.toLowerCase()];
+    if (faviconSrc && !imgFailed) {
+      return (
+        <div
+          className={`${sizeClass} shrink-0 flex items-center justify-center bg-[var(--bg-elevated)] border border-[var(--border-subtle)] p-1 shadow-xs overflow-hidden`}
+          aria-hidden="true"
+        >
+          <img
+            src={faviconSrc}
+            alt=""
+            className="w-full h-full object-contain rounded-[inherit]"
+            onError={() => setImgFailed(true)}
+          />
+        </div>
+      );
+    }
+
+    const brand = DOMAIN_BRANDS[host];
     if (brand) {
       return (
         <div
@@ -62,7 +188,7 @@ export function ItemIconBadge({ icon, category, title, size = 'md' }: ItemIconBa
     return (
       <div
         className={`${sizeClass} shrink-0 flex items-center justify-center font-semibold shadow-xs`}
-        style={{ backgroundColor: TEMPLATE_MAP[category].color, color: '#ffffff' }}
+        style={{ backgroundColor: (TEMPLATE_MAP[category] ?? TEMPLATE_MAP.login).color, color: '#ffffff' }}
         aria-hidden="true"
       >
         {letter}
@@ -70,33 +196,8 @@ export function ItemIconBadge({ icon, category, title, size = 'md' }: ItemIconBa
     );
   }
 
-  const color = icon?.kind === 'preset' ? icon.color : TEMPLATE_MAP[category].color;
-  const IconComp = (() => {
-    switch (category) {
-      case 'login':
-        return Globe;
-      case 'password':
-        return KeyRound;
-      case 'secure_note':
-        return FileText;
-      case 'credit_card':
-        return CreditCard;
-      case 'identity':
-        return UserCheck;
-      case 'api_credential':
-        return Webhook;
-      case 'database':
-        return Database;
-      case 'server':
-        return Server;
-      case 'ssh_key':
-        return Terminal;
-      case 'software_license':
-        return BadgeCheck;
-      case 'passkey':
-        return Fingerprint;
-    }
-  })();
+  const color = icon?.kind === 'preset' ? icon.color : (TEMPLATE_MAP[category] ?? TEMPLATE_MAP.login).color;
+  const IconComp = getCategoryIconComponent(category);
 
   return (
     <div

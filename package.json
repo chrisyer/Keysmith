@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "npm --workspace=@keysmith/desktop run dev",
     "build": "npm --workspace=@keysmith/desktop run build",
-    "typecheck": "npm --workspace=@keysmith/desktop run typecheck"
+    "typecheck": "npm --workspace=@keysmith/desktop run typecheck",
+    "tauri:dev": "npm --workspace=@keysmith/desktop run tauri dev",
+    "tauri:build": "npm --workspace=@keysmith/desktop run tauri build"
   }
 }

@@ -1,11 +1,13 @@
 import { Check, Copy, X } from 'lucide-react';
 import { useState } from 'react';
+import { useI18n } from '../i18n';
 import { tauriClient } from '../services/tauriClient';
 import { useUiStore } from '../stores/uiStore';
 import { getCharColorVar } from './ColoredPassword';
 import { ModalDialog } from './ModalDialog';
 
 export function LargeTypeModal() {
+  const { dict, fmt } = useI18n();
   const largeType = useUiStore((s) => s.largeType);
   const closeLargeType = useUiStore((s) => s.closeLargeType);
   const showToast = useUiStore((s) => s.showToast);
@@ -20,7 +22,7 @@ export function LargeTypeModal() {
     setTimeout(() => setCopiedInline(false), 1800);
     showToast({
       label: largeType.label,
-      text: `已复制「${largeType.label}」`,
+      text: `${dict.common.copied}「${largeType.label}」`,
       kind: 'clipboard',
     });
   };
@@ -31,17 +33,17 @@ export function LargeTypeModal() {
       onClose={closeLargeType}
       ariaLabelledBy="large-type-title"
       closedBy="any"
-      className="ks-dialog-dark rounded-2xl w-[min(780px,92vw)] shadow-2xl"
+      className="ks-dialog-dark rounded-xl w-[min(780px,92vw)] shadow-2xl"
     >
       {largeType && (
         <div className="p-6 flex flex-col gap-5">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <h1 id="large-type-title" className="text-sm font-medium text-white/70">
-                大字展示 · {largeType.label}
+              <h1 id="large-type-title" className="text-sm font-medium text-white/80">
+                {dict.largeType.title} · {largeType.label}
               </h1>
               <p className="text-xs text-white/45 mt-0.5">
-                共 {chars.length} 个字符 · 蓝字为数字，橙红为符号，下方为 1-based 字符下标
+                {fmt(dict.largeType.charCount, { count: chars.length })}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -51,13 +53,13 @@ export function LargeTypeModal() {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-medium text-white transition-colors cursor-pointer"
               >
                 {copiedInline ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                {copiedInline ? '已复制' : '复制'}
+                {copiedInline ? dict.common.copied : dict.common.copy}
               </button>
               <button
                 type="button"
                 onClick={closeLargeType}
                 autoFocus
-                aria-label="关闭大字展示"
+                aria-label={dict.common.close}
                 className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors cursor-pointer"
               >
                 <X size={16} />
@@ -88,9 +90,8 @@ export function LargeTypeModal() {
             ))}
           </div>
 
-          <div className="flex items-center justify-between text-[11px] text-white/45">
-            <span>提示：等宽对齐已启用，便于清晰区分 0/O 与 1/l/I</span>
-            <span>按 Esc 或点击外部关闭</span>
+          <div className="flex items-center justify-end text-[11px] text-white/45">
+            <span>{dict.largeType.escHint}</span>
           </div>
         </div>
       )}

@@ -1,8 +1,10 @@
 import { useEffect } from 'react';
-import { tauriClient } from '../services/tauriClient';
+import { getDictionary, resolveLocale } from '../i18n';
+import { isTauriRuntime, tauriClient } from '../services/tauriClient';
 import { useSessionStore } from '../stores/sessionStore';
 import { useUiStore } from '../stores/uiStore';
 import { useVaultStore } from '../stores/vaultStore';
+import { matchesShortcut } from '../utils/shortcuts';
 
 function isEditableElement(el: Element | null): boolean {
   if (!el) return false;
@@ -15,72 +17,84 @@ function isEditableElement(el: Element | null): boolean {
 export function useKeyboardShortcuts(searchInputRef: React.RefObject<HTMLInputElement | null>) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      const key = e.key.toLowerCase();
       const session = useSessionStore.getState();
       const ui = useUiStore.getState();
       const vault = useVaultStore.getState();
+      const sc = ui.shortcuts;
+      const locale = resolveLocale(ui.languageMode);
+      const dict = getDictionary(locale);
 
-      if (session.status !== 'Unlocked') return;
+      if (session.status !== 'Unlocked' || session.addingAccount) return;
 
       const hasOpenModal =
-        Boolean(ui.largeType) || ui.newItemOpen || ui.settingsOpen || ui.quickAccessOpen || Boolean(ui.vaultModal);
+        Boolean(ui.largeType) ||
+        ui.newItemOpen ||
+        ui.settingsOpen ||
+        ui.quickAccessOpen ||
+        ui.generatorOpen ||
+        Boolean(ui.vaultModal);
 
-      // Quick Access: Cmd+Shift+Space or Cmd+K
-      if (mod && ((e.shiftKey && e.code === 'Space') || (!e.shiftKey && key === 'k'))) {
+      if (matchesShortcut(e, sc.quickAccessInApp)) {
         e.preventDefault();
-        ui.setQuickAccessOpen(!ui.quickAccessOpen);
+        if (isTauriRuntime()) {
+          void tauriClient.windowToggleQuickAccess();
+        } else {
+          ui.setQuickAccessOpen(!ui.quickAccessOpen);
+        }
+        return;
+      }
+
+      if (matchesShortcut(e, sc.openGenerator)) {
+        e.preventDefault();
+        if (isTauriRuntime()) {
+          void tauriClient.windowToggleGenerator();
+        } else {
+          ui.setGeneratorOpen(!ui.generatorOpen);
+        }
         return;
       }
 
       if (hasOpenModal) return;
 
-      // Cmd+F: Search
-      if (mod && !e.shiftKey && key === 'f') {
+      if (matchesShortcut(e, sc.search)) {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
         return;
       }
 
-      // Cmd+N: New item
-      if (mod && !e.shiftKey && key === 'n') {
+      if (matchesShortcut(e, sc.newItem)) {
         e.preventDefault();
         ui.setNewItemOpen(true);
         return;
       }
 
-      // Cmd+,: Settings
-      if (mod && e.key === ',') {
+      if (matchesShortcut(e, sc.openSettings)) {
         e.preventDefault();
         ui.setSettingsOpen(true);
         return;
       }
 
-      // Cmd+L: Lock
-      if (mod && !e.shiftKey && key === 'l') {
+      if (matchesShortcut(e, sc.lockVault)) {
         e.preventDefault();
         void session.lock('shortcut');
         return;
       }
 
-      // Cmd+R: Sync
-      if (mod && !e.shiftKey && key === 'r') {
+      if (matchesShortcut(e, sc.syncVault)) {
         e.preventDefault();
         void vault.syncNow(ui.getFilter());
-        ui.showToast({ label: '同步', text: '正在与 Vaultwarden 同步密文...', kind: 'info' });
+        ui.showToast({ label: dict.sidebar.syncing, text: dict.sidebar.syncing, kind: 'info' });
         return;
       }
 
-      // Cmd+S: Save in editor
-      if (mod && key === 's' && ui.isEditing) {
+      if (matchesShortcut(e, sc.saveItem) && ui.isEditing) {
         e.preventDefault();
         const form = document.getElementById('ks-item-editor-form') as HTMLFormElement | null;
         form?.requestSubmit();
         return;
       }
 
-      // Esc: Cancel editor
       if (e.key === 'Escape' && ui.isEditing) {
         e.preventDefault();
         ui.stopEditing();
@@ -90,9 +104,14 @@ export function useKeyboardShortcuts(searchInputRef: React.RefObject<HTMLInputEl
       const item = vault.activeItem;
       if (!item) return;
 
-      // Cmd+E: Toggle Edit
-      if (mod && !e.shiftKey && key === 'e' && !item.deletedAt) {
+      const repromptLocked = Boolean(item.reprompt && !ui.repromptVerifiedIds[item.id]);
+
+      if (matchesShortcut(e, sc.editItem) && !item.deletedAt) {
         e.preventDefault();
+        if (repromptLocked) {
+          ui.showToast({ label: item.title, text: dict.detail.repromptDesc, kind: 'warning' });
+          return;
+        }
         if (ui.isEditing) {
           ui.stopEditing();
         } else {
@@ -108,61 +127,75 @@ export function useKeyboardShortcuts(searchInputRef: React.RefObject<HTMLInputEl
       const userField = fields.find((f) => f.purpose === 'username' && f.value);
       const totpField = fields.find((f) => f.fieldType === 'totp' && f.value);
 
-      // Cmd+Shift+L: Large Type
-      if (mod && e.shiftKey && key === 'l' && pwField) {
+      if (matchesShortcut(e, sc.largeType) && pwField) {
         e.preventDefault();
+        if (repromptLocked) {
+          ui.showToast({ label: item.title, text: dict.detail.repromptDesc, kind: 'warning' });
+          return;
+        }
         ui.openLargeType(pwField.label, pwField.value);
         return;
       }
 
-      // Cmd+Shift+C: Copy Username
-      if (mod && e.shiftKey && key === 'c' && userField) {
+      if (matchesShortcut(e, sc.copyUsername) && userField) {
         e.preventDefault();
         void tauriClient.clipboardCopySecret(userField.value, userField.label, false);
-        ui.showToast({ label: userField.label, text: `已复制「${userField.label}」`, kind: 'info' });
+        ui.showToast({
+          label: userField.label,
+          text: dict.detail.copiedPlainToast.replace('{label}', userField.label),
+          kind: 'info',
+        });
         return;
       }
 
-      // Cmd+Alt+C: Copy TOTP
-      if (mod && e.altKey && key === 'c' && totpField) {
+      if (matchesShortcut(e, sc.copyTotp) && totpField) {
         e.preventDefault();
+        if (repromptLocked) {
+          ui.showToast({ label: item.title, text: dict.detail.repromptDesc, kind: 'warning' });
+          return;
+        }
         void tauriClient.totpCompute(totpField.value).then(async (res) => {
-          await tauriClient.clipboardCopySecret(res.code, '一次性密码', true);
+          await tauriClient.clipboardCopySecret(res.code, 'TOTP', true);
           ui.showToast({
-            label: '一次性密码',
-            text: `已复制「一次性密码」· ${session.clipboardClearSeconds} 秒后自动清空剪贴板`,
+            label: 'TOTP',
+            text: dict.detail.copiedSensitiveToast
+              .replace('{label}', 'TOTP')
+              .replace('{secs}', String(session.clipboardClearSeconds)),
             kind: 'clipboard',
           });
         });
         return;
       }
 
-      // Cmd+C: Copy Password ONLY when no text is selected
-      if (mod && !e.shiftKey && !e.altKey && key === 'c' && pwField) {
+      if (matchesShortcut(e, sc.copyPassword) && pwField) {
         const sel = window.getSelection()?.toString();
         if (sel && sel.length > 0) return;
         e.preventDefault();
+        if (repromptLocked) {
+          ui.showToast({ label: item.title, text: dict.detail.repromptDesc, kind: 'warning' });
+          return;
+        }
         void tauriClient.clipboardCopySecret(pwField.value, pwField.label, true);
         ui.showToast({
           label: pwField.label,
-          text: `已复制「${pwField.label}」· ${session.clipboardClearSeconds} 秒后自动清空剪贴板`,
+          text: dict.detail.copiedSensitiveToast
+            .replace('{label}', pwField.label)
+            .replace('{secs}', String(session.clipboardClearSeconds)),
           kind: 'clipboard',
         });
         return;
       }
 
-      // Cmd+D: Toggle Favorite
-      if (mod && key === 'd') {
+      if (matchesShortcut(e, sc.toggleFavorite)) {
         e.preventDefault();
         void vault.toggleFavorite(item.id, !item.favorite, ui.getFilter());
         return;
       }
 
-      // Cmd+Backspace: Move to Trash
-      if (mod && e.key === 'Backspace' && !item.deletedAt) {
+      if (matchesShortcut(e, sc.moveToTrash) && !item.deletedAt) {
         e.preventDefault();
         void vault.trashItem(item.id, ui.getFilter());
-        ui.showToast({ label: '废纸篓', text: `已将「${item.title}」移入废纸篓`, kind: 'info' });
+        ui.showToast({ label: dict.sidebar.trash, text: `${dict.detail.moveToTrash}: ${item.title}`, kind: 'info' });
       }
     };
 

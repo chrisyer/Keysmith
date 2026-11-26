@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@oddbird/popover-polyfill": "^0.6.0",
     "@tanstack/react-virtual": "^3.13.0",
+    "@tauri-apps/api": "^2",
     "lucide-react": "^0.511.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -18,6 +20,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",
+    "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.4.0",

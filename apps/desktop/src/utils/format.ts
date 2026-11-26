@@ -1,10 +1,12 @@
+import { readStoredLanguage, resolveLocale } from '../i18n';
 import type { ItemPayload } from '../types/domain';
 
 export function formatDateTime(iso: string): string {
   try {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString('zh-CN', {
+    const locale = resolveLocale(readStoredLanguage()) === 'en' ? 'en-US' : 'zh-CN';
+    return d.toLocaleString(locale, {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -27,17 +29,18 @@ export function formatDateShort(iso: string): string {
 }
 
 export function formatRelativeTime(iso: string): string {
+  const isEn = resolveLocale(readStoredLanguage()) === 'en';
   const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '刚刚';
+  if (Number.isNaN(t)) return isEn ? 'Just now' : '刚刚';
   const diffSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (diffSec < 10) return '刚刚';
-  if (diffSec < 60) return `${diffSec} 秒前`;
+  if (diffSec < 10) return isEn ? 'Just now' : '刚刚';
+  if (diffSec < 60) return isEn ? `${diffSec}s ago` : `${diffSec} 秒前`;
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin} 分钟前`;
+  if (diffMin < 60) return isEn ? `${diffMin}m ago` : `${diffMin} 分钟前`;
   const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr} 小时前`;
+  if (diffHr < 24) return isEn ? `${diffHr}h ago` : `${diffHr} 小时前`;
   const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay} 天前`;
+  return isEn ? `${diffDay}d ago` : `${diffDay} 天前`;
 }
 
 export function extractDomain(uri: string): string {

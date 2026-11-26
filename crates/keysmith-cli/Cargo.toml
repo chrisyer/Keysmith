@@ -1,0 +1,22 @@
+[package]
+name = "keysmith-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Keysmith CLI, OpenSSH agent, and Chrome Native Messaging host"
+
+[[bin]]
+name = "ks"
+path = "src/main.rs"
+
+[[bin]]
+name = "keysmith-ssh-agent"
+path = "src/bin/keysmith_ssh_agent.rs"
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.41", features = ["full"] }
+zeroize = { version = "1.8", features = ["derive"] }

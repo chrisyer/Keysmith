@@ -5,11 +5,23 @@ import type {
   ItemDraft,
   ItemFilter,
   ItemSummary,
+  SendItem,
   SyncStatus,
   Vault,
   WatchtowerFlags,
   WatchtowerReport,
 } from '../types/domain';
+
+export function countActiveSends(list: SendItem[]): number {
+  const now = Date.now();
+  return list.filter((item) => {
+    if (item.disabled) return false;
+    if (item.expirationDate && Date.parse(item.expirationDate) <= now) return false;
+    if (item.deletionDate && Date.parse(item.deletionDate) <= now) return false;
+    if (item.maxAccessCount !== null && item.accessCount >= item.maxAccessCount) return false;
+    return true;
+  }).length;
+}
 
 interface VaultStore {
   vaults: Vault[];
@@ -21,8 +33,10 @@ interface VaultStore {
   hibpScanning: boolean;
   totalCount: number;
   favoriteCount: number;
+  archivedCount: number;
   passkeyCount: number;
   trashCount: number;
+  sendCount: number;
   categoryCounts: Record<string, number>;
   tagCounts: Array<{ tag: string; count: number }>;
 
@@ -31,6 +45,11 @@ interface VaultStore {
   selectItem: (id: string | null) => Promise<void>;
   createItem: (draft: ItemDraft, filter: ItemFilter) => Promise<ItemDetail>;
   updateItem: (id: string, draft: ItemDraft, filter: ItemFilter) => Promise<ItemDetail>;
+  duplicateItem: (id: string, filter: ItemFilter) => Promise<ItemDetail>;
+  setItemArchived: (id: string, archived: boolean, filter: ItemFilter) => Promise<ItemDetail>;
+  moveItemsToVault: (ids: string[], targetVaultId: string, filter: ItemFilter) => Promise<number>;
+  batchTrashItems: (ids: string[], filter: ItemFilter) => Promise<number>;
+  batchAddTag: (ids: string[], tag: string, filter: ItemFilter) => Promise<number>;
   trashItem: (id: string, filter: ItemFilter) => Promise<void>;
   restoreItem: (id: string, filter: ItemFilter) => Promise<void>;
   deletePermanent: (id: string, filter: ItemFilter) => Promise<void>;
@@ -41,6 +60,7 @@ interface VaultStore {
   createVault: (name: string, color: string) => Promise<Vault>;
   renameVault: (id: string, name: string) => Promise<void>;
   deleteVault: (id: string, filter: ItemFilter) => Promise<void>;
+  setSendCount: (count: number) => void;
   setSyncStatus: (status: SyncStatus) => void;
   clearOnLock: () => void;
 }
@@ -60,18 +80,21 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
   hibpScanning: false,
   totalCount: 0,
   favoriteCount: 0,
+  archivedCount: 0,
   passkeyCount: 0,
   trashCount: 0,
+  sendCount: 0,
   categoryCounts: {},
   tagCounts: [],
 
   refreshAll: async (filter) => {
-    const [vaults, items, stats, report, syncStatus] = await Promise.all([
+    const [vaults, items, stats, report, syncStatus, sends] = await Promise.all([
       tauriClient.vaultList(),
       tauriClient.itemList(filter),
       tauriClient.itemGetAllStats(),
       tauriClient.watchtowerScan(false),
       tauriClient.syncGetStatus(),
+      tauriClient.sendList().catch(() => []),
     ]);
 
     const currentActiveId = get().activeItemId;
@@ -88,8 +111,10 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
       syncStatus,
       totalCount: stats.totalCount,
       favoriteCount: stats.favoriteCount,
+      archivedCount: stats.archivedCount ?? 0,
       passkeyCount: stats.passkeyCount,
       trashCount: stats.trashCount,
+      sendCount: countActiveSends(sends),
       categoryCounts: stats.categoryCounts,
       tagCounts: stats.tagCounts,
     });
@@ -115,6 +140,7 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
       watchtowerReport: report,
       totalCount: stats.totalCount,
       favoriteCount: stats.favoriteCount,
+      archivedCount: stats.archivedCount ?? 0,
       passkeyCount: stats.passkeyCount,
       trashCount: stats.trashCount,
       categoryCounts: stats.categoryCounts,
@@ -143,6 +169,44 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
     set({ activeItemId: updated.id, activeItem: updated });
     await get().refreshItems(filter);
     return updated;
+  },
+
+  duplicateItem: async (id, filter) => {
+    const created = await tauriClient.itemDuplicate(id);
+    set({ activeItemId: created.id, activeItem: created });
+    await get().refreshItems(filter);
+    return created;
+  },
+
+  setItemArchived: async (id, archived, filter) => {
+    const updated = await tauriClient.itemSetArchived(id, archived);
+    if (get().activeItemId === id) {
+      set({ activeItem: updated });
+    }
+    await get().refreshItems(filter);
+    return updated;
+  },
+
+  moveItemsToVault: async (ids, targetVaultId, filter) => {
+    const count = await tauriClient.itemMoveVault(ids, targetVaultId);
+    await get().refreshItems(filter);
+    return count;
+  },
+
+  batchTrashItems: async (ids, filter) => {
+    const count = await tauriClient.itemBatchTrash(ids);
+    const currentId = get().activeItemId;
+    if (currentId && ids.includes(currentId)) {
+      set({ activeItemId: null, activeItem: null });
+    }
+    await get().refreshItems(filter);
+    return count;
+  },
+
+  batchAddTag: async (ids, tag, filter) => {
+    const count = await tauriClient.itemBatchAddTag(ids, tag);
+    await get().refreshItems(filter);
+    return count;
   },
 
   trashItem: async (id, filter) => {
@@ -216,6 +280,8 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
     await get().refreshAll(filter);
   },
 
+  setSendCount: (sendCount) => set({ sendCount }),
+
   setSyncStatus: (syncStatus) => set({ syncStatus }),
 
   clearOnLock: () =>
@@ -227,8 +293,10 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
       watchtowerReport: null,
       totalCount: 0,
       favoriteCount: 0,
+      archivedCount: 0,
       passkeyCount: 0,
       trashCount: 0,
+      sendCount: 0,
       categoryCounts: {},
       tagCounts: [],
     }),

@@ -1,12 +1,14 @@
 import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { ModalDialog } from '../../components/ModalDialog';
+import { useI18n } from '../../i18n';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 
 const VAULT_COLORS = ['#0572EC', '#0D9488', '#7C3AED', '#D97706', '#DB2777', '#16A34A'];
 
 export function VaultModal() {
+  const { dict, fmt } = useI18n();
   const vaultModal = useUiStore((s) => s.vaultModal);
   const setVaultModal = useUiStore((s) => s.setVaultModal);
   const setActiveVault = useUiStore((s) => s.setActiveVault);
@@ -33,10 +35,10 @@ export function VaultModal() {
     if (vaultModal.mode === 'create') {
       const created = await createVault(name, color);
       setActiveVault(created.id);
-      showToast({ label: 'Vault', text: `已创建保险库「${created.name}」`, kind: 'info' });
+      showToast({ label: 'Vault', text: fmt(dict.vaultModal.createdToast, { name: created.name }), kind: 'info' });
     } else if (vaultModal.vaultId) {
       await renameVault(vaultModal.vaultId, name);
-      showToast({ label: 'Vault', text: `已重命名为「${name.trim()}」`, kind: 'info' });
+      showToast({ label: 'Vault', text: fmt(dict.vaultModal.renamedToast, { name: name.trim() }), kind: 'info' });
     }
     handleClose();
   };
@@ -53,12 +55,12 @@ export function VaultModal() {
         <form onSubmit={(e) => void handleSubmit(e)} className="p-5 flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h1 id="vault-modal-title" className="text-sm font-semibold text-[var(--text-primary)]">
-              {vaultModal.mode === 'create' ? '新建保险库 (Vault)' : '重命名保险库'}
+              {vaultModal.mode === 'create' ? dict.vaultModal.createTitle : dict.vaultModal.renameTitle}
             </h1>
             <button
               type="button"
               onClick={handleClose}
-              aria-label="关闭"
+              aria-label={dict.common.close}
               className="p-1 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)] cursor-pointer"
             >
               <X size={15} />
@@ -67,7 +69,7 @@ export function VaultModal() {
 
           <div>
             <label htmlFor="vault-name-input" className="block text-xs text-[var(--text-secondary)] mb-1.5">
-              保险库名称
+              {dict.vaultModal.nameLabel}
             </label>
             <input
               id="vault-name-input"
@@ -76,21 +78,21 @@ export function VaultModal() {
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="例如：家庭共享 / 客户项目"
-              className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[var(--accent-primary)] focus:outline-none text-xs text-[var(--text-primary)]"
+              placeholder={dict.vaultModal.namePlaceholder}
+              className="ks-input w-full border-[var(--border-strong)]"
             />
           </div>
 
           {vaultModal.mode === 'create' && (
             <div>
-              <span className="block text-xs text-[var(--text-secondary)] mb-1.5">标识色</span>
+              <span className="block text-xs text-[var(--text-secondary)] mb-1.5">{dict.vaultModal.colorLabel}</span>
               <div className="flex items-center gap-2">
                 {VAULT_COLORS.map((c) => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => setColor(c)}
-                    aria-label={`选择颜色 ${c}`}
+                    aria-label={c}
                     className={`w-6 h-6 rounded-full cursor-pointer transition-transform ${
                       color === c ? 'scale-115 ring-2 ring-offset-2 ring-[var(--accent-primary)]' : ''
                     }`}
@@ -107,13 +109,13 @@ export function VaultModal() {
               onClick={handleClose}
               className="px-3 py-1.5 rounded-lg border border-[var(--border-strong)] text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] cursor-pointer"
             >
-              取消
+              {dict.common.cancel}
             </button>
             <button
               type="submit"
               className="px-3.5 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white cursor-pointer"
             >
-              {vaultModal.mode === 'create' ? '创建' : '保存'}
+              {vaultModal.mode === 'create' ? dict.common.create : dict.common.save}
             </button>
           </div>
         </form>

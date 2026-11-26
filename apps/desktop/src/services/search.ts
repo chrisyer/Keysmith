@@ -1,4 +1,5 @@
 import type { ItemCategory, ItemDetail, Vault } from '../types/domain';
+import { extractDomain } from '../utils/format';
 
 const PINYIN_TOKENS: Record<string, string> = {
   个人: 'gr geren',
@@ -58,6 +59,28 @@ const CATEGORY_ALIASES: Record<string, ItemCategory> = {
   passkey: 'passkey',
   txmy: 'passkey',
   通行密钥: 'passkey',
+  bank: 'bank_account',
+  bank_account: 'bank_account',
+  银行账户: 'bank_account',
+  crypto: 'crypto_wallet',
+  crypto_wallet: 'crypto_wallet',
+  钱包: 'crypto_wallet',
+  wifi: 'wifi_router',
+  wifi_router: 'wifi_router',
+  passport: 'passport',
+  护照: 'passport',
+  driver: 'driver_license',
+  driver_license: 'driver_license',
+  驾照: 'driver_license',
+  驾驶证: 'driver_license',
+  membership: 'membership',
+  会员卡: 'membership',
+  medical: 'medical_record',
+  medical_record: 'medical_record',
+  医疗: 'medical_record',
+  doc: 'document',
+  document: 'document',
+  文档: 'document',
 };
 
 export interface ParsedSearchQuery {
@@ -100,57 +123,118 @@ export function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
   return result;
 }
 
-function buildSearchCorpus(item: ItemDetail, vaultName: string): string {
-  const fieldsText = item.sections
-    .flatMap((s) => s.fields)
-    .filter((f) => !f.sensitive)
-    .map((f) => `${f.label} ${f.value}`)
-    .join(' ');
-  const urlsText = item.urls.map((u) => u.uri).join(' ');
-  const passkeysText = (item.passkeys ?? []).map((p) => `${p.rpId} ${p.rpName} ${p.userName}`).join(' ');
-  const base = `${item.title} ${item.subtitle ?? ''} ${vaultName} ${item.category} ${item.tags.join(' ')} ${urlsText} ${passkeysText} ${fieldsText} ${item.notes}`.toLowerCase();
-
-  let pinyinExtras = '';
+function expandPinyin(text: string): string {
+  const hits: Array<{ pos: number; short: string; full: string }> = [];
   for (const [zh, py] of Object.entries(PINYIN_TOKENS)) {
-    if (base.includes(zh)) {
-      pinyinExtras += ` ${py}`;
+    const pos = text.indexOf(zh);
+    if (pos >= 0) {
+      hits.push({ pos, short: py.split(' ')[0] ?? py, full: py });
     }
   }
-  return `${base}${pinyinExtras}`;
+  hits.sort((a, b) => a.pos - b.pos);
+
+  let initials = '';
+  let out = '';
+  for (const h of hits) {
+    initials += h.short;
+    out += ` ${h.full}`;
+  }
+  return initials ? `${out} ${initials}` : out;
 }
 
-export function matchesSearchQuery(item: ItemDetail, vaults: Vault[], rawQuery: string): boolean {
-  if (!rawQuery.trim()) return true;
+function stripEmailDomains(text: string): string {
+  return text.replace(/([^\s@]+)@([^\s@]+\.[^\s@]+)/g, '$1');
+}
+
+export function scoreSearchQuery(item: ItemDetail, vaults: Vault[], rawQuery: string): number | null {
+  if (!rawQuery.trim()) return 0;
   const parsed = parseSearchQuery(rawQuery);
   const vault = vaults.find((v) => v.id === item.vaultId);
-  const vaultName = vault?.name.toLowerCase() ?? '';
+  const vaultNameRaw = vault?.name ?? '';
+  const vaultName = vaultNameRaw.toLowerCase();
 
-  if (parsed.favoriteOnly && !item.favorite) {
-    return false;
-  }
-
+  if (parsed.favoriteOnly && !item.favorite) return null;
   if (parsed.passkeyOnly && (item.passkeys?.length ?? 0) === 0 && item.category !== 'passkey') {
-    return false;
+    return null;
   }
 
   for (const tag of parsed.tags) {
-    if (!item.tags.some((t) => t.toLowerCase().includes(tag))) {
-      return false;
-    }
+    if (!item.tags.some((t) => t.toLowerCase().includes(tag))) return null;
   }
 
+  const vaultPinyin = expandPinyin(vaultNameRaw);
   for (const v of parsed.vaults) {
-    const vPinyin = PINYIN_TOKENS[vault?.name ?? ''] ?? '';
-    if (!vaultName.includes(v) && !vPinyin.includes(v)) {
-      return false;
-    }
+    if (!vaultName.includes(v) && !vaultPinyin.includes(v)) return null;
   }
 
   if (parsed.categories.length > 0 && !parsed.categories.includes(item.category)) {
-    return false;
+    return null;
   }
 
-  if (parsed.freeTerms.length === 0) return true;
-  const corpus = buildSearchCorpus(item, vault?.name ?? '');
-  return parsed.freeTerms.every((term) => corpus.includes(term));
+  if (parsed.freeTerms.length === 0) return 100;
+
+  const titleLower = item.title.toLowerCase();
+  const titleWithPinyin = `${titleLower}${expandPinyin(item.title)}`;
+  const urlHosts = item.urls.map((u) => extractDomain(u.uri).toLowerCase()).filter(Boolean);
+  const fullUrls = item.urls.map((u) => u.uri.toLowerCase()).filter(Boolean);
+  const passkeyRps = (item.passkeys ?? [])
+    .flatMap((p) => [p.rpId.toLowerCase(), p.rpName.toLowerCase()])
+    .filter(Boolean);
+  const tagsLower = item.tags.map((t) => t.toLowerCase());
+
+  const secondaryParts: string[] = [];
+  if (item.subtitle) secondaryParts.push(item.subtitle);
+  for (const sec of item.sections) {
+    for (const f of sec.fields) {
+      if (!f.sensitive && f.value.trim()) secondaryParts.push(f.value);
+    }
+  }
+  for (const pk of item.passkeys ?? []) {
+    if (pk.userName) secondaryParts.push(pk.userName);
+  }
+  const rawSecondary = secondaryParts.join(' ').toLowerCase();
+  const strippedSecondary = stripEmailDomains(rawSecondary);
+
+  const notesLower = (item.notes ?? '').toLowerCase();
+  const notesStripped = stripEmailDomains(notesLower);
+  const vaultCorpus = `${vaultName}${vaultPinyin} ${item.category}`;
+
+  let totalScore = 0;
+
+  for (const term of parsed.freeTerms) {
+    let best = 0;
+
+    if (titleLower === term) {
+      best = Math.max(best, 1000);
+    } else if (titleLower.startsWith(term)) {
+      best = Math.max(best, 800);
+    } else if (titleWithPinyin.includes(term)) {
+      best = Math.max(best, 650);
+    }
+
+    if (urlHosts.some((h) => h.includes(term)) || passkeyRps.some((rp) => rp.includes(term))) {
+      best = Math.max(best, 550);
+    }
+
+    if (fullUrls.some((u) => u.includes(term)) || tagsLower.some((t) => t.includes(term))) {
+      best = Math.max(best, 400);
+    }
+
+    const allowEmailDomain = term.includes('@');
+    if ((allowEmailDomain ? rawSecondary : strippedSecondary).includes(term)) {
+      best = Math.max(best, 300);
+    }
+    if ((allowEmailDomain ? notesLower : notesStripped).includes(term) || vaultCorpus.includes(term)) {
+      best = Math.max(best, 180);
+    }
+
+    if (best === 0) return null;
+    totalScore += best;
+  }
+
+  return totalScore;
+}
+
+export function matchesSearchQuery(item: ItemDetail, vaults: Vault[], rawQuery: string): boolean {
+  return scoreSearchQuery(item, vaults, rawQuery) !== null;
 }

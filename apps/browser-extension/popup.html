@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Keysmith</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <img src="icons/48.png" alt="Keysmith" class="brand-logo" />
+        <div class="brand-text">
+          <span class="brand-name">Keysmith</span>
+          <span id="domain-label" class="domain-label">当前页面</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span id="status-badge" class="status-badge status-disconnected">检查中...</span>
+        <button id="refresh-btn" class="icon-btn" title="刷新状态" aria-label="刷新状态">↻</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- Setup Guide when Native Messaging Host is missing -->
+      <section id="setup-panel" class="card setup-card hidden">
+        <div class="card-title">尚未安装 Native Messaging 主机</div>
+        <p class="card-desc">
+          浏览器扩展需要通过本地安全通道与 Keysmith 桌面端通信。请先在终端运行以下命令完成绑定：
+        </p>
+        <div class="code-block">
+          <code id="install-cmd">ks install-nmh &lt;extension-id&gt;</code>
+          <button id="copy-cmd-btn" class="btn btn-secondary btn-sm">复制命令</button>
+        </div>
+        <div class="ext-id-row">
+          <span class="muted">扩展 ID：</span>
+          <code id="ext-id-text" class="ext-id-code"></code>
+          <button id="copy-ext-id-btn" class="link-btn">复制 ID</button>
+        </div>
+      </section>
+
+      <!-- Locked / Disconnected Notice -->
+      <section id="locked-panel" class="card notice-card hidden">
+        <div id="locked-title" class="card-title">Keysmith 桌面端已锁定</div>
+        <p id="locked-desc" class="card-desc">
+          请在 Keysmith 桌面应用中解锁保险库（支持 Touch ID / 主密码），然后点击右上角刷新。
+        </p>
+        <button id="retry-connect-btn" class="btn btn-primary btn-full">重新连接</button>
+      </section>
+
+      <!-- Unlocked Vault View -->
+      <section id="vault-panel" class="vault-panel hidden">
+        <div class="search-wrap">
+          <input
+            id="search-input"
+            type="search"
+            class="search-input"
+            placeholder="搜索密码、用户名或网站..."
+            autocomplete="off"
+          />
+        </div>
+
+        <div id="section-header" class="section-header">匹配当前网站的登录项</div>
+        <div id="items-list" class="items-list"></div>
+        <div id="empty-state" class="empty-state hidden">
+          未找到匹配当前网站的登录凭证，可尝试上方搜索。
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <button id="toggle-setup-btn" class="link-btn">安装与配置指南</button>
+      <span id="toast" class="toast hidden">已复制</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

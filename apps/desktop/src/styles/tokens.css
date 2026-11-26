@@ -11,57 +11,57 @@
     color-scheme: light;
   }
 
-  /* Raw Light Tokens (docs/03-ui-and-interaction.md §1.1) */
-  --bg-sidebar-light: #eef0f3;
-  --bg-list-light: #f8f9fa;
+  /* Light Tokens (Native macOS Apple Passwords / 1Password HIG) */
+  --bg-sidebar-light: #f2f2f5;
+  --bg-list-light: #fafafa;
   --bg-detail-light: #ffffff;
-  --bg-card-light: #f3f5f8;
+  --bg-card-light: #f5f5f7;
   --bg-elevated-light: #ffffff;
   --bg-input-light: #ffffff;
-  --bg-hover-light: rgba(0, 0, 0, 0.045);
-  --bg-selected-light: rgba(5, 114, 236, 0.12);
-  --border-subtle-light: rgba(0, 0, 0, 0.08);
-  --border-strong-light: rgba(0, 0, 0, 0.14);
-  --text-primary-light: #181a1f;
-  --text-secondary-light: #5c6470;
-  --text-muted-light: #868e96;
-  --accent-primary-light: #0572ec;
-  --accent-hover-light: #0461ca;
-  --pw-letter-light: #181a1f;
-  --pw-digit-light: #0572ec;
+  --bg-hover-light: rgba(0, 0, 0, 0.04);
+  --bg-selected-light: rgba(0, 122, 255, 0.11);
+  --border-subtle-light: rgba(0, 0, 0, 0.075);
+  --border-strong-light: rgba(0, 0, 0, 0.13);
+  --text-primary-light: #1d1d1f;
+  --text-secondary-light: #636366;
+  --text-muted-light: #8e8e93;
+  --accent-primary-light: #007aff;
+  --accent-hover-light: #0066d6;
+  --pw-letter-light: #1d1d1f;
+  --pw-digit-light: #007aff;
   --pw-symbol-light: #d9480f;
-  --status-danger-light: #e03131;
+  --status-danger-light: #ff3b30;
   --status-warning-light: #d97706;
   --status-caution-light: #ca8a04;
-  --status-success-light: #16a34a;
-  --status-info-light: #0572ec;
-  --scrollbar-thumb-light: rgba(24, 26, 31, 0.28);
+  --status-success-light: #28a745;
+  --status-info-light: #007aff;
+  --scrollbar-thumb-light: rgba(0, 0, 0, 0.22);
 
-  /* Raw Dark Tokens */
-  --bg-sidebar-dark: #1a1d21;
-  --bg-list-dark: #202328;
-  --bg-detail-dark: #262a30;
-  --bg-card-dark: #2e333b;
-  --bg-elevated-dark: #2c313a;
-  --bg-input-dark: #1e2228;
-  --bg-hover-dark: rgba(255, 255, 255, 0.06);
-  --bg-selected-dark: rgba(59, 147, 255, 0.18);
-  --border-subtle-dark: rgba(255, 255, 255, 0.09);
-  --border-strong-dark: rgba(255, 255, 255, 0.16);
-  --text-primary-dark: #f1f3f5;
-  --text-secondary-dark: #9ba3b0;
-  --text-muted-dark: #6f7785;
-  --accent-primary-dark: #3b93ff;
-  --accent-hover-dark: #54a3ff;
-  --pw-letter-dark: #f1f3f5;
-  --pw-digit-dark: #58a6ff;
-  --pw-symbol-dark: #ff7a59;
-  --status-danger-dark: #ff6b6b;
-  --status-warning-dark: #fbbf24;
-  --status-caution-dark: #facc15;
-  --status-success-dark: #4ade80;
-  --status-info-dark: #60a5fa;
-  --scrollbar-thumb-dark: rgba(241, 243, 245, 0.28);
+  /* Dark Tokens (Neutral macOS Graphite) */
+  --bg-sidebar-dark: #1c1c1e;
+  --bg-list-dark: #212124;
+  --bg-detail-dark: #1e1e20;
+  --bg-card-dark: #27272a;
+  --bg-elevated-dark: #28282b;
+  --bg-input-dark: #1b1b1d;
+  --bg-hover-dark: rgba(255, 255, 255, 0.055);
+  --bg-selected-dark: rgba(10, 132, 255, 0.19);
+  --border-subtle-dark: rgba(255, 255, 255, 0.08);
+  --border-strong-dark: rgba(255, 255, 255, 0.14);
+  --text-primary-dark: #f5f5f7;
+  --text-secondary-dark: #a1a1a6;
+  --text-muted-dark: #78787d;
+  --accent-primary-dark: #0a84ff;
+  --accent-hover-dark: #409cff;
+  --pw-letter-dark: #f5f5f7;
+  --pw-digit-dark: #60a5fa;
+  --pw-symbol-dark: #ff8a65;
+  --status-danger-dark: #ff453a;
+  --status-warning-dark: #ffd60a;
+  --status-caution-dark: #ffd60a;
+  --status-success-dark: #32d74b;
+  --status-info-dark: #0a84ff;
+  --scrollbar-thumb-dark: rgba(255, 255, 255, 0.22);
 
   /* Default (Light) fallback before @supports(light-dark) */
   --bg-sidebar: var(--bg-sidebar-light);
@@ -203,12 +203,19 @@
 }
 
 html {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  font-size: 14px;
+  letter-spacing: -0.005em;
   background-color: var(--bg-detail);
   color: var(--text-primary);
   accent-color: var(--accent-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+html.ks-floating-window,
+html.ks-floating-window body {
+  background-color: transparent !important;
 }
 
 body {
@@ -302,10 +309,165 @@ textarea,
   }
 }
 
-/* Accessible Focus Rings */
-:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
+/* Accessible Focus Rings (layered so Tailwind utilities override cleanly, and never put hard rects on text inputs) */
+@layer base {
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+  }
+
+  select {
+    -webkit-appearance: none;
+    appearance: none;
+    min-height: 34px;
+    line-height: 1.35;
+    cursor: pointer;
+  }
+
+  select:focus-visible {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 22%, transparent);
+  }
+
+  input[type="search"]::-webkit-search-cancel-button,
+  input[type="search"]::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  :is(button, a, summary, [role="button"], input[type="checkbox"], input[type="radio"]):focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .ks-select,
+  .ks-select-sm {
+    -webkit-appearance: none;
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 8px;
+    border: 1px solid var(--border-strong);
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    line-height: 1.35;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.65rem center;
+    background-size: 13px 13px;
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .ks-select {
+    min-height: 34px;
+    padding: 0.35rem 2rem 0.35rem 0.65rem;
+    font-size: 12px;
+  }
+
+  .ks-select-sm {
+    min-height: 28px;
+    padding: 0.2rem 1.75rem 0.2rem 0.55rem;
+    font-size: 11px;
+    border-radius: 6px;
+    background-position: right 0.5rem center;
+    background-size: 12px 12px;
+  }
+
+  .ks-select:hover,
+  .ks-select-sm:hover {
+    background-color: var(--bg-hover);
+  }
+
+  .ks-input {
+    min-height: 34px;
+    padding: 0.375rem 0.625rem;
+    font-size: 0.75rem;
+    line-height: 1.35;
+    border-radius: 0.5rem;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+
+  .ks-input:focus {
+    border-color: var(--accent-primary);
+    outline: none;
+  }
+
+  .ks-input::placeholder {
+    color: var(--text-muted);
+  }
+
+  @supports (appearance: base-select) {
+    select,
+    select::picker(select) {
+      appearance: base-select;
+    }
+
+    .ks-select,
+    .ks-select-sm {
+      background-image: none;
+      gap: 0.45rem;
+    }
+
+    .ks-select {
+      padding-right: 0.65rem;
+    }
+
+    .ks-select-sm {
+      padding-right: 0.55rem;
+    }
+
+    select::picker(select) {
+      background-color: var(--bg-elevated);
+      color: var(--text-primary);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 4px;
+      margin-top: 4px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+    }
+
+    select::picker-icon {
+      color: var(--text-muted);
+      margin-inline-start: auto;
+      width: 13px;
+      height: 13px;
+      transition: transform 0.16s ease;
+    }
+
+    select:open::picker-icon {
+      transform: rotate(180deg);
+    }
+
+    select option {
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--text-primary);
+      cursor: pointer;
+    }
+
+    select option:hover {
+      background-color: var(--bg-hover);
+    }
+
+    select option:checked {
+      background-color: var(--bg-selected);
+      color: var(--accent-primary);
+      font-weight: 500;
+    }
+
+    select option::checkmark {
+      color: var(--accent-primary);
+    }
+  }
 }
 
 /* Modal & Top-Layer Dialog Rules (dialog + animate-to-from-top-layer) */

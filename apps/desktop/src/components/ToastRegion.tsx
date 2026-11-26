@@ -1,10 +1,12 @@
 import { ShieldCheck, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useI18n } from '../i18n';
 import { tauriClient } from '../services/tauriClient';
 import { useUiStore } from '../stores/uiStore';
 import { announceAria } from '../utils/topLayer';
 
 export function ToastRegion() {
+  const { dict, fmt } = useI18n();
   const toast = useUiStore((s) => s.toast);
   const dismissToast = useUiStore((s) => s.dismissToast);
   const countdown = useUiStore((s) => s.clipboardCountdown);
@@ -58,12 +60,15 @@ export function ToastRegion() {
 
   const displayText =
     toast?.kind === 'clipboard' && countdown && countdown.label === toast.label
-      ? `已复制「${toast.label}」· ${countdown.remainingSeconds} 秒后自动清空剪贴板`
+      ? fmt(dict.toast.clipboardCountdownToast, {
+          label: toast.label,
+          secs: countdown.remainingSeconds,
+        })
       : toast?.text ?? '';
 
   return (
-    <div role="region" aria-label="通知">
-      <p className="inclusively-hidden">屏幕阅读器状态播报</p>
+    <div role="region" aria-label={dict.toast.regionAriaLabel}>
+      <p className="inclusively-hidden">{dict.toast.srStatusLabel}</p>
       <div id="ks-live-region" className="inclusively-hidden" aria-live="polite" />
 
       <div
@@ -94,7 +99,7 @@ export function ToastRegion() {
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer shrink-0"
               >
                 <Trash2 size={11} />
-                立即清空
+                {dict.toast.clearBtn}
               </button>
             )}
             <button
@@ -102,7 +107,7 @@ export function ToastRegion() {
               popoverTarget="ks-toast-popover"
               popoverTargetAction="hide"
               onClick={dismissToast}
-              aria-label="关闭通知"
+              aria-label={dict.toast.dismissAriaLabel}
               className="p-1 rounded-full hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer shrink-0"
             >
               <X size={13} />

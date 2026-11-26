@@ -6,16 +6,21 @@
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="color-scheme" content="light dark" />
-    <script>
-      try {
-        var m = document.querySelector('meta[name="color-scheme"]');
-        var s = localStorage.getItem('color-scheme');
-        if (m && (s === 'light' || s === 'dark')) {
-          m.content = s;
+    <style id="ks-boot-bg">
+      html,
+      body {
+        background-color: #f2f2f5;
+        margin: 0;
+      }
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          background-color: #1c1c1e;
         }
-      } catch (e) {}
-    </script>
-    <title>Keysmith — 本地优先密码管理器</title>
+      }
+    </style>
+    <script src="/theme-init.js"></script>
+    <title>Keysmith</title>
   </head>
   <body>
     <div id="root"></div>

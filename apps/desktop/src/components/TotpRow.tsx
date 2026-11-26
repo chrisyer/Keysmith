@@ -1,5 +1,6 @@
 import { Check, Copy, Maximize2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useI18n } from '../i18n';
 import { tauriClient } from '../services/tauriClient';
 import { useSessionStore } from '../stores/sessionStore';
 import { useUiStore } from '../stores/uiStore';
@@ -11,6 +12,7 @@ interface TotpRowProps {
 }
 
 export function TotpRow({ label, secretOrUri }: TotpRowProps) {
+  const { dict, fmt } = useI18n();
   const [totp, setTotp] = useState<TotpCode>({
     code: '000000',
     formattedCode: '000 000',
@@ -51,7 +53,7 @@ export function TotpRow({ label, secretOrUri }: TotpRowProps) {
     setTimeout(() => setCopied(false), 1400);
     showToast({
       label,
-      text: `已复制「${label}」· ${clearSec} 秒后自动清空剪贴板`,
+      text: fmt(dict.totp.copiedToast, { label, secs: clearSec }),
       kind: 'clipboard',
     });
   };
@@ -80,8 +82,8 @@ export function TotpRow({ label, secretOrUri }: TotpRowProps) {
               e.stopPropagation();
               openLargeType(label, totp.code);
             }}
-            title="大字展示 (Large Type)"
-            aria-label="大字展示验证码"
+            title={dict.totp.largeTypeTitle}
+            aria-label={dict.totp.largeTypeAria}
             className="p-1.5 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] transition-colors cursor-pointer"
           >
             <Maximize2 size={14} />
@@ -89,8 +91,8 @@ export function TotpRow({ label, secretOrUri }: TotpRowProps) {
           <button
             type="button"
             onClick={(e) => void handleCopy(e)}
-            title="复制验证码"
-            aria-label="复制验证码"
+            title={dict.totp.copyCodeTitle}
+            aria-label={dict.totp.copyCodeAria}
             className="p-1.5 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] transition-colors cursor-pointer"
           >
             {copied ? <Check size={14} className="text-[var(--status-success)]" /> : <Copy size={14} />}
@@ -101,7 +103,7 @@ export function TotpRow({ label, secretOrUri }: TotpRowProps) {
           className={`flex items-center gap-1.5 pl-2 ${
             isExpiring ? 'text-[var(--status-danger)] ks-pulse-danger' : 'text-[var(--text-secondary)]'
           }`}
-          title={`剩余 ${totp.remainingSeconds} 秒`}
+          title={fmt(dict.totp.remainingTitle, { secs: totp.remainingSeconds })}
         >
           <svg width="24" height="24" viewBox="0 0 24 24" className="-rotate-90">
             <circle

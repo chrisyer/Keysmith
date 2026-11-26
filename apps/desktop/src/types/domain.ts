@@ -9,7 +9,15 @@ export type ItemCategory =
   | 'server'
   | 'ssh_key'
   | 'software_license'
-  | 'passkey';
+  | 'passkey'
+  | 'bank_account'
+  | 'crypto_wallet'
+  | 'wifi_router'
+  | 'passport'
+  | 'driver_license'
+  | 'membership'
+  | 'medical_record'
+  | 'document';
 
 export type FieldType =
   | 'text'
@@ -78,6 +86,14 @@ export interface WatchtowerFlags {
   ignoreUnsecuredUrl: boolean;
 }
 
+export interface ItemAttachment {
+  id: string;
+  fileName: string;
+  size: number;
+  sizeName: string;
+  hasLocalData: boolean;
+}
+
 export interface PasskeyCredential {
   credentialId: string; // unpadded Base64URL
   rpId: string;
@@ -137,6 +153,9 @@ export interface ItemPayload {
   notes: string;
   passwordHistory: PasswordHistoryEntry[];
   watchtower: WatchtowerFlags;
+  archived?: boolean;
+  reprompt?: boolean;
+  attachments?: ItemAttachment[];
   createdAt: string;
   updatedAt: string;
 }
@@ -147,6 +166,7 @@ export interface Vault {
   icon: string;
   color: string;
   isDefault: boolean;
+  isOrganization?: boolean;
   itemCount: number;
 }
 
@@ -167,6 +187,9 @@ export interface ItemSummary {
   icon?: ItemIcon;
   tags: string[];
   favorite: boolean;
+  archived?: boolean;
+  reprompt?: boolean;
+  attachmentCount?: number;
   hasTotp: boolean;
   hasPasskey: boolean;
   primaryUrl?: string;
@@ -190,6 +213,8 @@ export interface ItemDraft {
   vaultId: string;
   title: string;
   favorite: boolean;
+  archived?: boolean;
+  reprompt?: boolean;
   category: ItemCategory;
   subtitle?: string;
   icon?: ItemIcon;
@@ -200,6 +225,7 @@ export interface ItemDraft {
   notes: string;
   passwordHistory: PasswordHistoryEntry[];
   watchtower: WatchtowerFlags;
+  attachments?: ItemAttachment[];
 }
 
 export type SortBy = 'title_asc' | 'title_desc' | 'updated_desc' | 'created_desc';
@@ -209,6 +235,7 @@ export interface ItemFilter {
   category?: ItemCategory | null;
   tag?: string | null;
   favorite?: boolean;
+  archived?: boolean;
   passkeyOnly?: boolean;
   trashed?: boolean;
   watchtowerIssue?: WatchtowerIssueType | null;
@@ -216,10 +243,21 @@ export interface ItemFilter {
   sortBy?: SortBy;
 }
 
+export interface ItemStats {
+  totalCount: number;
+  favoriteCount: number;
+  archivedCount: number;
+  passkeyCount: number;
+  trashCount: number;
+  categoryCounts: Record<string, number>;
+  tagCounts: Array<{ tag: string; count: number }>;
+}
+
 export type AuthStatus = 'Unauthenticated' | 'Locked' | 'Unlocked';
 
 export interface SessionState {
   status: AuthStatus;
+  accountId: string;
   email: string;
   displayName: string;
   serverUrl: string;
@@ -228,7 +266,32 @@ export interface SessionState {
   clipboardClearSeconds: number;
   lastSyncAt: string;
   kdfType: 'Argon2id' | 'PBKDF2';
+  closeToTray: boolean;
+  lockOnSleep: boolean;
+  screenCaptureProtected: boolean;
+  vibrancyEnabled: boolean;
+  faviconEnabled: boolean;
+  quickAccessShortcut: string;
+  biometricMaxDays: number;
+  launchAtLogin: boolean;
 }
+
+export type SessionPreferencesPatch = Partial<
+  Pick<
+    SessionState,
+    | 'biometricEnabled'
+    | 'autoLockMinutes'
+    | 'clipboardClearSeconds'
+    | 'closeToTray'
+    | 'lockOnSleep'
+    | 'screenCaptureProtected'
+    | 'vibrancyEnabled'
+    | 'faviconEnabled'
+    | 'quickAccessShortcut'
+    | 'biometricMaxDays'
+    | 'launchAtLogin'
+  >
+>;
 
 export type SyncStateKind = 'idle' | 'syncing' | 'offline' | 'error';
 
@@ -289,4 +352,142 @@ export interface KdfConfig {
   kdfIterations: number;
   kdfMemory?: number;
   kdfParallelism?: number;
+}
+
+export interface AccountSummary {
+  id: string;
+  email: string;
+  displayName: string;
+  serverUrl: string;
+  isActive: boolean;
+  kdfType: string;
+  lastSyncAt: string;
+}
+
+export interface GeneratorHistoryEntry {
+  id: string;
+  value: string;
+  mode: GeneratorMode;
+  entropyBits: number;
+  source?: string;
+  createdAt: string;
+}
+
+export interface SshKeyPair {
+  publicKey: string;
+  privateKeyOpenssh: string;
+  fingerprintSha256: string;
+}
+
+export interface AttachmentDownloadResult {
+  fileName: string;
+  mimeType: string;
+  dataBase64: string;
+}
+
+export type ImportFormat = '1pux' | 'bitwarden_json' | 'bitwarden_csv' | 'chrome_csv';
+
+export interface ImportSummary {
+  importedVaults: number;
+  importedItems: number;
+  skippedItems: number;
+  warnings: string[];
+}
+
+export type ExportFormat = 'keysmith_encrypted_json' | 'bitwarden_json' | 'csv';
+
+export interface ExportResult {
+  fileName: string;
+  content: string;
+}
+
+export interface AppUpdateInfo {
+  currentVersion: string;
+  channel?: string;
+  signed?: boolean;
+  status?: string;
+  latestVersion?: string;
+  updateAvailable?: boolean;
+  releaseUrl?: string;
+  notes?: string;
+  checkedAt?: string;
+}
+
+export type LanguageMode = 'system' | 'zh-CN' | 'en';
+
+export interface AppSettings {
+  language: LanguageMode;
+  theme: 'system' | 'light' | 'dark';
+  customShortcuts: Record<string, string>;
+  lastServerUrl?: string;
+}
+
+export interface AppSettingsPatch {
+  language?: LanguageMode;
+  theme?: 'system' | 'light' | 'dark';
+  customShortcuts?: Record<string, string>;
+  lastServerUrl?: string;
+}
+
+export type SendType = 'text' | 'file';
+
+export interface SendItem {
+  id: string;
+  accessId: string;
+  sendType: SendType;
+  name: string;
+  notes?: string;
+  text?: string;
+  hidden: boolean;
+  fileName?: string;
+  fileSize?: number;
+  fileSizeName?: string;
+  shareUrl: string;
+  maxAccessCount: number | null;
+  accessCount: number;
+  expirationDate?: string;
+  deletionDate: string;
+  revisionDate: string;
+  disabled: boolean;
+  hideEmail: boolean;
+  hasPassword: boolean;
+}
+
+export interface SendCreateTextInput {
+  name: string;
+  text: string;
+  hidden?: boolean;
+  notes?: string;
+  maxAccessCount?: number | null;
+  expirationDate?: string;
+  deletionDate: string;
+  password?: string;
+  disabled?: boolean;
+  hideEmail?: boolean;
+}
+
+export interface SendCreateFileInput {
+  name: string;
+  fileName: string;
+  dataBase64: string;
+  notes?: string;
+  maxAccessCount?: number | null;
+  expirationDate?: string;
+  deletionDate: string;
+  password?: string;
+  disabled?: boolean;
+  hideEmail?: boolean;
+}
+
+export interface SendUpdateInput {
+  name: string;
+  text?: string;
+  hidden?: boolean;
+  notes?: string;
+  maxAccessCount?: number | null;
+  expirationDate?: string;
+  deletionDate: string;
+  password?: string;
+  disabled?: boolean;
+  hideEmail?: boolean;
 }

@@ -1,42 +1,40 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
+  Archive,
   ArrowUpDown,
+  CheckSquare,
   ChevronDown,
+  FolderInput,
   HelpCircle,
+  ListChecks,
   Plus,
   Search,
   ShieldAlert,
+  Square,
   Star,
+  Tag,
+  Trash2,
   X,
 } from 'lucide-react';
-import { useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
+import { useI18n } from '../../i18n';
+import { tauriClient } from '../../services/tauriClient';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
-import type { SortBy, WatchtowerIssueType } from '../../types/domain';
+import type { SortBy } from '../../types/domain';
+import { formatShortcutMac } from '../../utils/shortcuts';
 
-const SORT_OPTIONS: Array<{ id: SortBy; label: string }> = [
-  { id: 'title_asc', label: '名称 A → Z' },
-  { id: 'title_desc', label: '名称 Z → A' },
-  { id: 'updated_desc', label: '最近修改' },
-  { id: 'created_desc', label: '最新创建' },
-];
-
-const ISSUE_LABELS: Record<WatchtowerIssueType, string> = {
-  weak: '弱密码',
-  reused: '重复使用的密码',
-  missing_2fa: '未开启 2FA',
-  unsecured_url: '不安全 HTTP',
-  expiring: '即将过期 / 已过期',
-  breached: '已泄露密码',
-};
+const SORT_OPTION_IDS: SortBy[] = ['title_asc', 'title_desc', 'updated_desc', 'created_desc'];
 
 interface ItemListProps {
   searchInputRef: React.RefObject<HTMLInputElement | null>;
 }
 
 export function ItemList({ searchInputRef }: ItemListProps) {
+  const { dict, fmt } = useI18n();
   const uid = useId().replace(/:/g, '');
+  const shortcuts = useUiStore((s) => s.shortcuts);
   const sortPopoverId = `sort-pop-${uid}`;
   const sortAnchor = `--sort-btn-${uid}`;
   const syntaxPopoverId = `syntax-pop-${uid}`;
@@ -45,6 +43,16 @@ export function ItemList({ searchInputRef }: ItemListProps) {
   const syntaxPopoverRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null);
+  const [batchMoveOpen, setBatchMoveOpen] = useState(false);
+  const [batchTagOpen, setBatchTagOpen] = useState(false);
+  const [batchTagInput, setBatchTagInput] = useState('');
+  const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
+  const [emptyingTrash, setEmptyingTrash] = useState(false);
+
+  const activeView = useUiStore((s) => s.activeView);
   const listWidth = useUiStore((s) => s.listWidth);
   const searchQuery = useUiStore((s) => s.searchQuery);
   const sortBy = useUiStore((s) => s.sortBy);
@@ -54,10 +62,23 @@ export function ItemList({ searchInputRef }: ItemListProps) {
   const setNewItemOpen = useUiStore((s) => s.setNewItemOpen);
   const setWatchtowerIssueFilter = useUiStore((s) => s.setWatchtowerIssueFilter);
   const stopEditing = useUiStore((s) => s.stopEditing);
+  const getFilter = useUiStore((s) => s.getFilter);
+  const showToast = useUiStore((s) => s.showToast);
 
+  const vaults = useVaultStore((s) => s.vaults);
   const items = useVaultStore((s) => s.items);
   const activeItemId = useVaultStore((s) => s.activeItemId);
   const selectItem = useVaultStore((s) => s.selectItem);
+  const refreshItems = useVaultStore((s) => s.refreshItems);
+  const refreshAll = useVaultStore((s) => s.refreshAll);
+  const moveItemsToVault = useVaultStore((s) => s.moveItemsToVault);
+  const batchTrashItems = useVaultStore((s) => s.batchTrashItems);
+  const batchAddTag = useVaultStore((s) => s.batchAddTag);
+
+  useEffect(() => {
+    const validIds = new Set(items.map((i) => i.id));
+    setSelectedIds((prev) => prev.filter((id) => validIds.has(id)));
+  }, [items]);
 
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -84,13 +105,119 @@ export function ItemList({ searchInputRef }: ItemListProps) {
     }
   };
 
-  const currentSortLabel = SORT_OPTIONS.find((s) => s.id === sortBy)?.label ?? '名称 A → Z';
+  const toggleIdSelection = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const handleItemClick = (idx: number, id: string, e: React.MouseEvent) => {
+    if (e.shiftKey && lastClickedIdx !== null) {
+      const start = Math.min(lastClickedIdx, idx);
+      const end = Math.max(lastClickedIdx, idx);
+      const rangeIds = items.slice(start, end + 1).map((it) => it.id);
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...rangeIds])));
+      setMultiSelectMode(true);
+      return;
+    }
+
+    if (e.metaKey || e.ctrlKey || multiSelectMode) {
+      toggleIdSelection(id);
+      setLastClickedIdx(idx);
+      setMultiSelectMode(true);
+      return;
+    }
+
+    setLastClickedIdx(idx);
+    stopEditing();
+    void selectItem(id);
+  };
+
+  const clearSelection = () => {
+    setSelectedIds([]);
+    setMultiSelectMode(false);
+    setBatchMoveOpen(false);
+    setBatchTagOpen(false);
+    setBatchTagInput('');
+  };
+
+  useEffect(() => {
+    setConfirmEmptyTrash(false);
+  }, [activeView]);
+
+  const handleEmptyTrash = async () => {
+    setEmptyingTrash(true);
+    try {
+      const purged = await tauriClient.itemEmptyTrash();
+      await refreshAll(getFilter());
+      setConfirmEmptyTrash(false);
+      showToast({
+        label: dict.sidebar.trash,
+        text: fmt(dict.list.emptyTrashDone, { count: purged }),
+        kind: 'info',
+      });
+    } finally {
+      setEmptyingTrash(false);
+    }
+  };
+
+  const handleBatchArchive = async () => {
+    if (selectedIds.length === 0) return;
+    const count = selectedIds.length;
+    await Promise.all(selectedIds.map((id) => tauriClient.itemSetArchived(id, true)));
+    await refreshItems(getFilter());
+    clearSelection();
+    showToast({
+      label: dict.list.batchArchiveLabel,
+      text: fmt(dict.list.batchArchiveDone, { count }),
+      kind: 'info',
+    });
+  };
+
+  const handleBatchMove = async (targetVaultId: string) => {
+    if (selectedIds.length === 0) return;
+    const count = await moveItemsToVault(selectedIds, targetVaultId, getFilter());
+    const vaultName = vaults.find((v) => v.id === targetVaultId)?.name ?? dict.list.batchMoveDefaultTarget;
+    clearSelection();
+    showToast({
+      label: dict.list.batchMoveLabel,
+      text: fmt(dict.list.batchMoveDone, { count, vault: vaultName }),
+      kind: 'info',
+    });
+  };
+
+  const handleBatchTagSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = batchTagInput.trim().replace(/^#/, '');
+    if (!clean || selectedIds.length === 0) return;
+    const count = await batchAddTag(selectedIds, clean, getFilter());
+    clearSelection();
+    showToast({
+      label: dict.list.batchTagLabel,
+      text: fmt(dict.list.batchTagDone, { count, tag: clean }),
+      kind: 'info',
+    });
+  };
+
+  const handleBatchTrash = async () => {
+    if (selectedIds.length === 0) return;
+    const count = await batchTrashItems(selectedIds, getFilter());
+    clearSelection();
+    showToast({
+      label: dict.list.batchTrashLabel,
+      text: fmt(dict.list.batchTrashDone, { count }),
+      kind: 'info',
+    });
+  };
+
+  const currentSortLabel = dict.list.sort[sortBy] ?? dict.list.sort.title_asc;
+  const showBatchBar = multiSelectMode || selectedIds.length > 0;
 
   return (
     <section
       style={{ width: listWidth }}
-      className="h-full shrink-0 bg-[var(--bg-list)] flex flex-col overflow-hidden"
-      aria-label="条目列表"
+      className="h-full shrink-0 bg-[var(--bg-list)] flex flex-col overflow-hidden relative"
+      aria-label="Items"
       onKeyDown={handleListKeyDown}
     >
       {/* Search + Action Bar */}
@@ -102,8 +229,8 @@ export function ItemList({ searchInputRef }: ItemListProps) {
             type="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索条目、拼音或 tag:开发  ⌘F"
-            aria-label="搜索条目"
+            placeholder={`${dict.list.searchPlaceholder} (${formatShortcutMac(shortcuts.search)})`}
+            aria-label={dict.common.search}
             className="w-full pl-8 pr-14 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
           <div className="absolute right-1.5 flex items-center gap-0.5">
@@ -111,7 +238,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                aria-label="清空搜索"
+                aria-label={dict.common.close}
                 className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
               >
                 <X size={12} />
@@ -121,8 +248,8 @@ export function ItemList({ searchInputRef }: ItemListProps) {
               type="button"
               popoverTarget={syntaxPopoverId}
               style={{ anchorName: syntaxAnchor } as React.CSSProperties}
-              title="检索语法提示"
-              aria-label="检索语法提示"
+              title={dict.list.syntaxTitle}
+              aria-label={dict.list.syntaxTitle}
               className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--accent-primary)] cursor-pointer"
             >
               <HelpCircle size={13} />
@@ -135,15 +262,15 @@ export function ItemList({ searchInputRef }: ItemListProps) {
           id={syntaxPopoverId}
           popover="auto"
           style={{ positionAnchor: syntaxAnchor } as React.CSSProperties}
-          className="ks-popover ks-anchored-popover w-[270px]"
+          className="ks-popover ks-anchored-popover w-[260px]"
         >
           <div className="p-3 text-xs flex flex-col gap-2">
-            <div className="font-semibold text-[var(--text-primary)]">高级检索与拼音首字母</div>
+            <div className="font-semibold text-[var(--text-primary)]">{dict.list.syntaxTitle}</div>
             <p className="text-[11px] text-[var(--text-secondary)]">
-              支持输入中文拼音首字母（如 <code className="font-mono-tabular">sjk</code>、<code className="font-mono-tabular">yhk</code>）及以下过滤语法：
+              {dict.list.syntaxHint}
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {['tag:开发', 'vault:工作', 'is:favorite', 'is:passkey', 'cat:passkey', 'cat:ssh'].map((chip) => (
+              {['is:favorite', 'is:passkey', 'cat:passkey', 'cat:ssh'].map((chip) => (
                 <button
                   key={chip}
                   type="button"
@@ -161,15 +288,37 @@ export function ItemList({ searchInputRef }: ItemListProps) {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => setNewItemOpen(true)}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white shadow-2xs transition-colors cursor-pointer"
-          >
-            <Plus size={13} />
-            新建
-          </button>
+        <div className="flex items-center justify-between gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setNewItemOpen(true)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white transition-colors cursor-pointer"
+            >
+              <Plus size={13} />
+              {dict.list.newBtn}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (multiSelectMode) {
+                  clearSelection();
+                } else {
+                  setMultiSelectMode(true);
+                }
+              }}
+              aria-label={dict.list.selectBtn}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
+                multiSelectMode
+                  ? 'bg-[var(--bg-selected)] text-[var(--accent-primary)]'
+                  : 'hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]'
+              }`}
+            >
+              <ListChecks size={13} />
+              <span>{multiSelectMode ? dict.list.doneBtn : dict.list.selectBtn}</span>
+            </button>
+          </div>
 
           <button
             type="button"
@@ -178,7 +327,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
             className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--bg-hover)] text-[11px] font-medium text-[var(--text-secondary)] cursor-pointer"
           >
             <ArrowUpDown size={12} />
-            <span>{currentSortLabel}</span>
+            <span className="truncate max-w-[78px]">{currentSortLabel}</span>
             <ChevronDown size={12} />
           </button>
 
@@ -190,21 +339,21 @@ export function ItemList({ searchInputRef }: ItemListProps) {
             className="ks-popover ks-anchored-popover-end w-[150px]"
           >
             <div className="p-1 flex flex-col gap-0.5 text-xs">
-              {SORT_OPTIONS.map((opt) => (
+              {SORT_OPTION_IDS.map((optId) => (
                 <button
-                  key={opt.id}
+                  key={optId}
                   type="button"
                   onClick={() => {
-                    setSortBy(opt.id);
+                    setSortBy(optId);
                     sortPopoverRef.current?.hidePopover?.();
                   }}
                   className={`px-2.5 py-1.5 rounded-lg text-left cursor-pointer ${
-                    sortBy === opt.id
+                    sortBy === optId
                       ? 'bg-[var(--bg-selected)] text-[var(--accent-primary)] font-medium'
                       : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
                   }`}
                 >
-                  {opt.label}
+                  {dict.list.sort[optId]}
                 </button>
               ))}
             </div>
@@ -215,15 +364,55 @@ export function ItemList({ searchInputRef }: ItemListProps) {
           <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-[var(--status-warning)]/12 border border-[var(--status-warning)]/30 text-[11px]">
             <span className="flex items-center gap-1.5 font-medium text-[var(--status-warning)] truncate">
               <ShieldAlert size={13} />
-              体检筛选：{ISSUE_LABELS[activeWatchtowerFilter]}
+              {fmt(dict.list.watchtowerFilter, {
+                label: dict.detail.issues[activeWatchtowerFilter] ?? activeWatchtowerFilter,
+              })}
             </span>
             <button
               type="button"
               onClick={() => setWatchtowerIssueFilter(null)}
               className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline shrink-0 cursor-pointer"
             >
-              返回总览
+              {dict.list.backOverview}
             </button>
+          </div>
+        )}
+
+        {activeView === 'trash' && items.length > 0 && (
+          <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-[var(--status-danger)]/8 border border-[var(--status-danger)]/25 text-[11px]">
+            <span className="text-[var(--text-secondary)] truncate">
+              {dict.sidebar.trash} ({items.length})
+            </span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {confirmEmptyTrash ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={emptyingTrash}
+                    onClick={() => void handleEmptyTrash()}
+                    className="px-2 py-0.5 rounded bg-[var(--status-danger)] text-white font-medium cursor-pointer"
+                  >
+                    {fmt(dict.list.emptyTrashConfirm, { count: items.length })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmEmptyTrash(false)}
+                    className="px-1.5 py-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+                  >
+                    {dict.common.cancel}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmEmptyTrash(true)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[var(--status-danger)]/15 hover:bg-[var(--status-danger)]/25 text-[var(--status-danger)] font-medium cursor-pointer"
+                >
+                  <Trash2 size={11} />
+                  {dict.list.emptyTrashBtn}
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -231,16 +420,14 @@ export function ItemList({ searchInputRef }: ItemListProps) {
       {/* Virtualized List */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto ks-scroll px-2 py-2"
+        className={`flex-1 overflow-y-auto ks-scroll px-2 py-2 ${showBatchBar ? 'pb-24' : ''}`}
         tabIndex={0}
       >
         {items.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center px-6 py-12">
-            <Search size={28} className="text-[var(--text-muted)] mb-2 opacity-60" />
-            <p className="text-xs font-medium text-[var(--text-secondary)]">没有匹配的条目</p>
-            <p className="text-[11px] text-[var(--text-muted)] mt-1">
-              试试调整筛选条件，或点击上方「+ 新建」创建条目
-            </p>
+            <Search size={26} className="text-[var(--text-muted)] mb-2 opacity-60" />
+            <p className="text-xs font-medium text-[var(--text-secondary)]">{dict.list.emptyTitle}</p>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1">{dict.list.emptyHint}</p>
           </div>
         ) : (
           <div
@@ -253,6 +440,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
             {virtualizer.getVirtualItems().map((vRow) => {
               const item = items[vRow.index];
               const isSelected = item.id === activeItemId;
+              const isChecked = selectedIds.includes(item.id);
               return (
                 <div
                   key={item.id}
@@ -268,16 +456,20 @@ export function ItemList({ searchInputRef }: ItemListProps) {
                 >
                   <button
                     type="button"
-                    onClick={() => {
-                      stopEditing();
-                      void selectItem(item.id);
-                    }}
+                    onClick={(e) => handleItemClick(vRow.index, item.id, e)}
                     className={`w-full h-full px-2.5 rounded-xl flex items-center gap-2.5 text-left transition-colors cursor-pointer ${
-                      isSelected
-                        ? 'bg-[var(--bg-selected)] ring-1 ring-[var(--accent-primary)]/35'
-                        : 'hover:bg-[var(--bg-hover)]'
+                      isChecked
+                        ? 'bg-[var(--bg-selected)] ring-1 ring-[var(--accent-primary)]/50'
+                        : isSelected
+                          ? 'bg-[var(--bg-selected)] ring-1 ring-[var(--accent-primary)]/35'
+                          : 'hover:bg-[var(--bg-hover)]'
                     }`}
                   >
+                    {showBatchBar && (
+                      <span className="shrink-0 text-[var(--accent-primary)]">
+                        {isChecked ? <CheckSquare size={15} /> : <Square size={15} className="text-[var(--text-muted)]" />}
+                      </span>
+                    )}
                     <ItemIconBadge icon={item.icon} category={item.category} title={item.title} size="md" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
@@ -306,7 +498,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
                       {item.issues.length > 0 && (
                         <span
                           className="w-2 h-2 rounded-full bg-[var(--status-danger)]"
-                          title={`存在 ${item.issues.length} 项 Watchtower 安全提醒`}
+                          title={fmt(dict.list.watchtowerDotTitle, { count: item.issues.length })}
                         />
                       )}
                     </div>
@@ -317,6 +509,114 @@ export function ItemList({ searchInputRef }: ItemListProps) {
           </div>
         )}
       </div>
+
+      {/* Floating Batch Toolbar */}
+      {showBatchBar && (
+        <div className="absolute bottom-2.5 left-2.5 right-2.5 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-xl p-2 flex flex-col gap-2 z-10">
+          <div className="flex items-center justify-between text-[11px] px-1">
+            <span className="font-semibold text-[var(--text-primary)]">
+              {fmt(dict.list.selectedCount, { count: selectedIds.length })}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedIds(items.map((i) => i.id))}
+                className="text-[var(--accent-primary)] hover:underline cursor-pointer"
+              >
+                {dict.list.selectAll}
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+              >
+                {dict.common.cancel}
+              </button>
+            </div>
+          </div>
+
+          {batchMoveOpen && (
+            <div className="flex flex-wrap gap-1 px-1">
+              {vaults
+                .filter((v) => !v.isOrganization)
+                .map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => void handleBatchMove(v.id)}
+                    className="px-2 py-1 rounded-md bg-[var(--bg-card)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-primary)] cursor-pointer"
+                  >
+                    {v.name}
+                  </button>
+                ))}
+            </div>
+          )}
+
+          {batchTagOpen && (
+            <form onSubmit={(e) => void handleBatchTagSubmit(e)} className="flex items-center gap-1.5 px-1">
+              <input
+                type="text"
+                value={batchTagInput}
+                onChange={(e) => setBatchTagInput(e.target.value)}
+                placeholder={dict.list.tagPlaceholder}
+                autoFocus
+                className="flex-1 px-2 py-1 rounded-md bg-[var(--bg-input)] border border-[var(--border-strong)] text-xs text-[var(--text-primary)]"
+              />
+              <button
+                type="submit"
+                className="px-2.5 py-1 rounded-md bg-[var(--accent-primary)] text-white text-[11px] font-medium cursor-pointer"
+              >
+                {dict.list.apply}
+              </button>
+            </form>
+          )}
+
+          <div className="grid grid-cols-4 gap-1 text-[11px]">
+            <button
+              type="button"
+              disabled={selectedIds.length === 0}
+              onClick={() => {
+                setBatchMoveOpen((v) => !v);
+                setBatchTagOpen(false);
+              }}
+              className="py-1.5 px-1 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] disabled:opacity-40 text-[var(--text-primary)] flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <FolderInput size={12} />
+              <span>{dict.list.move}</span>
+            </button>
+            <button
+              type="button"
+              disabled={selectedIds.length === 0}
+              onClick={() => {
+                setBatchTagOpen((v) => !v);
+                setBatchMoveOpen(false);
+              }}
+              className="py-1.5 px-1 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] disabled:opacity-40 text-[var(--text-primary)] flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <Tag size={12} />
+              <span>{dict.list.tag}</span>
+            </button>
+            <button
+              type="button"
+              disabled={selectedIds.length === 0}
+              onClick={() => void handleBatchArchive()}
+              className="py-1.5 px-1 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] disabled:opacity-40 text-[var(--text-primary)] flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <Archive size={12} />
+              <span>{dict.list.archive}</span>
+            </button>
+            <button
+              type="button"
+              disabled={selectedIds.length === 0}
+              onClick={() => void handleBatchTrash()}
+              className="py-1.5 px-1 rounded-lg bg-[var(--status-danger)]/10 hover:bg-[var(--status-danger)]/20 disabled:opacity-40 text-[var(--status-danger)] flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <Trash2 size={12} />
+              <span>{dict.common.delete}</span>
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

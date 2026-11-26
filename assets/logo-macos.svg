@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" fill="none">
+  <defs>
+    <linearGradient id="bg-squircle" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#222B3B" />
+      <stop offset="52%" stop-color="#151B26" />
+      <stop offset="100%" stop-color="#0D1119" />
+    </linearGradient>
+    <linearGradient id="rim-stroke" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.24" />
+      <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.38" />
+    </linearGradient>
+    <radialGradient id="ambient-glow" cx="512" cy="496" r="348" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3B93FF" stop-opacity="0.44" />
+      <stop offset="65%" stop-color="#0572EC" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#0572EC" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="titanium-ring" x1="256" y1="256" x2="768" y2="768" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E5ECF6" />
+      <stop offset="45%" stop-color="#B0BCCF" />
+      <stop offset="100%" stop-color="#768399" />
+    </linearGradient>
+    <linearGradient id="cobalt-core" x1="512" y1="330" x2="512" y2="694" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4CA0FF" />
+      <stop offset="55%" stop-color="#0572EC" />
+      <stop offset="100%" stop-color="#034EA6" />
+    </linearGradient>
+    <linearGradient id="platinum-key" x1="512" y1="384" x2="512" y2="650" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="70%" stop-color="#EEF4FC" />
+      <stop offset="100%" stop-color="#CBD8EA" />
+    </linearGradient>
+    <filter id="app-shadow" x="60" y="76" width="904" height="904" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#040812" flood-opacity="0.36" />
+    </filter>
+    <filter id="ring-shadow" x="210" y="210" width="604" height="620" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#040812" flood-opacity="0.55" />
+    </filter>
+    <filter id="key-shadow" x="390" y="346" width="244" height="340" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="7" stdDeviation="9" flood-color="#022354" flood-opacity="0.45" />
+    </filter>
+  </defs>
+
+  <!-- macOS HIG Squircle: 824x824 centered inside 1024x1024 (~10% transparent safe margin) -->
+  <g filter="url(#app-shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="188" fill="url(#bg-squircle)" />
+    <rect x="102.5" y="102.5" width="819" height="819" rx="185.5" stroke="url(#rim-stroke)" stroke-width="5" />
+  </g>
+
+  <circle cx="512" cy="498" r="348" fill="url(#ambient-glow)" />
+
+  <g filter="url(#ring-shadow)">
+    <circle cx="512" cy="512" r="256" fill="#1C2433" />
+    <circle cx="512" cy="512" r="256" stroke="url(#titanium-ring)" stroke-width="32" />
+    <circle cx="512" cy="512" r="226" stroke="#0B101A" stroke-width="7" stroke-opacity="0.7" />
+  </g>
+
+  <g stroke="#E9F0FA" stroke-width="9" stroke-linecap="round" opacity="0.88">
+    <line x1="512" y1="234" x2="512" y2="274" />
+    <line x1="512" y1="750" x2="512" y2="790" />
+    <line x1="234" y1="512" x2="274" y2="512" />
+    <line x1="750" y1="512" x2="790" y2="512" />
+  </g>
+
+  <circle cx="512" cy="512" r="181" fill="url(#cobalt-core)" />
+  <circle cx="512" cy="512" r="178.5" stroke="#85C1FF" stroke-width="5" stroke-opacity="0.45" />
+  <path
+    d="M373 437 A 156 156 0 0 1 651 437"
+    stroke="#FFFFFF"
+    stroke-width="5"
+    stroke-linecap="round"
+    stroke-opacity="0.24"
+  />
+
+  <g filter="url(#key-shadow)">
+    <path
+      fill-rule="evenodd"
+      clip-rule="evenodd"
+      fill="url(#platinum-key)"
+      d="M512 384C476.654 384 448 412.654 448 448C448 476.293 466.357 500.296 491.797 508.75L491.797 629.333C491.797 639.152 499.756 647.111 509.575 647.111H514.425C524.244 647.111 532.203 639.152 532.203 629.333V611.556H565.333C573.188 611.556 579.556 605.188 579.556 597.333V588.444C579.556 580.589 573.188 574.222 565.333 574.222H532.203V552.889H556.444C564.3 552.889 570.667 546.522 570.667 538.667V529.778C570.667 521.923 564.3 515.556 556.444 515.556H532.203V508.75C557.643 500.296 576 476.293 576 448C576 412.654 547.346 384 512 384ZM512 421.333C497.273 421.333 485.333 433.273 485.333 448C485.333 462.727 497.273 474.667 512 474.667C526.727 474.667 538.667 462.727 538.667 448C538.667 433.273 526.727 421.333 512 421.333Z"
+    />
+  </g>
+</svg>

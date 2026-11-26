@@ -1,13 +1,36 @@
 import { create } from 'zustand';
+import { readStoredLanguage, writeStoredLanguage } from '../i18n';
+import { isTauriRuntime, tauriClient } from '../services/tauriClient';
 import type {
   ItemCategory,
   ItemFilter,
+  LanguageMode,
   SortBy,
   WatchtowerIssueType,
 } from '../types/domain';
+import {
+  DEFAULT_SHORTCUTS,
+  mergeCustomShortcuts,
+  type ShortcutActionId,
+  type ShortcutMap,
+} from '../utils/shortcuts';
 import { applyThemeMode, getSystemPrefersDark, readStoredThemeMode, type ThemeMode } from '../utils/theme';
 
-export type SidebarView = 'all' | 'favorites' | 'passkeys' | 'watchtower' | 'category' | 'tag' | 'trash';
+export type SidebarView =
+  | 'all'
+  | 'favorites'
+  | 'archived'
+  | 'passkeys'
+  | 'watchtower'
+  | 'send'
+  | 'category'
+  | 'tag'
+  | 'trash';
+
+export interface SendPrefillDraft {
+  name: string;
+  text: string;
+}
 
 export interface ToastMessage {
   id: string;
@@ -41,23 +64,30 @@ interface UiStore {
   sidebarWidth: number;
   listWidth: number;
   themeMode: ThemeMode;
+  languageMode: LanguageMode;
+  shortcuts: ShortcutMap;
   systemPrefersDark: boolean;
 
   largeType: LargeTypeState | null;
   newItemOpen: boolean;
   settingsOpen: boolean;
   quickAccessOpen: boolean;
+  generatorOpen: boolean;
   vaultModal: VaultModalState | null;
+  sendPrefill: SendPrefillDraft | null;
 
   toast: ToastMessage | null;
   clipboardCountdown: { label: string; remainingSeconds: number; totalSeconds: number } | null;
+  repromptVerifiedIds: Record<string, boolean>;
 
   getFilter: () => ItemFilter;
   setActiveVault: (vaultId: string | null) => void;
   setViewAll: () => void;
   setViewFavorites: () => void;
+  setViewArchived: () => void;
   setViewPasskeys: () => void;
   setViewWatchtower: () => void;
+  setViewSend: () => void;
   setViewCategory: (category: ItemCategory) => void;
   setViewTag: (tag: string) => void;
   setViewTrash: () => void;
@@ -70,7 +100,11 @@ interface UiStore {
 
   setSidebarWidth: (width: number) => void;
   setListWidth: (width: number) => void;
-  setThemeMode: (mode: ThemeMode) => void;
+  setThemeMode: (mode: ThemeMode, persistRemote?: boolean) => void;
+  setLanguageMode: (mode: LanguageMode, persistRemote?: boolean) => void;
+  setShortcutsFromStorage: (custom?: Record<string, string> | null) => void;
+  setShortcutAction: (action: ShortcutActionId, combo: string) => void;
+  resetAllShortcuts: () => void;
   setSystemPrefersDark: (dark: boolean) => void;
 
   openLargeType: (label: string, value: string) => void;
@@ -78,13 +112,17 @@ interface UiStore {
   setNewItemOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setQuickAccessOpen: (open: boolean) => void;
+  setGeneratorOpen: (open: boolean) => void;
   setVaultModal: (modal: VaultModalState | null) => void;
+  openSendWithPrefill: (prefill: SendPrefillDraft) => void;
+  clearSendPrefill: () => void;
 
   showToast: (toast: Omit<ToastMessage, 'id'>) => void;
   dismissToast: () => void;
   setClipboardCountdown: (
     tick: { label: string; remainingSeconds: number; totalSeconds: number } | null,
   ) => void;
+  markRepromptVerified: (itemId: string) => void;
   resetSensitiveUiOnLock: () => void;
 }
 
@@ -98,6 +136,28 @@ function readNum(key: string, fallback: number, min: number, max: number): numbe
     // ignore
   }
   return fallback;
+}
+
+const SHORTCUTS_STORAGE_KEY = 'keysmith:customShortcuts';
+
+function readStoredShortcuts(): ShortcutMap {
+  try {
+    const raw = localStorage.getItem(SHORTCUTS_STORAGE_KEY);
+    if (raw) {
+      return mergeCustomShortcuts(JSON.parse(raw) as Record<string, string>);
+    }
+  } catch {
+    // ignore
+  }
+  return { ...DEFAULT_SHORTCUTS };
+}
+
+function writeStoredShortcuts(map: ShortcutMap): void {
+  try {
+    localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
 }
 
 export const useUiStore = create<UiStore>((set, get) => ({
@@ -114,16 +174,21 @@ export const useUiStore = create<UiStore>((set, get) => ({
   sidebarWidth: readNum('keysmith:sidebarWidth', 228, 190, 320),
   listWidth: readNum('keysmith:listWidth', 292, 240, 420),
   themeMode: readStoredThemeMode(),
+  languageMode: readStoredLanguage(),
+  shortcuts: readStoredShortcuts(),
   systemPrefersDark: getSystemPrefersDark(),
 
   largeType: null,
   newItemOpen: false,
   settingsOpen: false,
   quickAccessOpen: false,
+  generatorOpen: false,
   vaultModal: null,
+  sendPrefill: null,
 
   toast: null,
   clipboardCountdown: null,
+  repromptVerifiedIds: {},
 
   getFilter: () => {
     const s = get();
@@ -132,6 +197,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
       category: s.activeView === 'category' ? s.activeCategory : null,
       tag: s.activeView === 'tag' ? s.activeTag : null,
       favorite: s.activeView === 'favorites' ? true : undefined,
+      archived: s.activeView === 'archived' ? true : undefined,
       passkeyOnly: s.activeView === 'passkeys' ? true : undefined,
       trashed: s.activeView === 'trash',
       watchtowerIssue: s.activeWatchtowerFilter,
@@ -168,6 +234,16 @@ export const useUiStore = create<UiStore>((set, get) => ({
       creatingDraftCategory: null,
     }),
 
+  setViewArchived: () =>
+    set({
+      activeView: 'archived',
+      activeCategory: null,
+      activeTag: null,
+      activeWatchtowerFilter: null,
+      isEditing: false,
+      creatingDraftCategory: null,
+    }),
+
   setViewPasskeys: () =>
     set({
       activeView: 'passkeys',
@@ -181,6 +257,16 @@ export const useUiStore = create<UiStore>((set, get) => ({
   setViewWatchtower: () =>
     set({
       activeView: 'watchtower',
+      activeCategory: null,
+      activeTag: null,
+      activeWatchtowerFilter: null,
+      isEditing: false,
+      creatingDraftCategory: null,
+    }),
+
+  setViewSend: () =>
+    set({
+      activeView: 'send',
       activeCategory: null,
       activeTag: null,
       activeWatchtowerFilter: null,
@@ -262,23 +348,76 @@ export const useUiStore = create<UiStore>((set, get) => ({
     set({ listWidth: clamped });
   },
 
-  setThemeMode: (mode) => {
+  setThemeMode: (mode, persistRemote = true) => {
     applyThemeMode(mode);
     set({ themeMode: mode });
+    if (persistRemote) {
+      void tauriClient.appSettingsUpdate({ theme: mode }).catch(() => {});
+    }
+  },
+
+  setLanguageMode: (mode, persistRemote = true) => {
+    writeStoredLanguage(mode);
+    set({ languageMode: mode });
+    if (persistRemote) {
+      void tauriClient.appSettingsUpdate({ language: mode }).catch(() => {});
+    }
+  },
+
+  setShortcutsFromStorage: (custom) => {
+    const merged = mergeCustomShortcuts(custom);
+    writeStoredShortcuts(merged);
+    set({ shortcuts: merged });
+  },
+
+  setShortcutAction: (action, combo) => {
+    const next = { ...get().shortcuts, [action]: combo };
+    writeStoredShortcuts(next);
+    set({ shortcuts: next });
+    void tauriClient.appSettingsUpdate({ customShortcuts: next }).catch(() => {});
+  },
+
+  resetAllShortcuts: () => {
+    const next = { ...DEFAULT_SHORTCUTS };
+    writeStoredShortcuts(next);
+    set({ shortcuts: next });
+    void tauriClient.appSettingsUpdate({ customShortcuts: {} }).catch(() => {});
   },
 
   setSystemPrefersDark: (systemPrefersDark) => set({ systemPrefersDark }),
 
-  openLargeType: (label, value) => set({ largeType: { label, value } }),
+  openLargeType: (label, value) => {
+    if (isTauriRuntime()) {
+      void tauriClient.windowOpenLargeType(label, value);
+      return;
+    }
+    set({ largeType: { label, value } });
+  },
   closeLargeType: () => set({ largeType: null }),
   setNewItemOpen: (newItemOpen) => set({ newItemOpen }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setQuickAccessOpen: (quickAccessOpen) => set({ quickAccessOpen }),
+  setGeneratorOpen: (generatorOpen) => set({ generatorOpen }),
   setVaultModal: (vaultModal) => set({ vaultModal }),
+  openSendWithPrefill: (sendPrefill) =>
+    set({
+      activeView: 'send',
+      activeCategory: null,
+      activeTag: null,
+      activeWatchtowerFilter: null,
+      isEditing: false,
+      creatingDraftCategory: null,
+      sendPrefill,
+    }),
+  clearSendPrefill: () => set({ sendPrefill: null }),
 
   showToast: (toast) => set({ toast: { ...toast, id: String(Date.now()) } }),
   dismissToast: () => set({ toast: null }),
   setClipboardCountdown: (clipboardCountdown) => set({ clipboardCountdown }),
+  markRepromptVerified: (itemId) =>
+    set((state) => ({
+      repromptVerifiedIds: { ...state.repromptVerifiedIds, [itemId]: true },
+    })),
 
   resetSensitiveUiOnLock: () =>
     set({
@@ -288,7 +427,10 @@ export const useUiStore = create<UiStore>((set, get) => ({
       largeType: null,
       newItemOpen: false,
       quickAccessOpen: false,
+      generatorOpen: false,
       settingsOpen: false,
       vaultModal: null,
+      sendPrefill: null,
+      repromptVerifiedIds: {},
     }),
 }));

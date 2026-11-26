@@ -1,0 +1,41 @@
+[package]
+name = "keysmith-core"
+version = "0.1.0"
+edition = "2021"
+description = "Zero-knowledge core engine for Keysmith password & passkey manager"
+
+[dependencies]
+aes = "0.8"
+argon2 = "0.5"
+base64 = "0.22"
+blake3 = "1.5"
+cbc = { version = "0.1", features = ["alloc"] }
+chrono = { version = "0.4", features = ["serde"] }
+csv = "1.3"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+futures-util = "0.3"
+hkdf = "0.12"
+hmac = "0.12"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
+pbkdf2 = { version = "0.12", features = ["simple"] }
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart"] }
+rqrr = "0.8"
+rsa = { version = "0.9", features = ["sha2"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha1 = "0.10"
+sha2 = "0.10"
+ssh-key = { version = "0.6", features = ["ed25519", "rand_core"] }
+subtle = "2.6"
+thiserror = "2.0"
+tokio = { version = "1.41", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+url = "2.5"
+uuid = { version = "1.11", features = ["v4"] }
+zeroize = { version = "1.8", features = ["derive"] }
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+qrcode = "0.14"

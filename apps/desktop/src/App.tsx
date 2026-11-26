@@ -1,5 +1,5 @@
-import { KeyRound, Plus, ShieldCheck } from 'lucide-react';
-import { useEffect, useMemo, useRef } from 'react';
+import { AlertCircle, KeyRound, Plus, RefreshCw } from 'lucide-react';
+import { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
 import { LargeTypeModal } from './components/LargeTypeModal';
 import { PaneResizer } from './components/PaneResizer';
 import { ToastRegion } from './components/ToastRegion';
@@ -8,33 +8,59 @@ import { LockScreen } from './features/auth/LockScreen';
 import { ItemDetailPane } from './features/detail/ItemDetailPane';
 import { ItemEditorPane } from './features/detail/ItemEditorPane';
 import { ItemList } from './features/list/ItemList';
+import { GeneratorModal } from './features/modals/GeneratorModal';
 import { NewItemModal } from './features/modals/NewItemModal';
 import { QuickAccessModal } from './features/modals/QuickAccessModal';
-import { SettingsModal } from './features/modals/SettingsModal';
 import { VaultModal } from './features/modals/VaultModal';
 import { Sidebar } from './features/sidebar/Sidebar';
-import { WatchtowerDashboard } from './features/watchtower/WatchtowerDashboard';
 import { useActivityTracker } from './hooks/useActivityTracker';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { tauriClient } from './services/tauriClient';
+import { getDictionary, resolveLocale, useI18n } from './i18n';
+import { isTauriRuntime, tauriClient } from './services/tauriClient';
 import { createEmptyDraft } from './services/templates';
 import { useSessionStore } from './stores/sessionStore';
 import { useUiStore } from './stores/uiStore';
 import { useVaultStore } from './stores/vaultStore';
+import { formatShortcutMac } from './utils/shortcuts';
 import { subscribeThemeChanges } from './utils/theme';
 import { ensurePopoverPolyfill } from './utils/topLayer';
 
-export function App() {
+const SettingsModal = lazy(() =>
+  import('./features/modals/SettingsModal').then((m) => ({ default: m.SettingsModal })),
+);
+const SendWorkspace = lazy(() =>
+  import('./features/send/SendWorkspace').then((m) => ({ default: m.SendWorkspace })),
+);
+const WatchtowerDashboard = lazy(() =>
+  import('./features/watchtower/WatchtowerDashboard').then((m) => ({ default: m.WatchtowerDashboard })),
+);
+const GeneratorWindow = lazy(() =>
+  import('./features/windows/GeneratorWindow').then((m) => ({ default: m.GeneratorWindow })),
+);
+const LargeTypeWindow = lazy(() =>
+  import('./features/windows/LargeTypeWindow').then((m) => ({ default: m.LargeTypeWindow })),
+);
+const QuickAccessWindow = lazy(() =>
+  import('./features/windows/QuickAccessWindow').then((m) => ({ default: m.QuickAccessWindow })),
+);
+
+function MainWorkspaceApp() {
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const { dict } = useI18n();
 
   const authStatus = useSessionStore((s) => s.status);
+  const addingAccount = useSessionStore((s) => s.addingAccount);
+  const initialized = useSessionStore((s) => s.initialized);
+  const initError = useSessionStore((s) => s.initError);
   const initSession = useSessionStore((s) => s.init);
+  const retryInit = useSessionStore((s) => s.retryInit);
   const setAuthStatus = useSessionStore((s) => s.setAuthStatus);
 
   const vaults = useVaultStore((s) => s.vaults);
   const activeItem = useVaultStore((s) => s.activeItem);
   const refreshAll = useVaultStore((s) => s.refreshAll);
   const refreshItems = useVaultStore((s) => s.refreshItems);
+  const selectItem = useVaultStore((s) => s.selectItem);
   const setSyncStatus = useVaultStore((s) => s.setSyncStatus);
   const clearOnLock = useVaultStore((s) => s.clearOnLock);
 
@@ -49,13 +75,18 @@ export function App() {
   const creatingDraftCategory = useUiStore((s) => s.creatingDraftCategory);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
   const listWidth = useUiStore((s) => s.listWidth);
+  const shortcuts = useUiStore((s) => s.shortcuts);
 
   const getFilter = useUiStore((s) => s.getFilter);
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
   const setListWidth = useUiStore((s) => s.setListWidth);
   const setSystemPrefersDark = useUiStore((s) => s.setSystemPrefersDark);
   const setThemeMode = useUiStore((s) => s.setThemeMode);
+  const setLanguageMode = useUiStore((s) => s.setLanguageMode);
+  const setShortcutsFromStorage = useUiStore((s) => s.setShortcutsFromStorage);
   const setNewItemOpen = useUiStore((s) => s.setNewItemOpen);
+  const setViewAll = useUiStore((s) => s.setViewAll);
+  const stopEditing = useUiStore((s) => s.stopEditing);
   const showToast = useUiStore((s) => s.showToast);
   const setClipboardCountdown = useUiStore((s) => s.setClipboardCountdown);
   const resetSensitiveUiOnLock = useUiStore((s) => s.resetSensitiveUiOnLock);
@@ -66,6 +97,9 @@ export function App() {
   useEffect(() => {
     ensurePopoverPolyfill();
     void initSession().then(() => {
+      if (isTauriRuntime()) {
+        void tauriClient.windowMainReady();
+      }
       if (useSessionStore.getState().status === 'Unlocked') {
         void refreshAll(useUiStore.getState().getFilter());
       }
@@ -94,11 +128,38 @@ export function App() {
 
     const unsubCleared = tauriClient.onEvent('clipboard:cleared', ({ label }) => {
       setClipboardCountdown(null);
+      const currentDict = getDictionary(resolveLocale(useUiStore.getState().languageMode));
       showToast({
         label,
-        text: `已安全清空剪贴板中的「${label}」`,
+        text: currentDict.app.clipboardClearedToast.replace('{label}', label),
         kind: 'info',
       });
+    });
+
+    const unsubQuickAccess = tauriClient.onEvent('ui:toggle_quick_access', () => {
+      if (useSessionStore.getState().status !== 'Unlocked') return;
+      const ui = useUiStore.getState();
+      ui.setQuickAccessOpen(!ui.quickAccessOpen);
+    });
+
+    const unsubFocusItem = tauriClient.onEvent('ui:focus_item', (payload) => {
+      if (useSessionStore.getState().status !== 'Unlocked') return;
+      const itemId = typeof payload === 'string' ? payload : payload?.itemId;
+      if (!itemId) return;
+      setViewAll();
+      stopEditing();
+      void selectItem(itemId);
+    });
+
+    const unsubDataChanged = tauriClient.onEvent('sync:data_changed', () => {
+      if (!isTauriRuntime() || useSessionStore.getState().status !== 'Unlocked') return;
+      void refreshAll(useUiStore.getState().getFilter());
+    });
+
+    const unsubSettings = tauriClient.onEvent('ui:settings_changed', (settings) => {
+      if (settings.language) setLanguageMode(settings.language, false);
+      if (settings.theme) setThemeMode(settings.theme, false);
+      if (settings.customShortcuts) setShortcutsFromStorage(settings.customShortcuts);
     });
 
     return () => {
@@ -107,24 +168,34 @@ export function App() {
       unsubSync();
       unsubTick();
       unsubCleared();
+      unsubQuickAccess();
+      unsubFocusItem();
+      unsubDataChanged();
+      unsubSettings();
     };
   }, [
     clearOnLock,
     initSession,
     refreshAll,
     resetSensitiveUiOnLock,
+    selectItem,
     setAuthStatus,
     setClipboardCountdown,
+    setLanguageMode,
+    setShortcutsFromStorage,
     setSyncStatus,
     setSystemPrefersDark,
     setThemeMode,
+    setViewAll,
     showToast,
+    stopEditing,
   ]);
 
   useEffect(() => {
-    if (authStatus !== 'Unlocked') return;
+    if (!initialized || authStatus !== 'Unlocked') return;
     void refreshItems(getFilter());
   }, [
+    initialized,
     authStatus,
     activeVaultId,
     activeView,
@@ -149,6 +220,8 @@ export function App() {
         vaultId: activeItem.vaultId,
         title: activeItem.title,
         favorite: activeItem.favorite,
+        archived: activeItem.archived,
+        reprompt: activeItem.reprompt,
         category: activeItem.category,
         subtitle: activeItem.subtitle,
         icon: activeItem.icon,
@@ -159,12 +232,49 @@ export function App() {
         notes: activeItem.notes,
         passwordHistory: activeItem.passwordHistory,
         watchtower: activeItem.watchtower,
+        attachments: activeItem.attachments,
       };
     }
     return null;
   }, [isEditing, creatingDraftCategory, activeVaultId, vaults, activeItem]);
 
-  if (authStatus === 'Unauthenticated') {
+  if (!initialized) {
+    return (
+      <>
+        <div className="h-dvh w-full flex items-center justify-center bg-[var(--bg-sidebar)] text-xs text-[var(--text-muted)]">
+          {dict.app.initializing}
+        </div>
+        <ToastRegion />
+      </>
+    );
+  }
+
+  if (initError) {
+    return (
+      <>
+        <div className="h-dvh w-full flex items-center justify-center bg-[var(--bg-sidebar)] p-6">
+          <div className="w-full max-w-[380px] rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-xl p-7 text-center flex flex-col items-center">
+            <div className="w-11 h-11 rounded-xl bg-[var(--status-danger)]/10 border border-[var(--status-danger)]/25 flex items-center justify-center text-[var(--status-danger)] mb-4">
+              <AlertCircle size={20} />
+            </div>
+            <h1 className="text-[15px] font-semibold text-[var(--text-primary)]">{dict.app.initFailed}</h1>
+            <p className="text-xs text-[var(--text-secondary)] mt-1.5">{initError}</p>
+            <button
+              type="button"
+              onClick={() => void retryInit()}
+              className="mt-5 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white cursor-pointer"
+            >
+              <RefreshCw size={13} />
+              {dict.app.retryInit}
+            </button>
+          </div>
+        </div>
+        <ToastRegion />
+      </>
+    );
+  }
+
+  if (addingAccount || authStatus === 'Unauthenticated') {
     return (
       <>
         <AuthScreen />
@@ -191,63 +301,143 @@ export function App() {
       <Sidebar />
 
       <PaneResizer
-        ariaLabel="调整侧边栏宽度"
+        ariaLabel={dict.app.resizeSidebarAria}
         onResize={(dx) => setSidebarWidth(sidebarWidth + dx)}
       />
 
-      {/* Pane 2: Item List */}
-      <ItemList searchInputRef={searchInputRef} />
+      {activeView === 'send' ? (
+        <Suspense fallback={<div className="flex-1 bg-[var(--bg-detail)]" />}>
+          <SendWorkspace />
+        </Suspense>
+      ) : (
+        <>
+          {/* Pane 2: Item List */}
+          <ItemList searchInputRef={searchInputRef} />
 
-      <PaneResizer
-        ariaLabel="调整条目列表宽度"
-        onResize={(dx) => setListWidth(listWidth + dx)}
-      />
+          <PaneResizer
+            ariaLabel={dict.app.resizeListAria}
+            onResize={(dx) => setListWidth(listWidth + dx)}
+          />
 
-      {/* Pane 3: Detail / Editor / Watchtower Dashboard */}
-      <main className="flex-1 min-w-[340px] h-full overflow-hidden">
-        {isEditing && editorDraft ? (
-          <ItemEditorPane initialDraft={editorDraft} isNew={Boolean(creatingDraftCategory)} />
-        ) : showWatchtowerOverview ? (
-          <WatchtowerDashboard />
-        ) : activeItem ? (
-          <ItemDetailPane item={activeItem} />
-        ) : (
-          <div className="h-full flex flex-col items-center justify-center text-center px-8 bg-[var(--bg-detail)]">
-            <div className="w-14 h-14 rounded-2xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--accent-primary)] mb-4">
-              <KeyRound size={26} />
-            </div>
-            <h2 className="text-base font-semibold text-[var(--text-primary)]">
-              选择或新建一个条目
-            </h2>
-            <p className="text-xs text-[var(--text-secondary)] mt-1.5 max-w-sm leading-relaxed">
-              所有条目在内存中零知识解密展示，离开或锁屏立即执行 <code className="font-mono-tabular">zeroize</code> 密钥擦除。
-            </p>
-            <div className="mt-5 flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={() => setNewItemOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white cursor-pointer"
-              >
-                <Plus size={14} />
-                新建条目  ⌘N
-              </button>
-              <span className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
-                <ShieldCheck size={13} className="text-[var(--status-success)]" />
-                零知识端到端加密
-              </span>
-            </div>
-          </div>
-        )}
-      </main>
+          {/* Pane 3: Detail / Editor / Watchtower Dashboard */}
+          <main className="flex-1 min-w-[340px] h-full overflow-hidden">
+            {isEditing && editorDraft ? (
+              <ItemEditorPane initialDraft={editorDraft} isNew={Boolean(creatingDraftCategory)} />
+            ) : showWatchtowerOverview ? (
+              <Suspense fallback={<div className="h-full bg-[var(--bg-detail)]" />}>
+                <WatchtowerDashboard />
+              </Suspense>
+            ) : activeItem ? (
+              <ItemDetailPane item={activeItem} />
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-center px-8 bg-[var(--bg-detail)]">
+                <div className="w-12 h-12 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--accent-primary)] mb-3.5">
+                  <KeyRound size={22} />
+                </div>
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  {dict.app.emptyTitle}
+                </h2>
+                <p className="text-xs text-[var(--text-secondary)] mt-1 max-w-xs leading-relaxed">
+                  {dict.app.emptyHint}
+                </p>
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setNewItemOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white cursor-pointer"
+                  >
+                    <Plus size={14} />
+                    {dict.app.newItemBtn}
+                    <span className="opacity-75 font-mono-tabular text-[11px] ml-0.5">
+                      {formatShortcutMac(shortcuts.newItem)}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </main>
+        </>
+      )}
 
       {/* Modals & Top-Layer Overlays */}
       <LargeTypeModal />
+      <GeneratorModal />
       <NewItemModal />
       <QuickAccessModal />
-      <SettingsModal />
+      <Suspense fallback={null}>
+        <SettingsModal />
+      </Suspense>
       <VaultModal />
       <ToastRegion />
     </div>
   );
 }
+
+export function App() {
+  const windowKind = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('window');
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (windowKind === 'quick-access' || windowKind === 'large-type' || windowKind === 'generator') {
+      document.documentElement.classList.add('ks-floating-window');
+      void tauriClient
+        .appSettingsGet()
+        .then((s) => {
+          const ui = useUiStore.getState();
+          if (s.language) ui.setLanguageMode(s.language, false);
+          if (s.theme) ui.setThemeMode(s.theme, false);
+        })
+        .catch(() => {});
+      const unsub = tauriClient.onEvent('ui:settings_changed', (s) => {
+        const ui = useUiStore.getState();
+        if (s.language) ui.setLanguageMode(s.language, false);
+        if (s.theme) ui.setThemeMode(s.theme, false);
+      });
+      return () => {
+        document.documentElement.classList.remove('ks-floating-window');
+        unsub();
+      };
+    }
+    return undefined;
+  }, [windowKind]);
+
+  if (windowKind === 'large-type') {
+    return (
+      <>
+        <Suspense fallback={null}>
+          <LargeTypeWindow />
+        </Suspense>
+        <ToastRegion />
+      </>
+    );
+  }
+
+  if (windowKind === 'quick-access') {
+    return (
+      <>
+        <Suspense fallback={null}>
+          <QuickAccessWindow />
+        </Suspense>
+        <ToastRegion />
+      </>
+    );
+  }
+
+  if (windowKind === 'generator') {
+    return (
+      <>
+        <Suspense fallback={null}>
+          <GeneratorWindow />
+        </Suspense>
+        <ToastRegion />
+      </>
+    );
+  }
+
+  return <MainWorkspaceApp />;
+}
+
 export default App;

@@ -1,44 +1,57 @@
 import {
+  Archive,
   ArrowDown,
   ArrowUp,
   Check,
+  ClipboardPaste,
   Fingerprint,
   GripVertical,
+  KeyRound,
+  Lock,
+  Palette,
   Plus,
+  QrCode,
   Trash2,
   X,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { GeneratorPopover } from '../../components/GeneratorPopover';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
+import { useI18n } from '../../i18n';
+import { tauriClient } from '../../services/tauriClient';
 import { TEMPLATE_MAP } from '../../services/templates';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import type { FieldType, ItemDraft, ItemField, UrlMatchRule } from '../../types/domain';
 import { makeId } from '../../utils/format';
 
-const FIELD_TYPES: Array<{ value: FieldType; label: string }> = [
-  { value: 'text', label: '文本' },
-  { value: 'password', label: '密码' },
-  { value: 'totp', label: 'TOTP 验证码' },
-  { value: 'email', label: '邮箱' },
-  { value: 'url', label: '网址' },
-  { value: 'date', label: '日期' },
-  { value: 'month_year', label: '年月 (YYYY-MM)' },
-  { value: 'phone', label: '电话' },
-  { value: 'number', label: '数字' },
-  { value: 'multiline', label: '多行文本' },
-  { value: 'ssh_public_key', label: 'SSH 公钥' },
-  { value: 'ssh_private_key', label: 'SSH 私钥' },
+const ICON_COLOR_PRESETS = [
+  '#0572EC',
+  '#7C3AED',
+  '#0D9488',
+  '#16A34A',
+  '#D97706',
+  '#E11D48',
+  '#4F46E5',
+  '#475569',
 ];
 
-const URL_RULES: Array<{ value: UrlMatchRule; label: string }> = [
-  { value: 'domain', label: '主域匹配 (默认)' },
-  { value: 'host', label: '精确主机+端口' },
-  { value: 'starts_with', label: '前缀匹配' },
-  { value: 'exact', label: '完全匹配' },
-  { value: 'never', label: '仅作跳转链接' },
+const FIELD_TYPE_ORDER: FieldType[] = [
+  'text',
+  'password',
+  'totp',
+  'email',
+  'url',
+  'date',
+  'month_year',
+  'phone',
+  'number',
+  'multiline',
+  'ssh_public_key',
+  'ssh_private_key',
 ];
+
+const URL_RULE_ORDER: UrlMatchRule[] = ['domain', 'host', 'starts_with', 'exact', 'never'];
 
 interface ItemEditorPaneProps {
   initialDraft: ItemDraft;
@@ -46,13 +59,25 @@ interface ItemEditorPaneProps {
 }
 
 export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
+  const { dict, fmt } = useI18n();
+  const iconPopUid = useId().replace(/:/g, '');
+  const iconPopoverId = `icon-pop-${iconPopUid}`;
+  const iconAnchorName = `--icon-btn-${iconPopUid}`;
+  const iconPopoverRef = useRef<HTMLDivElement>(null);
+
   const [draft, setDraft] = useState<ItemDraft>(() => structuredClone(initialDraft));
   const [tagInput, setTagInput] = useState('');
+  const [domainIconHost, setDomainIconHost] = useState(
+    initialDraft.icon?.kind === 'domain' ? initialDraft.icon.host : '',
+  );
   const [saving, setSaving] = useState(false);
+  const [sshGenerating, setSshGenerating] = useState(false);
+  const [qrBusyFieldId, setQrBusyFieldId] = useState<string | null>(null);
   const [dragInfo, setDragInfo] = useState<{ sectionId: string; fieldIndex: number } | null>(null);
 
   useEffect(() => {
     setDraft(structuredClone(initialDraft));
+    setDomainIconHost(initialDraft.icon?.kind === 'domain' ? initialDraft.icon.host : '');
   }, [initialDraft]);
 
   const vaults = useVaultStore((s) => s.vaults);
@@ -64,7 +89,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
   const stopEditing = useUiStore((s) => s.stopEditing);
   const showToast = useUiStore((s) => s.showToast);
 
-  const tpl = TEMPLATE_MAP[draft.category];
+  const tpl = TEMPLATE_MAP[draft.category] ?? TEMPLATE_MAP.login;
 
   const handleSave = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -72,10 +97,20 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
     try {
       if (isNew || !draft.id) {
         await createItem(draft, getFilter());
-        showToast({ label: '新建条目', text: `已创建「${draft.title || '未命名条目'}」`, kind: 'info' });
+        showToast({
+          label: dict.editor.newItemLabel,
+          text: fmt(dict.editor.newItemCreatedToast, {
+            title: draft.title || dict.common.unnamedItem,
+          }),
+          kind: 'info',
+        });
       } else {
         await updateItem(draft.id, draft, getFilter());
-        showToast({ label: '保存条目', text: `已保存「${draft.title}」的修改`, kind: 'info' });
+        showToast({
+          label: dict.editor.saveItemLabel,
+          text: fmt(dict.editor.saveItemUpdatedToast, { title: draft.title }),
+          kind: 'info',
+        });
       }
       stopEditing();
     } finally {
@@ -123,7 +158,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                 ...sec.fields,
                 {
                   id: makeId('f'),
-                  label: '自定义字段',
+                  label: dict.editor.customFieldDefault,
                   fieldType: 'text',
                   value: '',
                   sensitive: false,
@@ -153,11 +188,11 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
         ...prev.sections,
         {
           id: makeId('sec'),
-          title: '自定义分组',
+          title: dict.editor.customSectionDefault,
           fields: [
             {
               id: makeId('f'),
-              label: '字段名称',
+              label: dict.editor.customSectionFieldDefault,
               fieldType: 'text',
               value: '',
               sensitive: false,
@@ -176,6 +211,113 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
     setTagInput('');
   };
 
+  const handleGenerateSshKeypair = async (sectionId: string) => {
+    setSshGenerating(true);
+    try {
+      const pair = await tauriClient.sshGenerateEd25519(draft.title || 'keysmith@local');
+      setDraft((prev) => ({
+        ...prev,
+        sections: prev.sections.map((sec) => {
+          if (sec.id !== sectionId) return sec;
+          return {
+            ...sec,
+            fields: sec.fields.map((f) => {
+              if (f.fieldType === 'ssh_public_key') return { ...f, value: pair.publicKey };
+              if (f.fieldType === 'ssh_private_key') {
+                return { ...f, value: pair.privateKeyOpenssh, sensitive: true };
+              }
+              if (f.label.includes('指纹') || f.label.toLowerCase().includes('fingerprint')) {
+                return { ...f, value: pair.fingerprintSha256 };
+              }
+              return f;
+            }),
+          };
+        }),
+      }));
+      showToast({
+        label: dict.editor.sshKeypairLabel,
+        text: fmt(dict.editor.sshKeypairGeneratedToast, { fp: pair.fingerprintSha256 }),
+        kind: 'info',
+      });
+    } catch (err) {
+      showToast({
+        label: dict.editor.sshGenerateFailedLabel,
+        text: err instanceof Error ? err.message : dict.editor.sshGenerateFailedText,
+        kind: 'warning',
+      });
+    } finally {
+      setSshGenerating(false);
+    }
+  };
+
+  const handleTotpFromClipboard = async (sectionId: string, fieldId: string) => {
+    setQrBusyFieldId(fieldId);
+    try {
+      const imgB64 = await tauriClient.clipboardReadImageBase64();
+      if (!imgB64) {
+        showToast({
+          label: dict.editor.clipboardNoImageLabel,
+          text: dict.editor.clipboardNoImageText,
+          kind: 'warning',
+        });
+        return;
+      }
+      const otpUri = await tauriClient.totpParseQrImage(imgB64);
+      updateField(sectionId, fieldId, { value: otpUri, sensitive: true });
+      showToast({
+        label: dict.editor.totpQrLabel,
+        text: dict.editor.totpQrClipboardToast,
+        kind: 'info',
+      });
+    } catch (err) {
+      showToast({
+        label: dict.editor.qrParseFailedLabel,
+        text: err instanceof Error ? err.message : dict.editor.qrParseFailedText,
+        kind: 'warning',
+      });
+    } finally {
+      setQrBusyFieldId(null);
+    }
+  };
+
+  const handleTotpFromFile = async (
+    sectionId: string,
+    fieldId: string,
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setQrBusyFieldId(fieldId);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result ?? '');
+          const commaIdx = result.indexOf(',');
+          resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
+        };
+        reader.onerror = () => reject(new Error(dict.editor.imageReadFailed));
+        reader.readAsDataURL(file);
+      });
+      const otpUri = await tauriClient.totpParseQrImage(base64);
+      updateField(sectionId, fieldId, { value: otpUri, sensitive: true });
+      showToast({
+        label: dict.editor.totpQrLabel,
+        text: fmt(dict.editor.totpQrFileToast, { name: file.name }),
+        kind: 'info',
+      });
+    } catch (err) {
+      showToast({
+        label: dict.editor.qrParseFailedLabel,
+        text: err instanceof Error ? err.message : dict.editor.qrParseFailedText,
+        kind: 'warning',
+      });
+    } finally {
+      setQrBusyFieldId(null);
+    }
+  };
+
   return (
     <form
       id="ks-item-editor-form"
@@ -183,45 +325,136 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
       className="h-full flex flex-col bg-[var(--bg-detail)] overflow-hidden"
     >
       {/* Sticky Editor Top Bar */}
-      <header className="px-7 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between gap-4 shrink-0 bg-[var(--bg-detail)]">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <ItemIconBadge icon={draft.icon} category={draft.category} title={draft.title} size="md" />
+      <header className="px-5 py-4 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-3 shrink-0 bg-[var(--bg-detail)]">
+        <div className="flex items-center gap-3 min-w-[200px] flex-1">
+          <button
+            type="button"
+            popoverTarget={iconPopoverId}
+            style={{ anchorName: iconAnchorName } as React.CSSProperties}
+            title={dict.editor.customIconTitle}
+            className="relative group rounded-xl cursor-pointer shrink-0"
+          >
+            <ItemIconBadge icon={draft.icon} category={draft.category} title={draft.title} size="md" />
+            <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-strong)] flex items-center justify-center text-[var(--text-secondary)]">
+              <Palette size={9} />
+            </span>
+          </button>
+
+          <div
+            ref={iconPopoverRef}
+            id={iconPopoverId}
+            popover="auto"
+            style={{ positionAnchor: iconAnchorName } as React.CSSProperties}
+            className="ks-popover ks-anchored-popover w-[250px]"
+          >
+            <div className="p-3 flex flex-col gap-3 text-xs">
+              <div className="font-semibold text-[var(--text-primary)]">{dict.editor.customIconTitle}</div>
+              <div>
+                <div className="text-[11px] text-[var(--text-secondary)] mb-1.5">{dict.editor.presetBadgeColor}</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {ICON_COLOR_PRESETS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => {
+                        setDraft((p) => ({
+                          ...p,
+                          icon: { kind: 'preset', name: tpl.iconName, color },
+                        }));
+                        iconPopoverRef.current?.hidePopover?.();
+                      }}
+                      className="w-6 h-6 rounded-lg border border-black/15 cursor-pointer"
+                      style={{ backgroundColor: color }}
+                      aria-label={fmt(dict.editor.pickColorAria, { color })}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="pt-2 border-t border-[var(--border-subtle)] flex flex-col gap-1.5">
+                <div className="text-[11px] text-[var(--text-secondary)]">{dict.editor.orDomainFavicon}</div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={domainIconHost}
+                    onChange={(e) => setDomainIconHost(e.target.value)}
+                    placeholder="github.com"
+                    className="flex-1 px-2 py-1 rounded-md bg-[var(--bg-input)] border border-[var(--border-strong)] text-xs font-mono-tabular text-[var(--text-primary)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cleanHost = domainIconHost.trim().replace(/^https?:\/\//i, '').split('/')[0];
+                      if (!cleanHost) return;
+                      setDraft((p) => ({ ...p, icon: { kind: 'domain', host: cleanHost } }));
+                      iconPopoverRef.current?.hidePopover?.();
+                    }}
+                    className="px-2 py-1 rounded-md bg-[var(--accent-primary)] text-white text-[11px] cursor-pointer"
+                  >
+                    {dict.editor.applyBtn}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="min-w-0 flex-1">
             <input
               type="text"
               value={draft.title}
               onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))}
-              placeholder="条目标题"
+              placeholder={dict.editor.titlePlaceholder}
               required
               autoFocus
-              className="w-full text-lg font-semibold bg-transparent border-b border-transparent focus:border-[var(--accent-primary)] focus:outline-none text-[var(--text-primary)] pb-0.5"
+              className="w-full px-2.5 py-1 -mx-2.5 rounded-lg text-[17px] font-semibold bg-transparent hover:bg-[var(--bg-hover)] focus:bg-[var(--bg-input)] border border-transparent focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/20 focus:outline-none text-[var(--text-primary)] transition-colors"
             />
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-[11px] text-[var(--text-muted)]">{tpl.label}</span>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <span className="text-[11px] text-[var(--text-muted)]">{dict.categories[draft.category] ?? tpl.label}</span>
               <span className="text-[var(--text-muted)]">·</span>
               <select
                 value={draft.vaultId}
                 onChange={(e) => setDraft((p) => ({ ...p, vaultId: e.target.value }))}
-                aria-label="所属保险库"
-                className="text-[11px] font-medium bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-md px-2 py-0.5 text-[var(--text-primary)]"
+                aria-label={dict.editor.vaultSelectAria}
+                className="ks-select-sm min-w-[84px] text-[var(--text-primary)]"
               >
-                {vaults.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                  </option>
-                ))}
+                {vaults
+                  .filter((v) => !v.isOrganization || v.id === draft.vaultId)
+                  .map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
               </select>
+              <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)] cursor-pointer ml-1 whitespace-nowrap shrink-0">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.archived)}
+                  onChange={(e) => setDraft((p) => ({ ...p, archived: e.target.checked }))}
+                  className="ks-checkbox"
+                />
+                <Archive size={11} />
+                <span>{dict.editor.archivedCheckbox}</span>
+              </label>
+              <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)] cursor-pointer ml-1 whitespace-nowrap shrink-0">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.reprompt)}
+                  onChange={(e) => setDraft((p) => ({ ...p, reprompt: e.target.checked }))}
+                  className="ks-checkbox"
+                />
+                <Lock size={11} />
+                <span>{dict.editor.repromptLabel}</span>
+              </label>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
           <button
             type="button"
             onClick={stopEditing}
             className="px-3 py-1.5 rounded-lg border border-[var(--border-strong)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-secondary)] cursor-pointer"
           >
-            取消
+            {dict.editor.cancel}
           </button>
           <button
             type="submit"
@@ -229,7 +462,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white shadow-xs cursor-pointer"
           >
             <Check size={14} />
-            {saving ? '保存中...' : '保存  ⌘S'}
+            {saving ? dict.editor.saving : dict.editor.saveWithShortcut}
           </button>
         </div>
       </header>
@@ -243,7 +476,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
           >
             <div className="flex items-center justify-between gap-2">
               {sIdx === 0 && !section.title ? (
-                <span className="text-xs font-semibold text-[var(--text-secondary)]">主要字段</span>
+                <span className="text-xs font-semibold text-[var(--text-secondary)]">{dict.editor.sectionMainFields}</span>
               ) : (
                 <input
                   type="text"
@@ -256,7 +489,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                       ),
                     }))
                   }
-                  placeholder="分组标题"
+                  placeholder={dict.editor.sectionTitlePlaceholder}
                   className="text-xs font-semibold bg-transparent border-b border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-[var(--text-primary)] pb-0.5"
                 />
               )}
@@ -270,10 +503,10 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                       sections: prev.sections.filter((s) => s.id !== section.id),
                     }))
                   }
-                  aria-label="删除分组"
+                  aria-label={dict.editor.removeSectionAria}
                   className="text-[11px] text-[var(--text-muted)] hover:text-[var(--status-danger)] cursor-pointer"
                 >
-                  移除分组
+                  {dict.editor.removeSectionBtn}
                 </button>
               )}
             </div>
@@ -297,17 +530,17 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                     }}
                     className="p-3 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] flex flex-col gap-2"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                        <span className="cursor-grab text-[var(--text-muted)]" title="拖拽排序">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 flex-1 min-w-[160px]">
+                        <span className="cursor-grab text-[var(--text-muted)] shrink-0" title={dict.editor.dragSortTitle}>
                           <GripVertical size={14} />
                         </span>
                         <input
                           type="text"
                           value={field.label}
                           onChange={(e) => updateField(section.id, field.id, { label: e.target.value })}
-                          placeholder="字段标签"
-                          className="text-xs font-medium bg-transparent border-b border-transparent focus:border-[var(--accent-primary)] focus:outline-none text-[var(--text-secondary)] w-36"
+                          placeholder={dict.editor.fieldLabelPlaceholder}
+                          className="px-1.5 py-0.5 rounded text-xs font-medium bg-transparent hover:bg-[var(--bg-hover)] focus:bg-[var(--bg-input)] border border-transparent focus:border-[var(--accent-primary)] focus:outline-none text-[var(--text-secondary)] flex-1 min-w-[72px] transition-colors"
                         />
                         <select
                           value={field.fieldType}
@@ -322,19 +555,19 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                               sensitive: autoSensitive ? true : field.sensitive,
                             });
                           }}
-                          aria-label="字段类型"
-                          className="text-[11px] bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[var(--text-secondary)]"
+                          aria-label={dict.editor.fieldTypeAria}
+                          className="ks-select-sm min-w-[96px] text-[var(--text-secondary)] shrink-0 whitespace-nowrap"
                         >
-                          {FIELD_TYPES.map((ft) => (
-                            <option key={ft.value} value={ft.value}>
-                              {ft.label}
+                          {FIELD_TYPE_ORDER.map((ft) => (
+                            <option key={ft} value={ft}>
+                              {dict.editor.fieldTypes[ft as keyof typeof dict.editor.fieldTypes] ?? ft}
                             </option>
                           ))}
                         </select>
                       </div>
 
-                      <div className="flex items-center gap-1 shrink-0">
-                        <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)] cursor-pointer mr-1">
+                      <div className="flex items-center gap-1 shrink-0 whitespace-nowrap">
+                        <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)] cursor-pointer mr-1 whitespace-nowrap shrink-0">
                           <input
                             type="checkbox"
                             checked={field.sensitive}
@@ -343,13 +576,13 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                             }
                             className="ks-checkbox"
                           />
-                          掩码
+                          {dict.editor.sensitiveCheckbox}
                         </label>
                         <button
                           type="button"
                           onClick={() => moveField(section.id, fIdx, fIdx - 1)}
                           disabled={fIdx === 0}
-                          aria-label="上移字段"
+                          aria-label={dict.editor.moveFieldUpAria}
                           className="p-1 rounded hover:bg-[var(--bg-hover)] disabled:opacity-30 text-[var(--text-muted)] cursor-pointer"
                         >
                           <ArrowUp size={12} />
@@ -358,7 +591,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                           type="button"
                           onClick={() => moveField(section.id, fIdx, fIdx + 1)}
                           disabled={fIdx === section.fields.length - 1}
-                          aria-label="下移字段"
+                          aria-label={dict.editor.moveFieldDownAria}
                           className="p-1 rounded hover:bg-[var(--bg-hover)] disabled:opacity-30 text-[var(--text-muted)] cursor-pointer"
                         >
                           <ArrowDown size={12} />
@@ -366,7 +599,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                         <button
                           type="button"
                           onClick={() => removeField(section.id, field.id)}
-                          aria-label="删除字段"
+                          aria-label={dict.editor.removeFieldAria}
                           className="p-1 rounded hover:bg-[var(--status-danger)]/10 text-[var(--text-muted)] hover:text-[var(--status-danger)] cursor-pointer"
                         >
                           <Trash2 size={12} />
@@ -384,8 +617,8 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                           autoCorrect="off"
                           autoCapitalize="off"
                           spellCheck={false}
-                          placeholder="输入内容..."
-                          className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-xs font-mono-tabular text-[var(--text-primary)]"
+                          placeholder={dict.editor.multilinePlaceholder}
+                          className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/20 focus:outline-none text-xs font-mono-tabular text-[var(--text-primary)] transition-colors"
                         />
                       ) : (
                         <input
@@ -396,10 +629,14 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                           autoCorrect={isSecret ? 'off' : undefined}
                           autoCapitalize={isSecret ? 'off' : undefined}
                           spellCheck={isSecret ? false : undefined}
-                          placeholder={field.fieldType === 'totp' ? 'otpauth://totp/... 或 Base32 密钥' : '输入字段值...'}
-                          className={`w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-[13px] ${
+                          placeholder={
+                            field.fieldType === 'totp'
+                              ? dict.editor.totpValuePlaceholder
+                              : dict.editor.fieldValuePlaceholder
+                          }
+                          className={`ks-input w-full focus:ring-2 focus:ring-[var(--accent-primary)]/20 text-[13px] ${
                             isSecret ? 'font-mono-tabular' : ''
-                          } text-[var(--text-primary)]`}
+                          }`}
                         />
                       )}
 
@@ -411,19 +648,60 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                         />
                       )}
                     </div>
+
+                    {field.fieldType === 'totp' && (
+                      <div className="flex items-center flex-wrap gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          disabled={qrBusyFieldId === field.id}
+                          onClick={() => void handleTotpFromClipboard(section.id, field.id)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--bg-card)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
+                        >
+                          <ClipboardPaste size={11} />
+                          {qrBusyFieldId === field.id ? dict.editor.qrRecognizing : dict.editor.importQrClipboard}
+                        </button>
+                        <label className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--bg-card)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer">
+                          <QrCode size={11} />
+                          <span>{dict.editor.uploadQrImage}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => void handleTotpFromFile(section.id, field.id, e)}
+                          />
+                        </label>
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
 
-            <button
-              type="button"
-              onClick={() => addFieldToSection(section.id)}
-              className="self-start inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-primary)] hover:underline cursor-pointer"
-            >
-              <Plus size={13} />
-              添加字段
-            </button>
+            <div className="flex items-center flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => addFieldToSection(section.id)}
+                className="self-start inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-primary)] hover:underline cursor-pointer"
+              >
+                <Plus size={13} />
+                {dict.editor.addField}
+              </button>
+
+              {(draft.category === 'ssh_key' ||
+                section.fields.some(
+                  (f) => f.fieldType === 'ssh_private_key' || f.fieldType === 'ssh_public_key',
+                )) && (
+                <button
+                  type="button"
+                  disabled={sshGenerating}
+                  onClick={() => void handleGenerateSshKeypair(section.id)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-detail)] hover:bg-[var(--bg-selected)] border border-[var(--border-strong)] text-xs font-medium text-[var(--accent-primary)] cursor-pointer"
+                >
+                  <KeyRound size={12} />
+                  {sshGenerating ? dict.editor.generatingEd25519 : dict.editor.generateEd25519}
+                </button>
+              )}
+            </div>
           </div>
         ))}
 
@@ -433,7 +711,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
           className="self-start inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-[var(--border-strong)] hover:border-[var(--accent-primary)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
         >
           <Plus size={13} />
-          新增自定义分组 (Section)
+          {dict.editor.addSection}
         </button>
 
         {/* Passkeys Bound List */}
@@ -441,19 +719,25 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
           <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] p-4 flex flex-col gap-2.5">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--text-secondary)]">
               <Fingerprint size={14} className="text-sky-500" />
-              已绑定通行密钥 ({draft.passkeys.length})
+              {fmt(dict.editor.boundPasskeys, { count: draft.passkeys.length })}
             </span>
             <div className="flex flex-col gap-2">
               {draft.passkeys.map((pk) => (
                 <div
                   key={pk.credentialId}
-                  className="px-3 py-2 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] flex items-center justify-between gap-3 text-xs"
+                  className="px-3 py-2 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] flex items-center justify-between gap-3 text-xs min-w-0"
                 >
-                  <div className="min-w-0">
-                    <div className="font-medium text-[var(--text-primary)] truncate">
+                  <div className="min-w-0 flex-1 overflow-hidden">
+                    <div
+                      title={`${pk.rpName} (${pk.rpId}) · ${pk.userName}`}
+                      className="font-medium text-[var(--text-primary)] truncate"
+                    >
                       {pk.rpName} ({pk.rpId}) · {pk.userName}
                     </div>
-                    <div className="text-[11px] text-[var(--text-muted)] font-mono-tabular truncate">
+                    <div
+                      title={pk.credentialId}
+                      className="text-[11px] text-[var(--text-muted)] font-mono-tabular truncate"
+                    >
                       {pk.credentialId}
                     </div>
                   </div>
@@ -468,7 +752,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                     className="inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-[var(--status-danger)]/10 text-[11px] text-[var(--status-danger)] shrink-0 cursor-pointer"
                   >
                     <Trash2 size={12} />
-                    解绑
+                    {dict.editor.unbindPasskey}
                   </button>
                 </div>
               ))}
@@ -479,24 +763,24 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
         {/* URLs Editor */}
         <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-[var(--text-secondary)]">关联网址</span>
+            <span className="text-xs font-semibold text-[var(--text-secondary)]">{dict.editor.relatedUrls}</span>
             <button
               type="button"
               onClick={() =>
                 setDraft((p) => ({
                   ...p,
-                  urls: [...p.urls, { id: makeId('u'), uri: '', label: '网址', matchRule: 'domain' }],
+                  urls: [...p.urls, { id: makeId('u'), uri: '', label: dict.editor.defaultUrlLabel, matchRule: 'domain' }],
                 }))
               }
               className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-primary)] hover:underline cursor-pointer"
             >
               <Plus size={13} />
-              添加网址
+              {dict.editor.addUrl}
             </button>
           </div>
 
           {draft.urls.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)]">暂无关联网址</p>
+            <p className="text-xs text-[var(--text-muted)]">{dict.editor.noUrls}</p>
           ) : (
             <div className="flex flex-col gap-2">
               {draft.urls.map((u) => (
@@ -511,7 +795,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                       }))
                     }
                     placeholder="https://example.com"
-                    className="flex-1 px-2.5 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-xs font-mono-tabular text-[var(--text-primary)]"
+                    className="ks-input flex-1 font-mono-tabular focus:ring-2 focus:ring-[var(--accent-primary)]/20"
                   />
                   <select
                     value={u.matchRule}
@@ -523,12 +807,12 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                         ),
                       }))
                     }
-                    aria-label="网址匹配规则"
-                    className="text-[11px] bg-[var(--bg-input)] border border-[var(--border-subtle)] rounded-lg px-2 py-1.5 text-[var(--text-secondary)]"
+                    aria-label={dict.editor.urlMatchRuleAria}
+                    className="ks-select min-w-[124px] text-[var(--text-secondary)] shrink-0"
                   >
-                    {URL_RULES.map((r) => (
-                      <option key={r.value} value={r.value}>
-                        {r.label}
+                    {URL_RULE_ORDER.map((r) => (
+                      <option key={r} value={r}>
+                        {dict.editor.urlRules[r]}
                       </option>
                     ))}
                   </select>
@@ -537,7 +821,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                     onClick={() =>
                       setDraft((p) => ({ ...p, urls: p.urls.filter((x) => x.id !== u.id) }))
                     }
-                    aria-label="移除网址"
+                    aria-label={dict.editor.removeUrlAria}
                     className="p-1.5 rounded hover:bg-[var(--status-danger)]/10 text-[var(--text-muted)] hover:text-[var(--status-danger)] cursor-pointer"
                   >
                     <Trash2 size={13} />
@@ -550,7 +834,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
 
         {/* Tags Editor */}
         <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] p-4 flex flex-col gap-2.5">
-          <span className="text-xs font-semibold text-[var(--text-secondary)]">标签</span>
+          <span className="text-xs font-semibold text-[var(--text-secondary)]">{dict.editor.tagsLabel}</span>
           <div className="flex flex-wrap items-center gap-1.5">
             {draft.tags.map((tag) => (
               <span
@@ -563,7 +847,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                   onClick={() =>
                     setDraft((p) => ({ ...p, tags: p.tags.filter((t) => t !== tag) }))
                   }
-                  aria-label={`移除标签 ${tag}`}
+                  aria-label={fmt(dict.editor.removeTagAria, { tag })}
                   className="hover:text-[var(--status-danger)] cursor-pointer"
                 >
                   <X size={12} />
@@ -580,13 +864,13 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                   addTag(tagInput);
                 }
               }}
-              placeholder="输入标签按回车添加..."
+              placeholder={dict.editor.tagInputPlaceholder}
               className="px-2 py-1 text-xs bg-transparent focus:outline-none text-[var(--text-primary)] min-w-[140px]"
             />
           </div>
           {tagCounts.length > 0 && (
             <div className="flex flex-wrap items-center gap-1 pt-1">
-              <span className="text-[11px] text-[var(--text-muted)] mr-1">常用标签：</span>
+              <span className="text-[11px] text-[var(--text-muted)] mr-1">{dict.editor.commonTags}</span>
               {tagCounts
                 .filter((t) => !draft.tags.includes(t.tag))
                 .slice(0, 6)
@@ -607,15 +891,15 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
         {/* Notes Editor */}
         <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] p-4 flex flex-col gap-2">
           <label htmlFor="editor-notes" className="text-xs font-semibold text-[var(--text-secondary)]">
-            备注（支持 Markdown）
+            {dict.editor.notesLabel}
           </label>
           <textarea
             id="editor-notes"
             rows={4}
             value={draft.notes}
             onChange={(e) => setDraft((p) => ({ ...p, notes: e.target.value }))}
-            placeholder="记录账号用途、恢复注意事项或内网连接说明..."
-            className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-xs leading-relaxed text-[var(--text-primary)]"
+            placeholder={dict.editor.notesPlaceholder}
+            className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/20 focus:outline-none text-xs leading-relaxed text-[var(--text-primary)] transition-colors"
           />
         </div>
       </div>

@@ -1,0 +1,1688 @@
+use std::collections::HashMap;
+use std::io::{Cursor, Write};
+use std::sync::{Arc, Mutex};
+
+use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use chrono::{Duration, Utc};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use image::{ImageFormat, Luma};
+use keysmith_core::crypto::{
+    build_send_share_url, decrypt_bytes, derive_master_key, derive_master_password_hash,
+    derive_send_key, encrypt_bytes, encrypt_send_buffer, generate_send_seed, hash_send_password,
+    protect_user_symmetric_key, stretch_master_key, unprotect_user_symmetric_key, KdfConfig,
+    UserSymmetricKey,
+};
+use keysmith_core::domain::codec::{
+    cipher_to_item, draft_to_cipher, encode_vault_name, folder_to_vault,
+};
+use keysmith_core::domain::{
+    AppSettingsPatch, AuthStatus, FieldPurpose, FieldType, GeneratorMode, GeneratorOptions,
+    ItemCategory, ItemDraft, ItemField, ItemFilter, ItemSection, ItemUrl, PasskeyCredential,
+    SendCreateTextInput, SendType, SendUpdateInput, SessionPreferencesPatch, UrlMatchRule, Vault,
+    WatchtowerFlags, WatchtowerIssueType, DEFAULT_PERSONAL_VAULT_ID,
+};
+use keysmith_core::generator::{evaluate_password_strength, generate_secret};
+use keysmith_core::importers::decrypt_keysmith_export;
+use keysmith_core::protocol::signalr::{parse_signalr_frames, SignalREvent};
+use keysmith_core::protocol::{
+    CipherCardDto, CipherDto, CipherFido2CredentialDto, CipherFieldDto, CipherIdentityDto,
+    CipherLoginDto, CipherLoginUriDto, CipherPasswordHistoryDto, FolderDto, SyncResponse,
+};
+use keysmith_core::search::{matches_search_query, score_search_query};
+use keysmith_core::storage::{Storage, StoredAccount};
+use keysmith_core::totp::compute_totp_at;
+use keysmith_core::traits::{BiometricKeyStore, NoopClipboardManager};
+use keysmith_core::watchtower::run_watchtower_audit;
+use keysmith_core::{AppCore, CoreError};
+use qrcode::QrCode;
+use ssh_key::PublicKey;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use zeroize::Zeroizing;
+use zip::write::SimpleFileOptions;
+
+#[derive(Default)]
+struct MockBiometricStore {
+    available: bool,
+    keys: Mutex<HashMap<String, Vec<u8>>>,
+}
+
+impl BiometricKeyStore for MockBiometricStore {
+    fn is_available(&self) -> bool {
+        self.available
+    }
+
+    fn save_unlock_key(&self, account_id: &str, key: &[u8]) -> Result<(), CoreError> {
+        self.keys
+            .lock()
+            .unwrap()
+            .insert(account_id.to_string(), key.to_vec());
+        Ok(())
+    }
+
+    fn load_unlock_key(
+        &self,
+        account_id: &str,
+        _reason: &str,
+    ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+        self.keys
+            .lock()
+            .unwrap()
+            .get(account_id)
+            .cloned()
+            .map(Zeroizing::new)
+            .ok_or_else(|| CoreError::Biometric("未找到密钥".to_string()))
+    }
+
+    fn delete_unlock_key(&self, account_id: &str) -> Result<(), CoreError> {
+        self.keys.lock().unwrap().remove(account_id);
+        Ok(())
+    }
+}
+
+fn make_test_account(
+    id: &str,
+    email: &str,
+    server_url: &str,
+    kdf: &KdfConfig,
+    protected: String,
+) -> StoredAccount {
+    let mut acc = StoredAccount::default_prefs(
+        id.to_string(),
+        server_url.to_string(),
+        email.to_string(),
+        email.split('@').next().unwrap_or("User").to_string(),
+        kdf.kdf,
+        kdf.kdf_iterations,
+        kdf.kdf_memory,
+        kdf.kdf_parallelism,
+        protected,
+        format!("dev-{id}"),
+    );
+    acc.biometric_enabled = true;
+    acc.last_master_password_unlock_at = Some(Utc::now().to_rfc3339());
+    acc
+}
+
+#[test]
+fn crypto_kdf_hkdf_and_encstring_roundtrip_and_tamper_detection() {
+    let argon_cfg = KdfConfig {
+        kdf: 1,
+        kdf_iterations: 2,
+        kdf_memory: Some(16),
+        kdf_parallelism: Some(1),
+    };
+    let mk1 = derive_master_key("SuperSecret#2026", "  Cherry@Example.COM ", &argon_cfg).unwrap();
+    let mk2 = derive_master_key("SuperSecret#2026", "cherry@example.com", &argon_cfg).unwrap();
+    assert_eq!(mk1.as_bytes(), mk2.as_bytes());
+
+    let pbkdf_cfg = KdfConfig {
+        kdf: 0,
+        kdf_iterations: 1000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    };
+    let mk_pb = derive_master_key("SuperSecret#2026", "cherry@example.com", &pbkdf_cfg).unwrap();
+    let mph = derive_master_password_hash(&mk_pb, "SuperSecret#2026");
+    assert!(!mph.is_empty());
+
+    let smk = stretch_master_key(&mk1).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let protected = protect_user_symmetric_key(&usk, &smk).unwrap();
+    assert!(protected.starts_with("2."));
+
+    let restored = unprotect_user_symmetric_key(&protected, &smk).unwrap();
+    assert_eq!(&*usk.to_bytes(), &*restored.to_bytes());
+
+    // Tamper MAC byte -> must fail verify-then-decrypt
+    let parts: Vec<&str> = protected.strip_prefix("2.").unwrap().split('|').collect();
+    let mut mac_bytes = B64.decode(parts[2]).unwrap();
+    mac_bytes[0] ^= 0xff;
+    let tampered = format!("2.{}|{}|{}", parts[0], parts[1], B64.encode(mac_bytes));
+    assert!(unprotect_user_symmetric_key(&tampered, &smk).is_err());
+
+    // Wrong password -> must fail
+    let mk_wrong = derive_master_key("WrongPassword", "cherry@example.com", &argon_cfg).unwrap();
+    let smk_wrong = stretch_master_key(&mk_wrong).unwrap();
+    assert!(unprotect_user_symmetric_key(&protected, &smk_wrong).is_err());
+
+    // Legacy Type 0 EncString read support
+    let iv = [7u8; 16];
+    let ct = cbc::Encryptor::<aes::Aes256>::new_from_slices(usk.enc_key(), &iv)
+        .unwrap()
+        .encrypt_padded_vec_mut::<Pkcs7>(b"legacy-note");
+    let type0 = format!("0.{}|{}", B64.encode(iv), B64.encode(ct));
+    let dec0 = decrypt_bytes(&type0, usk.enc_key(), usk.mac_key()).unwrap();
+    assert_eq!(&*dec0, b"legacy-note");
+
+    // Type 2 roundtrip
+    let type2 = encrypt_bytes(b"hello keysmith", usk.enc_key(), usk.mac_key()).unwrap();
+    let dec2 = decrypt_bytes(&type2, usk.enc_key(), usk.mac_key()).unwrap();
+    assert_eq!(&*dec2, b"hello keysmith");
+}
+
+#[test]
+fn domain_decodes_bitwarden_native_ciphers_and_preserves_fields_on_update() {
+    let usk = UserSymmetricKey::generate();
+
+    let mut bw_login = CipherDto {
+        id: "c-login-1".to_string(),
+        organization_id: None,
+        folder_id: Some("f-work".to_string()),
+        collection_ids: Vec::new(),
+        cipher_type: 1,
+        name: Some(usk.encrypt_string("GitHub").unwrap()),
+        notes: Some(usk.encrypt_string("Main dev account").unwrap()),
+        favorite: true,
+        login: Some(CipherLoginDto {
+            username: Some(usk.encrypt_string("cherry").unwrap()),
+            password: Some(usk.encrypt_string("OldPass!999").unwrap()),
+            totp: Some(usk.encrypt_string("JBSWY3DPEHPK3PXP").unwrap()),
+            uris: vec![CipherLoginUriDto {
+                uri: Some(usk.encrypt_string("https://github.com/login").unwrap()),
+                uri_match: Some(0),
+                extra: Default::default(),
+            }],
+            fido2_credentials: vec![CipherFido2CredentialDto {
+                credential_id: Some("abc".to_string()),
+                rp_id: Some("github.com".to_string()),
+                ..Default::default()
+            }],
+            extra: Default::default(),
+        }),
+        secure_note: None,
+        card: None,
+        identity: None,
+        fields: vec![CipherFieldDto {
+            name: Some(usk.encrypt_string("Recovery Hint").unwrap()),
+            value: Some(usk.encrypt_string("YubiKey").unwrap()),
+            field_type: 1,
+            linked_id: None,
+            extra: Default::default(),
+        }],
+        password_history: vec![CipherPasswordHistoryDto {
+            password: Some(usk.encrypt_string("OlderPass!111").unwrap()),
+            last_used_date: Some("2025-01-01T00:00:00Z".to_string()),
+        }],
+        attachments: Vec::new(),
+        reprompt: Some(0),
+        revision_date: Some("2026-01-01T00:00:00Z".to_string()),
+        creation_date: Some("2025-01-01T00:00:00Z".to_string()),
+        deleted_date: None,
+        extra: Default::default(),
+    };
+
+    let item = cipher_to_item(&bw_login, &usk).unwrap();
+    assert_eq!(item.title, "GitHub");
+    assert_eq!(item.payload.category, ItemCategory::Login);
+    assert_eq!(item.payload.notes, "Main dev account");
+    assert_eq!(item.payload.urls.len(), 1);
+    assert_eq!(item.payload.password_history.len(), 1);
+
+    let mut updated_sections = item.payload.sections.clone();
+    for field in &mut updated_sections[0].fields {
+        if field.purpose == Some(FieldPurpose::Password) {
+            field.value = "NewStrongPass#2026".to_string();
+        }
+    }
+    let draft = ItemDraft {
+        id: Some(item.id.clone()),
+        vault_id: item.vault_id.clone(),
+        title: "GitHub Enterprise".to_string(),
+        favorite: true,
+        category: ItemCategory::Login,
+        subtitle: None,
+        icon: item.payload.icon.clone(),
+        tags: vec![],
+        urls: item.payload.urls.clone(),
+        sections: updated_sections,
+        passkeys: item.payload.passkeys.clone(),
+        notes: "Updated note".to_string(),
+        password_history: item.payload.password_history.clone(),
+        watchtower: item.payload.watchtower,
+        archived: false,
+        reprompt: false,
+    };
+    let (next_cipher, next_item) =
+        draft_to_cipher(&item.id, &draft, Some(&bw_login), Some(&item), &usk).unwrap();
+    assert_eq!(next_cipher.cipher_type, 1);
+    assert_eq!(
+        next_cipher
+            .login
+            .as_ref()
+            .unwrap()
+            .fido2_credentials
+            .len(),
+        1
+    );
+    assert_eq!(next_item.payload.password_history.len(), 2);
+    assert_eq!(next_item.payload.password_history[0].value, "OldPass!999");
+
+    bw_login.cipher_type = 3;
+    bw_login.login = None;
+    bw_login.card = Some(CipherCardDto {
+        cardholder_name: Some(usk.encrypt_string("Cherry Wang").unwrap()),
+        brand: Some(usk.encrypt_string("Visa").unwrap()),
+        number: Some(usk.encrypt_string("4111111111114242").unwrap()),
+        exp_month: Some(usk.encrypt_string("12").unwrap()),
+        exp_year: Some(usk.encrypt_string("2028").unwrap()),
+        code: Some(usk.encrypt_string("123").unwrap()),
+        extra: Default::default(),
+    });
+    let card_item = cipher_to_item(&bw_login, &usk).unwrap();
+    assert_eq!(card_item.payload.category, ItemCategory::CreditCard);
+
+    bw_login.cipher_type = 4;
+    bw_login.card = None;
+    bw_login.identity = Some(CipherIdentityDto {
+        first_name: Some(usk.encrypt_string("Cherry").unwrap()),
+        last_name: Some(usk.encrypt_string("Wang").unwrap()),
+        email: Some(usk.encrypt_string("cherry@example.com").unwrap()),
+        ..Default::default()
+    });
+    let id_item = cipher_to_item(&bw_login, &usk).unwrap();
+    assert_eq!(id_item.payload.category, ItemCategory::Identity);
+
+    let plain_folder = FolderDto {
+        id: "f1".to_string(),
+        name: usk.encrypt_string("Work").unwrap(),
+        revision_date: None,
+    };
+    let v1 = folder_to_vault(&plain_folder, &usk, 3).unwrap();
+    assert_eq!(v1.name, "Work");
+    assert_eq!(v1.item_count, 3);
+
+    let meta_folder = FolderDto {
+        id: "f2".to_string(),
+        name: encode_vault_name("基础设施", "server", "#10B981", &usk).unwrap(),
+        revision_date: None,
+    };
+    let v2 = folder_to_vault(&meta_folder, &usk, 5).unwrap();
+    assert_eq!(v2.name, "基础设施");
+    assert_eq!(v2.icon, "server");
+    assert_eq!(v2.color, "#10B981");
+}
+
+#[test]
+fn totp_rfc6238_test_vector() {
+    let secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+    let res = compute_totp_at(
+        &format!("otpauth://totp/Test?secret={secret}&digits=8&period=30"),
+        59,
+    );
+    assert_eq!(res.code, "94287082");
+    assert_eq!(res.formatted_code, "9428 7082");
+    assert_eq!(res.remaining_seconds, 1);
+}
+
+#[test]
+fn generator_and_watchtower_and_search() {
+    let gen = generate_secret(&GeneratorOptions {
+        mode: GeneratorMode::Password,
+        length: 20,
+        include_digits: true,
+        include_symbols: true,
+        exclude_ambiguous: true,
+        ..Default::default()
+    });
+    assert_eq!(gen.value.len(), 20);
+    assert!(gen.strength.score >= 3);
+
+    let weak = evaluate_password_strength("123456");
+    assert!(weak.score < 3);
+
+    let vault = Vault {
+        id: "v-work".to_string(),
+        name: "工作".to_string(),
+        icon: "briefcase".to_string(),
+        color: "#0572EC".to_string(),
+        is_default: false,
+        is_organization: false,
+        item_count: 2,
+    };
+
+    let usk = UserSymmetricKey::generate();
+    let draft1 = ItemDraft {
+        id: None,
+        vault_id: "v-work".to_string(),
+        title: "生产数据库".to_string(),
+        favorite: true,
+        category: ItemCategory::Login,
+        subtitle: None,
+        icon: None,
+        tags: vec!["开发".to_string()],
+        urls: vec![ItemUrl {
+            id: "u1".to_string(),
+            uri: "http://example.com/login".to_string(),
+            label: None,
+            match_rule: UrlMatchRule::Domain,
+        }],
+        sections: vec![ItemSection {
+            id: "s1".to_string(),
+            title: String::new(),
+            fields: vec![ItemField {
+                id: "f1".to_string(),
+                label: "密码".to_string(),
+                field_type: FieldType::Password,
+                value: "123456".to_string(),
+                sensitive: true,
+                copyable: true,
+                purpose: Some(FieldPurpose::Password),
+            }],
+        }],
+        passkeys: vec![],
+        notes: String::new(),
+        password_history: vec![],
+        watchtower: WatchtowerFlags::default(),
+        archived: false,
+        reprompt: false,
+    };
+    let (_, item1) = draft_to_cipher("i1", &draft1, None, None, &usk).unwrap();
+
+    let mut draft2 = draft1.clone();
+    draft2.title = "本地服务".to_string();
+    draft2.urls = vec![ItemUrl {
+        id: "u2".to_string(),
+        uri: "http://127.0.0.1:8080".to_string(),
+        label: None,
+        match_rule: UrlMatchRule::Host,
+    }];
+    draft2.passkeys = vec![PasskeyCredential {
+        credential_id: "cred1".to_string(),
+        rp_id: "localhost".to_string(),
+        rp_name: "Local".to_string(),
+        user_handle: "dXNlcg".to_string(),
+        user_name: "dev".to_string(),
+        user_display_name: "Dev".to_string(),
+        algorithm: -7,
+        private_key_pkcs8: "pk".to_string(),
+        public_key_spki: "pub".to_string(),
+        sign_count: 1,
+        discoverable: true,
+        aaguid: "00000000-0000-0000-0000-000000000000".to_string(),
+        transports: vec!["internal".to_string()],
+        backed_up: true,
+        created_at: "2026-01-01T00:00:00Z".to_string(),
+        last_used_at: None,
+    }];
+    let (_, item2) = draft_to_cipher("i2", &draft2, None, None, &usk).unwrap();
+
+    assert!(matches_search_query(
+        &item1,
+        &[vault.clone()],
+        "tag:开发 vault:gz is:fav scsjk"
+    ));
+    assert!(!matches_search_query(&item1, &[vault.clone()], "is:passkey"));
+    assert!(matches_search_query(&item2, &[vault], "is:passkey"));
+
+    let report = run_watchtower_audit(&[item1, item2], None, None);
+    assert_eq!(report.counts[&WatchtowerIssueType::Weak], 2);
+    assert_eq!(report.counts[&WatchtowerIssueType::Reused], 2);
+    assert_eq!(report.counts[&WatchtowerIssueType::Missing2fa], 1);
+    assert_eq!(report.counts[&WatchtowerIssueType::UnsecuredUrl], 1);
+}
+
+#[tokio::test]
+async fn app_core_offline_unlock_lock_zeroize_and_crud() {
+    let storage = Storage::open_in_memory().unwrap();
+    let kdf = KdfConfig {
+        kdf: 0,
+        kdf_iterations: 1000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    };
+    let mk = derive_master_key("MasterPass#2026", "cherry@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let protected = protect_user_symmetric_key(&usk, &smk).unwrap();
+
+    let acc = make_test_account(
+        "acc-1",
+        "cherry@example.com",
+        "https://vault.example.com",
+        &kdf,
+        protected,
+    );
+    storage.upsert_account(&acc).unwrap();
+
+    let bio = Arc::new(MockBiometricStore {
+        available: true,
+        ..Default::default()
+    });
+    let clip = Arc::new(NoopClipboardManager);
+    let core = AppCore::with_storage(storage, bio, clip).unwrap();
+
+    assert_eq!(core.session_get_state().status, AuthStatus::Locked);
+    assert!(core.vault_list().is_err());
+
+    assert!(core.session_unlock_password("wrong").await.is_err());
+    assert_eq!(core.session_get_state().status, AuthStatus::Locked);
+
+    let state = core
+        .session_unlock_password("MasterPass#2026")
+        .await
+        .unwrap();
+    assert_eq!(state.status, AuthStatus::Unlocked);
+    assert!(state.biometric_enabled);
+
+    let created = core
+        .item_create(ItemDraft {
+            id: None,
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: "My Secret Bank".to_string(),
+            favorite: true,
+            category: ItemCategory::Login,
+            subtitle: None,
+            icon: None,
+            tags: vec!["finance".to_string()],
+            urls: vec![],
+            sections: vec![ItemSection {
+                id: "s1".to_string(),
+                title: String::new(),
+                fields: vec![ItemField {
+                    id: "f1".to_string(),
+                    label: "密码".to_string(),
+                    field_type: FieldType::Password,
+                    value: "UltraSecretPlaintext99!".to_string(),
+                    sensitive: true,
+                    copyable: true,
+                    purpose: Some(FieldPurpose::Password),
+                }],
+            }],
+            passkeys: vec![],
+            notes: "Private note".to_string(),
+            password_history: vec![],
+            watchtower: WatchtowerFlags::default(),
+            archived: false,
+            reprompt: false,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(core.sync_get_status().pending_count, 1);
+    let list = core.item_list(ItemFilter::default()).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].title, "My Secret Bank");
+
+    core.session_lock("manual").unwrap();
+    assert_eq!(core.session_get_state().status, AuthStatus::Locked);
+    assert!(core.item_get(&created.id).is_err());
+
+    let unlocked_bio = core.session_unlock_biometric().await.unwrap();
+    assert_eq!(unlocked_bio.status, AuthStatus::Unlocked);
+    let loaded = core.item_get(&created.id).unwrap().unwrap();
+    assert_eq!(loaded.title, "My Secret Bank");
+
+    let updated_prefs = core
+        .session_update_preferences(SessionPreferencesPatch {
+            auto_lock_minutes: Some(5),
+            clipboard_clear_seconds: Some(45),
+            biometric_enabled: Some(false),
+            close_to_tray: Some(false),
+            biometric_max_days: Some(3),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(updated_prefs.auto_lock_minutes, 5);
+    assert_eq!(updated_prefs.clipboard_clear_seconds, 45);
+    assert!(!updated_prefs.biometric_enabled);
+    assert!(!updated_prefs.close_to_tray);
+    assert_eq!(updated_prefs.biometric_max_days, 3);
+}
+
+#[tokio::test]
+async fn app_core_vaults_trash_passkeys_and_disk_zero_plaintext() {
+    let tmp_dir = std::env::temp_dir().join(format!("keysmith_test_{}", uuid::Uuid::new_v4()));
+    let db_path = tmp_dir.join("keysmith.db");
+    let storage = Storage::open(&db_path).unwrap();
+
+    let kdf = KdfConfig {
+        kdf: 0,
+        kdf_iterations: 1000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    };
+    let mk = derive_master_key("VaultPass#2026", "disk@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let protected = protect_user_symmetric_key(&usk, &smk).unwrap();
+
+    let acc = make_test_account(
+        "acc-disk",
+        "disk@example.com",
+        "https://vault.example.com",
+        &kdf,
+        protected,
+    );
+    storage.upsert_account(&acc).unwrap();
+
+    let bio = Arc::new(MockBiometricStore {
+        available: true,
+        ..Default::default()
+    });
+    let clip = Arc::new(NoopClipboardManager);
+    let core = AppCore::with_storage(storage, bio, clip).unwrap();
+    core.session_unlock_password("VaultPass#2026")
+        .await
+        .unwrap();
+
+    let v = core
+        .vault_create("WorkOps", Some("#10B981"), Some("server"))
+        .await
+        .unwrap();
+    assert_eq!(v.name, "WorkOps");
+    let v_renamed = core.vault_rename(&v.id, "ProdOps").await.unwrap();
+    assert_eq!(v_renamed.name, "ProdOps");
+
+    let item = core
+        .item_create(ItemDraft {
+            id: None,
+            vault_id: v.id.clone(),
+            title: "TOP_SECRET_TITLE_XYZ".to_string(),
+            favorite: false,
+            category: ItemCategory::Login,
+            subtitle: None,
+            icon: None,
+            tags: vec!["prod".to_string()],
+            urls: vec![],
+            sections: vec![ItemSection {
+                id: "s1".to_string(),
+                title: String::new(),
+                fields: vec![ItemField {
+                    id: "f1".to_string(),
+                    label: "密码".to_string(),
+                    field_type: FieldType::Password,
+                    value: "TOP_SECRET_PASSWORD_98765".to_string(),
+                    sensitive: true,
+                    copyable: true,
+                    purpose: Some(FieldPurpose::Password),
+                }],
+            }],
+            passkeys: vec![],
+            notes: "TOP_SECRET_NOTES_ABC".to_string(),
+            password_history: vec![],
+            watchtower: WatchtowerFlags::default(),
+            archived: false,
+            reprompt: false,
+        })
+        .await
+        .unwrap();
+
+    // Encrypted generator history & local attachment must also leave zero plaintext on disk
+    let hist = core
+        .generator_history_record("GEN_SECRET_PWD_777", "password", 88, Some("GitHub注册"))
+        .unwrap();
+    assert_eq!(hist.value, "GEN_SECRET_PWD_777");
+    let hist_list = core.generator_history_list().unwrap();
+    assert_eq!(hist_list.len(), 1);
+    assert_eq!(hist_list[0].source.as_deref(), Some("GitHub注册"));
+
+    let att = core
+        .attachment_upload(&item.id, "id_rsa_secret.pem", &B64.encode(b"ATT_PLAINTEXT_SECRET_888"))
+        .await
+        .unwrap();
+    assert!(att.has_local_data);
+    let dl = core.attachment_download(&item.id, &att.id).await.unwrap();
+    assert_eq!(B64.decode(&dl.data_base64).unwrap(), b"ATT_PLAINTEXT_SECRET_888");
+
+    let db_bytes = std::fs::read(&db_path).unwrap();
+    let db_lossy = String::from_utf8_lossy(&db_bytes);
+    assert!(!db_lossy.contains("TOP_SECRET_TITLE_XYZ"));
+    assert!(!db_lossy.contains("TOP_SECRET_PASSWORD_98765"));
+    assert!(!db_lossy.contains("TOP_SECRET_NOTES_ABC"));
+    assert!(!db_lossy.contains("GEN_SECRET_PWD_777"));
+    assert!(!db_lossy.contains("ATT_PLAINTEXT_SECRET_888"));
+    assert!(!db_lossy.contains("VaultPass#2026"));
+
+    core.attachment_delete(&item.id, &att.id).await.unwrap();
+    core.generator_history_clear().unwrap();
+    assert!(core.generator_history_list().unwrap().is_empty());
+
+    core.item_toggle_favorite(&item.id, true).await.unwrap();
+    assert_eq!(core.item_get_all_stats().unwrap().favorite_count, 1);
+    core.item_trash(&item.id).await.unwrap();
+    assert_eq!(core.item_get_all_stats().unwrap().trash_count, 1);
+    assert_eq!(core.item_get_all_stats().unwrap().total_count, 0);
+    core.item_restore(&item.id).await.unwrap();
+    assert_eq!(core.item_get_all_stats().unwrap().total_count, 1);
+
+    core.vault_delete(&v.id).await.unwrap();
+    let moved = core.item_get(&item.id).unwrap().unwrap();
+    assert_eq!(moved.vault_id, DEFAULT_PERSONAL_VAULT_ID);
+
+    let pk = core
+        .account_passkey_register("MacBook Touch ID", "multiDevice")
+        .unwrap();
+    let pk_renamed = core.account_passkey_rename(&pk.id, "Work Mac").unwrap();
+    assert_eq!(pk_renamed.name, "Work Mac");
+    assert_eq!(core.account_passkey_list().unwrap().credentials.len(), 1);
+
+    core.session_lock("manual").unwrap();
+    let passkey_unlocked = core.auth_passkey_login(Some(&pk.id)).await.unwrap();
+    assert_eq!(passkey_unlocked.status, AuthStatus::Unlocked);
+    assert_eq!(
+        core.account_passkey_list().unwrap().credentials[0].counter,
+        1
+    );
+
+    core.account_passkey_delete(&pk.id).unwrap();
+    assert_eq!(core.account_passkey_list().unwrap().credentials.len(), 0);
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn protocol_sync_response_handles_explicit_null_arrays() {
+    let raw = r#"{
+        "profile": {
+            "id": "u-1",
+            "email": "user@example.com",
+            "name": null,
+            "key": "2.abc|def|ghi"
+        },
+        "folders": null,
+        "collections": null,
+        "organizations": null,
+        "ciphers": [
+            {
+                "id": "c-1",
+                "type": 1,
+                "name": "2.a|b|c",
+                "favorite": null,
+                "login": {
+                    "username": "2.a|b|c",
+                    "password": "2.a|b|c",
+                    "uris": null
+                },
+                "fields": null,
+                "passwordHistory": null,
+                "attachments": null
+            }
+        ]
+    }"#;
+
+    let parsed: SyncResponse = serde_json::from_str(raw).unwrap();
+    assert!(parsed.folders.is_empty());
+    assert!(parsed.collections.is_empty());
+    assert_eq!(parsed.ciphers.len(), 1);
+    assert!(!parsed.ciphers[0].favorite);
+    assert!(parsed.ciphers[0].fields.is_empty());
+    assert!(parsed.ciphers[0].password_history.is_empty());
+    assert!(parsed.ciphers[0].login.as_ref().unwrap().uris.is_empty());
+
+    let raw_null_ciphers = r#"{
+        "profile": { "id": "u-1" },
+        "folders": [],
+        "ciphers": null
+    }"#;
+    let parsed2: SyncResponse = serde_json::from_str(raw_null_ciphers).unwrap();
+    assert!(parsed2.ciphers.is_empty());
+}
+
+#[tokio::test]
+async fn token_refresh_automatically_retries_after_401() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let base_url = format!("http://{addr}");
+
+    let server_task = tokio::spawn(async move {
+        let mut sync_calls = 0usize;
+        for _ in 0..3 {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let n = sock.read(&mut buf).await.unwrap();
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let req_lower = req.to_ascii_lowercase();
+
+            let (status, body) = if req.starts_with("GET /api/sync") {
+                sync_calls += 1;
+                if sync_calls == 1 {
+                    assert!(req_lower.contains("authorization: bearer expired-tok"));
+                    ("401 Unauthorized", r#"{"error":"expired"}"#.to_string())
+                } else {
+                    assert!(req_lower.contains("authorization: bearer fresh-tok"));
+                    (
+                        "200 OK",
+                        r#"{"profile":{"id":"acc-refresh","email":"r@example.com"},"folders":[],"collections":[],"ciphers":[]}"#.to_string(),
+                    )
+                }
+            } else if req.starts_with("POST /identity/connect/token") {
+                if !req.contains("refresh_token=rt-old") {
+                    let mut extra = vec![0u8; 1024];
+                    if let Ok(Ok(m)) = tokio::time::timeout(
+                        std::time::Duration::from_millis(200),
+                        sock.read(&mut extra),
+                    )
+                    .await
+                    {
+                        let combined = format!("{req}{}", String::from_utf8_lossy(&extra[..m]));
+                        assert!(combined.contains("refresh_token=rt-old"));
+                    }
+                }
+                (
+                    "200 OK",
+                    r#"{"access_token":"fresh-tok","expires_in":3600,"token_type":"Bearer","refresh_token":"rt-new"}"#.to_string(),
+                )
+            } else {
+                ("404 Not Found", "{}".to_string())
+            };
+
+            let resp = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            sock.write_all(resp.as_bytes()).await.unwrap();
+        }
+    });
+
+    let storage = Storage::open_in_memory().unwrap();
+    let kdf = KdfConfig {
+        kdf: 0,
+        kdf_iterations: 1000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    };
+    let mk = derive_master_key("RefreshPass#1", "r@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let protected = protect_user_symmetric_key(&usk, &smk).unwrap();
+
+    let mut acc = make_test_account("acc-refresh", "r@example.com", &base_url, &kdf, protected);
+    acc.access_token = Some("expired-tok".to_string());
+    acc.refresh_token = Some("rt-old".to_string());
+    storage.upsert_account(&acc).unwrap();
+
+    let core = AppCore::with_storage(
+        storage.clone(),
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    core.session_unlock_password("RefreshPass#1").await.unwrap();
+    let sync_status = core.sync_now().await.unwrap();
+    assert_eq!(sync_status.pending_count, 0);
+
+    let saved = storage.load_account_by_id("acc-refresh").unwrap().unwrap();
+    assert_eq!(saved.access_token.as_deref(), Some("fresh-tok"));
+    assert_eq!(saved.refresh_token.as_deref(), Some("rt-new"));
+
+    server_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn phase2_categories_archive_duplicate_batch_and_multi_account() {
+    let storage = Storage::open_in_memory().unwrap();
+    let kdf = KdfConfig {
+        kdf: 0,
+        kdf_iterations: 1000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    };
+    let mk1 = derive_master_key("PassOne#1", "one@example.com", &kdf).unwrap();
+    let smk1 = stretch_master_key(&mk1).unwrap();
+    let usk1 = UserSymmetricKey::generate();
+    let mut acc1 = make_test_account(
+        "acc-1",
+        "one@example.com",
+        "https://vault.one",
+        &kdf,
+        protect_user_symmetric_key(&usk1, &smk1).unwrap(),
+    );
+    acc1.biometric_max_days = 7;
+    storage.upsert_account(&acc1).unwrap();
+
+    let mk2 = derive_master_key("PassTwo#2", "two@example.com", &kdf).unwrap();
+    let smk2 = stretch_master_key(&mk2).unwrap();
+    let usk2 = UserSymmetricKey::generate();
+    let mut acc2 = make_test_account(
+        "acc-2",
+        "two@example.com",
+        "https://vault.two",
+        &kdf,
+        protect_user_symmetric_key(&usk2, &smk2).unwrap(),
+    );
+    acc2.is_active = false;
+    // Expired biometric timestamp (10 days ago > max 7 days)
+    acc2.last_master_password_unlock_at = Some((Utc::now() - Duration::days(10)).to_rfc3339());
+    storage.upsert_account(&acc2).unwrap();
+
+    let bio = Arc::new(MockBiometricStore {
+        available: true,
+        ..Default::default()
+    });
+    let core = AppCore::with_storage(storage, bio, Arc::new(NoopClipboardManager)).unwrap();
+    core.session_unlock_password("PassOne#1").await.unwrap();
+
+    // Create Phase 2 categories
+    let bank = core
+        .item_create(ItemDraft {
+            id: None,
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: "招商银行储蓄卡".to_string(),
+            favorite: false,
+            category: ItemCategory::BankAccount,
+            subtitle: None,
+            icon: None,
+            tags: vec![],
+            urls: vec![],
+            sections: vec![],
+            passkeys: vec![],
+            notes: "Bank".to_string(),
+            password_history: vec![],
+            watchtower: WatchtowerFlags::default(),
+            archived: false,
+            reprompt: false,
+        })
+        .await
+        .unwrap();
+    let passport = core
+        .item_create(ItemDraft {
+            id: None,
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: "中国护照".to_string(),
+            favorite: false,
+            category: ItemCategory::Passport,
+            subtitle: None,
+            icon: None,
+            tags: vec![],
+            urls: vec![],
+            sections: vec![],
+            passkeys: vec![],
+            notes: "Passport".to_string(),
+            password_history: vec![],
+            watchtower: WatchtowerFlags::default(),
+            archived: false,
+            reprompt: false,
+        })
+        .await
+        .unwrap();
+
+    // Duplicate + Archive + Batch move/tag/trash
+    let dup = core.item_duplicate(&bank.id).await.unwrap();
+    assert_eq!(dup.title, "招商银行储蓄卡 (副本)");
+
+    core.item_set_archived(&passport.id, true).await.unwrap();
+    let stats = core.item_get_all_stats().unwrap();
+    assert_eq!(stats.total_count, 2); // bank + dup
+    assert_eq!(stats.archived_count, 1);
+
+    let archived_list = core
+        .item_list(ItemFilter {
+            archived: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(archived_list.len(), 1);
+    assert_eq!(archived_list[0].id, passport.id);
+
+    let target_vault = core.vault_create("ArchiveVault", None, None).await.unwrap();
+    let moved = core
+        .item_move_vault(&[bank.id.clone(), dup.id.clone()], &target_vault.id)
+        .await
+        .unwrap();
+    assert_eq!(moved, 2);
+    let tagged = core
+        .item_batch_add_tag(&[bank.id.clone()], "vip")
+        .await
+        .unwrap();
+    assert_eq!(tagged, 1);
+    assert_eq!(
+        core.item_get(&bank.id).unwrap().unwrap().payload.tags,
+        vec!["vip"]
+    );
+    let trashed = core.item_batch_trash(&[dup.id.clone()]).await.unwrap();
+    assert_eq!(trashed, 1);
+    assert_eq!(core.item_get_all_stats().unwrap().trash_count, 1);
+
+    // Multi-account list & switch + biometric expiry check
+    let accounts = core.account_list().unwrap();
+    assert_eq!(accounts.len(), 2);
+    let switched = core.account_switch("acc-2").unwrap();
+    assert_eq!(switched.status, AuthStatus::Locked);
+    assert_eq!(switched.email, "two@example.com");
+
+    // Biometric must fail because acc-2 last master password unlock was 10 days ago (>7)
+    let bio_err = core.session_unlock_biometric().await;
+    assert!(matches!(bio_err, Err(CoreError::Biometric(_))));
+
+    // Password unlock resets the timestamp
+    let unlocked2 = core.session_unlock_password("PassTwo#2").await.unwrap();
+    assert_eq!(unlocked2.status, AuthStatus::Unlocked);
+}
+
+#[tokio::test]
+async fn ssh_keygen_sign_qr_decode_and_import_export() {
+    let storage = Storage::open_in_memory().unwrap();
+    let kdf = KdfConfig {
+        kdf: 0,
+        kdf_iterations: 1000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    };
+    let mk = derive_master_key("ImpExp#2026", "imp@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let acc = make_test_account(
+        "acc-imp",
+        "imp@example.com",
+        "https://vault.imp",
+        &kdf,
+        protect_user_symmetric_key(&usk, &smk).unwrap(),
+    );
+    storage.upsert_account(&acc).unwrap();
+
+    let core = AppCore::with_storage(
+        storage,
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    core.session_unlock_password("ImpExp#2026").await.unwrap();
+
+    // 1. SSH Ed25519 keygen + sign + verify + ssh_list_identities
+    let kp = core.ssh_generate_ed25519(Some("cherry@mbp")).unwrap();
+    assert!(kp.public_key.starts_with("ssh-ed25519 "));
+    assert!(kp.fingerprint_sha256.starts_with("SHA256:"));
+    let msg = b"git-commit-payload";
+    let sig_bytes = core.ssh_sign_ed25519(&kp.private_key_openssh, msg).unwrap();
+    assert_eq!(sig_bytes.len(), 64);
+
+    let pub_parsed = PublicKey::from_openssh(&kp.public_key).unwrap();
+    let ed_pub = pub_parsed.key_data().ed25519().unwrap();
+    let vk = VerifyingKey::from_bytes(&ed_pub.0).unwrap();
+    let sig = Signature::from_slice(&sig_bytes).unwrap();
+    vk.verify(msg, &sig).unwrap();
+
+    core.item_create(ItemDraft {
+        id: None,
+        vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+        title: "GitHub Signing Key".to_string(),
+        favorite: false,
+        category: ItemCategory::SshKey,
+        subtitle: None,
+        icon: None,
+        tags: vec![],
+        urls: vec![],
+        sections: vec![ItemSection {
+            id: "s1".to_string(),
+            title: String::new(),
+            fields: vec![
+                ItemField {
+                    id: "f1".to_string(),
+                    label: "公钥".to_string(),
+                    field_type: FieldType::SshPublicKey,
+                    value: kp.public_key.clone(),
+                    sensitive: false,
+                    copyable: true,
+                    purpose: None,
+                },
+                ItemField {
+                    id: "f2".to_string(),
+                    label: "私钥".to_string(),
+                    field_type: FieldType::SshPrivateKey,
+                    value: kp.private_key_openssh.clone(),
+                    sensitive: true,
+                    copyable: true,
+                    purpose: None,
+                },
+            ],
+        }],
+        passkeys: vec![],
+        notes: String::new(),
+        password_history: vec![],
+        watchtower: WatchtowerFlags::default(),
+        archived: false,
+        reprompt: false,
+    })
+    .await
+    .unwrap();
+    let ids = core.ssh_list_identities().unwrap();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(ids[0].fingerprint_sha256, kp.fingerprint_sha256);
+
+    // 2. QR image decoding (generate QR PNG in memory and decode via totp_parse_qr_image)
+    let otp_uri = "otpauth://totp/Keysmith:cherry@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Keysmith";
+    let qr = QrCode::new(otp_uri.as_bytes()).unwrap();
+    let qr_img = qr
+        .render::<Luma<u8>>()
+        .quiet_zone(true)
+        .min_dimensions(240, 240)
+        .build();
+    let mut png_bytes = Vec::new();
+    qr_img
+        .write_to(&mut Cursor::new(&mut png_bytes), ImageFormat::Png)
+        .unwrap();
+    let decoded_uri = core
+        .totp_parse_qr_image(&format!("data:image/png;base64,{}", B64.encode(&png_bytes)))
+        .unwrap();
+    assert_eq!(decoded_uri, otp_uri);
+
+    // 3. .1pux zip import
+    let export_data = r#"{
+        "accounts": [{
+            "vaults": [{
+                "attrs": { "name": "1P Vault" },
+                "items": [{
+                    "categoryUuid": "001",
+                    "overview": { "title": "1P GitLab", "url": "https://gitlab.com", "tags": ["dev"] },
+                    "details": {
+                        "loginFields": [
+                            { "designation": "username", "value": "alice" },
+                            { "designation": "password", "value": "1P_Secret#99" }
+                        ],
+                        "notesPlain": "Imported from 1P"
+                    }
+                }]
+            }]
+        }]
+    }"#;
+    let mut zip_buf = Vec::new();
+    {
+        let mut zip = zip::ZipWriter::new(Cursor::new(&mut zip_buf));
+        zip.start_file("export.data", SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(export_data.as_bytes()).unwrap();
+        zip.finish().unwrap();
+    }
+    let sum_1p = core
+        .vault_import("1pux", &B64.encode(&zip_buf), true, None)
+        .await
+        .unwrap();
+    assert_eq!(sum_1p.imported_vaults, 1);
+    assert_eq!(sum_1p.imported_items, 1);
+
+    // 4. Bitwarden JSON + Chrome CSV import
+    let bw_json = r#"{"encrypted":false,"folders":[],"items":[{"type":1,"name":"BW Site","login":{"username":"bob","password":"BwPass#1"}}]}"#;
+    let sum_bw = core
+        .vault_import("bitwarden_json", bw_json, false, None)
+        .await
+        .unwrap();
+    assert_eq!(sum_bw.imported_items, 1);
+
+    let chrome_csv = "name,url,username,password,note\nChrome Site,https://example.org,carl,CarlPass#2,from chrome\n";
+    let sum_csv = core
+        .vault_import("chrome_csv", chrome_csv, false, None)
+        .await
+        .unwrap();
+    assert_eq!(sum_csv.imported_items, 1);
+
+    // 5. Export (wrong master password fails; encrypted export hides plaintext; CSV/BW JSON exports work)
+    assert!(core
+        .vault_export("csv", "WrongMaster", None)
+        .await
+        .is_err());
+
+    let enc_exp = core
+        .vault_export("keysmith_encrypted_json", "ImpExp#2026", Some("ExportPhrase#1"))
+        .await
+        .unwrap();
+    assert!(!enc_exp.content.contains("1P_Secret#99"));
+    assert!(!enc_exp.content.contains("CarlPass#2"));
+    let dec_bundle =
+        decrypt_keysmith_export(&enc_exp.content, Some("ExportPhrase#1"), None).unwrap();
+    assert!(dec_bundle.contains("1P_Secret#99"));
+
+    let csv_exp = core.vault_export("csv", "ImpExp#2026", None).await.unwrap();
+    assert!(csv_exp.content.contains("1P GitLab"));
+    assert!(csv_exp.content.contains("Chrome Site"));
+
+    // 6. SignalR frame parser smoke test
+    let raw_frames = "{}\x1e{\"type\":6}\x1e{\"type\":1,\"target\":\"ReceiveMessage\",\"arguments\":[{\"Type\":0,\"Payload\":{\"Id\":\"c-99\"}}]}\x1e";
+    let events = parse_signalr_frames(raw_frames);
+    assert_eq!(
+        events,
+        vec![SignalREvent::SyncCipher {
+            action: "SyncCipherUpdate".to_string(),
+            cipher_id: Some("c-99".to_string())
+        }]
+    );
+}
+
+#[test]
+fn watchtower_missing_2fa_serde_contract() {
+    assert_eq!(
+        serde_json::to_string(&WatchtowerIssueType::Missing2fa).unwrap(),
+        "\"missing_2fa\""
+    );
+    assert_eq!(
+        serde_json::from_str::<WatchtowerIssueType>("\"missing_2fa\"").unwrap(),
+        WatchtowerIssueType::Missing2fa
+    );
+    assert_eq!(
+        serde_json::from_str::<WatchtowerIssueType>("\"missing2fa\"").unwrap(),
+        WatchtowerIssueType::Missing2fa
+    );
+
+    let flags = WatchtowerFlags {
+        ignore_missing_2fa: true,
+        ..Default::default()
+    };
+    let json = serde_json::to_value(flags).unwrap();
+    assert_eq!(json["ignoreMissing2fa"], serde_json::json!(true));
+}
+
+#[test]
+fn fido2_credentials_decode_and_preserve() {
+    let usk = UserSymmetricKey::generate();
+    let cipher = CipherDto {
+        id: "cipher-passkey-1".to_string(),
+        organization_id: None,
+        folder_id: None,
+        collection_ids: Vec::new(),
+        cipher_type: 1,
+        name: Some(usk.encrypt_string("GitHub").unwrap()),
+        notes: None,
+        favorite: false,
+        login: Some(CipherLoginDto {
+            username: Some(usk.encrypt_string("octocat").unwrap()),
+            password: Some(usk.encrypt_string("Pass#1234").unwrap()),
+            totp: None,
+            uris: vec![CipherLoginUriDto {
+                uri: Some(usk.encrypt_string("https://github.com").unwrap()),
+                uri_match: Some(0),
+                extra: Default::default(),
+            }],
+            fido2_credentials: vec![CipherFido2CredentialDto {
+                credential_id: Some(usk.encrypt_string("cred-abc-123").unwrap()),
+                key_type: Some(usk.encrypt_string("public-key").unwrap()),
+                key_algorithm: Some(usk.encrypt_string("ECDSA").unwrap()),
+                key_curve: Some(usk.encrypt_string("P-256").unwrap()),
+                key_value: Some(usk.encrypt_string("MIGHAgEAMBMGByqGSM49...").unwrap()),
+                rp_id: Some(usk.encrypt_string("github.com").unwrap()),
+                rp_name: Some(usk.encrypt_string("GitHub").unwrap()),
+                counter: Some(usk.encrypt_string("4").unwrap()),
+                user_handle: Some(usk.encrypt_string("uh-1").unwrap()),
+                user_name: Some(usk.encrypt_string("octocat").unwrap()),
+                user_display_name: Some(usk.encrypt_string("The Octocat").unwrap()),
+                discoverable: Some(usk.encrypt_string("true").unwrap()),
+                creation_date: Some("2026-01-15T10:00:00.000Z".to_string()),
+                extra: Default::default(),
+            }],
+            extra: Default::default(),
+        }),
+        secure_note: None,
+        card: None,
+        identity: None,
+        fields: Vec::new(),
+        password_history: Vec::new(),
+        attachments: Vec::new(),
+        reprompt: Some(0),
+        revision_date: None,
+        creation_date: None,
+        deleted_date: None,
+        extra: Default::default(),
+    };
+
+    let decoded = cipher_to_item(&cipher, &usk).unwrap();
+    assert_eq!(decoded.payload.passkeys.len(), 1);
+    let pk = &decoded.payload.passkeys[0];
+    assert_eq!(pk.credential_id, "cred-abc-123");
+    assert_eq!(pk.rp_id, "github.com");
+    assert_eq!(pk.rp_name, "GitHub");
+    assert_eq!(pk.user_name, "octocat");
+    assert_eq!(pk.user_display_name, "The Octocat");
+    assert_eq!(pk.sign_count, 4);
+    assert!(pk.discoverable);
+    assert_eq!(pk.algorithm, -7);
+    assert_eq!(pk.created_at, "2026-01-15T10:00:00.000Z");
+
+    // Updating a password preserves encrypted fido2Credentials when passkey stays attached
+    let mut draft = ItemDraft {
+        id: Some(decoded.id.clone()),
+        vault_id: decoded.vault_id.clone(),
+        title: decoded.title.clone(),
+        favorite: decoded.favorite,
+        category: decoded.payload.category,
+        subtitle: decoded.payload.subtitle.clone(),
+        icon: decoded.payload.icon.clone(),
+        tags: decoded.payload.tags.clone(),
+        urls: decoded.payload.urls.clone(),
+        sections: decoded.payload.sections.clone(),
+        passkeys: decoded.payload.passkeys.clone(),
+        notes: decoded.payload.notes.clone(),
+        password_history: decoded.payload.password_history.clone(),
+        watchtower: decoded.payload.watchtower,
+        archived: decoded.payload.archived,
+        reprompt: decoded.payload.reprompt,
+    };
+    let (updated_cipher, _) = draft_to_cipher(&decoded.id, &draft, Some(&cipher), Some(&decoded), &usk).unwrap();
+    assert_eq!(
+        updated_cipher.login.as_ref().unwrap().fido2_credentials.len(),
+        1
+    );
+
+    // Unbinding passkey removes it from fido2_credentials
+    draft.passkeys.clear();
+    let (unbound_cipher, _) = draft_to_cipher(&decoded.id, &draft, Some(&cipher), Some(&decoded), &usk).unwrap();
+    assert!(unbound_cipher.login.as_ref().unwrap().fido2_credentials.is_empty());
+}
+
+#[tokio::test]
+async fn app_settings_and_account_persist_across_reopen() {
+    let tmp_dir = std::env::temp_dir().join(format!("keysmith_persist_{}", uuid::Uuid::new_v4()));
+    let db_path = tmp_dir.join("keysmith.db");
+
+    {
+        let storage = Storage::open(&db_path).unwrap();
+        let kdf = KdfConfig {
+            kdf: 0,
+            kdf_iterations: 1000,
+            kdf_memory: None,
+            kdf_parallelism: None,
+        };
+        let mk = derive_master_key("PersistPass#1", "persist@example.com", &kdf).unwrap();
+        let smk = stretch_master_key(&mk).unwrap();
+        let usk = UserSymmetricKey::generate();
+        let protected = protect_user_symmetric_key(&usk, &smk).unwrap();
+        let acc = make_test_account(
+            "acc-persist",
+            "persist@example.com",
+            "https://vault.example.com",
+            &kdf,
+            protected,
+        );
+        storage.upsert_account(&acc).unwrap();
+
+        let core = AppCore::with_storage(
+            storage,
+            Arc::new(MockBiometricStore::default()),
+            Arc::new(NoopClipboardManager),
+        )
+        .unwrap();
+
+        let mut shortcuts = HashMap::new();
+        shortcuts.insert("search".to_string(), "CommandOrControl+K".to_string());
+        let saved = core
+            .app_settings_update(AppSettingsPatch {
+                language: Some("en".to_string()),
+                theme: Some("dark".to_string()),
+                custom_shortcuts: Some(shortcuts),
+                last_server_url: Some("https://vault.example.com".to_string()),
+            })
+            .unwrap();
+        assert_eq!(saved.language, "en");
+        assert_eq!(saved.theme, "dark");
+        core.checkpoint_storage().unwrap();
+    }
+
+    // Reopen fresh from disk (simulates quit & relaunch)
+    let storage2 = Storage::open(&db_path).unwrap();
+    let core2 = AppCore::with_storage(
+        storage2,
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    let session = core2.session_get_state();
+    assert_eq!(session.status, AuthStatus::Locked);
+    assert_eq!(session.email, "persist@example.com");
+
+    let settings2 = core2.app_settings_get().unwrap();
+    assert_eq!(settings2.language, "en");
+    assert_eq!(settings2.theme, "dark");
+    assert_eq!(
+        settings2.custom_shortcuts.get("search").map(String::as_str),
+        Some("CommandOrControl+K")
+    );
+    assert_eq!(
+        settings2.last_server_url.as_deref(),
+        Some("https://vault.example.com")
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn search_excludes_email_domain_noise_and_ranks_relevance() {
+    let usk = UserSymmetricKey::generate();
+    let vault = Vault {
+        id: "v1".to_string(),
+        name: "个人".to_string(),
+        icon: "folder".to_string(),
+        color: "#007AFF".to_string(),
+        is_default: true,
+        is_organization: false,
+        item_count: 3,
+    };
+
+    let (_, google_item) = draft_to_cipher(
+        "item-google",
+        &ItemDraft {
+            id: None,
+            vault_id: "v1".to_string(),
+            title: "Google".to_string(),
+            favorite: false,
+            category: ItemCategory::Login,
+            subtitle: None,
+            icon: None,
+            tags: vec![],
+            urls: vec![ItemUrl {
+                id: "u1".to_string(),
+                uri: "https://accounts.google.com".to_string(),
+                label: None,
+                match_rule: UrlMatchRule::Domain,
+            }],
+            sections: vec![ItemSection {
+                id: "s1".to_string(),
+                title: String::new(),
+                fields: vec![ItemField {
+                    id: "f1".to_string(),
+                    label: "用户名".to_string(),
+                    field_type: FieldType::Text,
+                    value: "alice@gmail.com".to_string(),
+                    sensitive: false,
+                    copyable: true,
+                    purpose: Some(FieldPurpose::Username),
+                }],
+            }],
+            passkeys: vec![],
+            notes: String::new(),
+            password_history: vec![],
+            watchtower: WatchtowerFlags::default(),
+            archived: false,
+            reprompt: false,
+        },
+        None,
+        None,
+        &usk,
+    )
+    .unwrap();
+
+    let (_, bybit_item) = draft_to_cipher(
+        "item-bybit",
+        &ItemDraft {
+            id: None,
+            vault_id: "v1".to_string(),
+            title: "Bybit".to_string(),
+            favorite: false,
+            category: ItemCategory::Login,
+            subtitle: None,
+            icon: None,
+            tags: vec![],
+            urls: vec![ItemUrl {
+                id: "u2".to_string(),
+                uri: "https://www.bybit.com".to_string(),
+                label: None,
+                match_rule: UrlMatchRule::Domain,
+            }],
+            sections: vec![ItemSection {
+                id: "s2".to_string(),
+                title: String::new(),
+                fields: vec![ItemField {
+                    id: "f2".to_string(),
+                    label: "用户名".to_string(),
+                    field_type: FieldType::Text,
+                    value: "user123@googlemail.com".to_string(),
+                    sensitive: false,
+                    copyable: true,
+                    purpose: Some(FieldPurpose::Username),
+                }],
+            }],
+            passkeys: vec![],
+            notes: "backup: recover@google.com".to_string(),
+            password_history: vec![],
+            watchtower: WatchtowerFlags::default(),
+            archived: false,
+            reprompt: false,
+        },
+        None,
+        None,
+        &usk,
+    )
+    .unwrap();
+
+    let (_, notes_github_item) = draft_to_cipher(
+        "item-other",
+        &ItemDraft {
+            id: None,
+            vault_id: "v1".to_string(),
+            title: "Build Server".to_string(),
+            favorite: false,
+            category: ItemCategory::Login,
+            subtitle: None,
+            icon: None,
+            tags: vec![],
+            urls: vec![ItemUrl {
+                id: "u3".to_string(),
+                uri: "https://ci.example.org".to_string(),
+                label: None,
+                match_rule: UrlMatchRule::Domain,
+            }],
+            sections: vec![ItemSection {
+                id: "s3".to_string(),
+                title: String::new(),
+                fields: vec![ItemField {
+                    id: "f3".to_string(),
+                    label: "用户名".to_string(),
+                    field_type: FieldType::Text,
+                    value: "ops@example.com".to_string(),
+                    sensitive: false,
+                    copyable: true,
+                    purpose: Some(FieldPurpose::Username),
+                }],
+            }],
+            passkeys: vec![],
+            notes: "Connected to google cloud and github deploy key".to_string(),
+            password_history: vec![],
+            watchtower: WatchtowerFlags::default(),
+            archived: false,
+            reprompt: false,
+        },
+        None,
+        None,
+        &usk,
+    )
+    .unwrap();
+
+    let vaults = vec![vault];
+    assert!(matches_search_query(&google_item, &vaults, "google"));
+    assert!(!matches_search_query(&bybit_item, &vaults, "google"));
+    assert!(matches_search_query(&bybit_item, &vaults, "@googlemail"));
+
+    let score_google = score_search_query(&google_item, &vaults, "google").unwrap();
+    let score_notes = score_search_query(&notes_github_item, &vaults, "google").unwrap();
+    assert!(score_google > score_notes);
+}
+
+#[test]
+fn send_crypto_hkdf_password_hash_and_url() {
+    let seed = generate_send_seed();
+    let send_key1 = derive_send_key(&seed).unwrap();
+    let send_key2 = derive_send_key(&seed).unwrap();
+    assert_eq!(send_key1.to_bytes(), send_key2.to_bytes());
+
+    let enc = send_key1.encrypt_string("机密分享文本").unwrap();
+    let dec = send_key2.decrypt_string(&enc).unwrap();
+    assert_eq!(&*dec, "机密分享文本");
+
+    let enc_buf = encrypt_send_buffer(b"hello-binary", send_key1.enc_key(), send_key1.mac_key()).unwrap();
+    assert_eq!(enc_buf[0], 2u8);
+    assert!(enc_buf.len() > 49);
+
+    let hash_a = hash_send_password("s3cr3t", &seed);
+    let hash_b = hash_send_password("s3cr3t", &seed);
+    assert_eq!(hash_a, hash_b);
+    assert_ne!(hash_a, hash_send_password("other", &seed));
+
+    let url = build_send_share_url("https://vault.example.com/", "acc-123", &seed);
+    assert!(url.starts_with("https://vault.example.com/#/send/acc-123/"));
+}
+
+#[tokio::test]
+async fn send_crud_persistence_and_lock_zeroize() {
+    let storage = Storage::open_in_memory().unwrap();
+    let kdf = KdfConfig::default();
+    let usk = UserSymmetricKey::generate();
+    let mk = derive_master_key("pw-send-test", "send@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let protected = protect_user_symmetric_key(&usk, &smk).unwrap();
+
+    let mut acc = StoredAccount::default_prefs(
+        "acc-send".to_string(),
+        "https://vault.example.com".to_string(),
+        "send@example.com".to_string(),
+        "Send Tester".to_string(),
+        kdf.kdf,
+        kdf.kdf_iterations,
+        kdf.kdf_memory,
+        kdf.kdf_parallelism,
+        protected,
+        "dev-send".to_string(),
+    );
+    acc.access_token = None;
+    storage.upsert_account(&acc).unwrap();
+
+    let core = AppCore::with_storage(
+        storage,
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    core.session_unlock_password("pw-send-test").await.unwrap();
+
+    let created = core
+        .send_create_text(SendCreateTextInput {
+            name: "一次分享密钥".to_string(),
+            text: "TOKEN-999".to_string(),
+            hidden: true,
+            notes: Some("内部备注".to_string()),
+            max_access_count: Some(1),
+            expiration_date: None,
+            deletion_date: (Utc::now() + Duration::days(3)).to_rfc3339(),
+            password: Some("open123".to_string()),
+            disabled: false,
+            hide_email: true,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(created.send_type, SendType::Text);
+    assert!(created.has_password);
+    assert!(created.hide_email);
+    assert!(created.share_url.contains("/#/send/"));
+    let orig_url = created.share_url.clone();
+
+    let updated = core
+        .send_update(
+            &created.id,
+            SendUpdateInput {
+                name: "已更新密钥分享".to_string(),
+                text: Some("TOKEN-888".to_string()),
+                hidden: Some(false),
+                notes: None,
+                max_access_count: Some(5),
+                expiration_date: None,
+                deletion_date: created.deletion_date.clone(),
+                password: None,
+                disabled: true,
+                hide_email: false,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.name, "已更新密钥分享");
+    assert_eq!(updated.text.as_deref(), Some("TOKEN-888"));
+    assert_eq!(updated.share_url, orig_url);
+    assert!(updated.disabled);
+
+    let cleared = core.send_remove_password(&created.id).await.unwrap();
+    assert!(!cleared.has_password);
+
+    core.session_lock("test").unwrap();
+    assert!(core.send_list().await.is_err());
+
+    core.session_unlock_password("pw-send-test").await.unwrap();
+    let list = core.send_list().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].name, "已更新密钥分享");
+
+    core.send_delete(&created.id).await.unwrap();
+    assert!(core.send_list().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn reprompt_roundtrip_and_empty_trash() {
+    let storage = Storage::open_in_memory().unwrap();
+    let kdf = KdfConfig::default();
+    let usk = UserSymmetricKey::generate();
+    let mk = derive_master_key("pw-trash-test", "trash@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let protected = protect_user_symmetric_key(&usk, &smk).unwrap();
+
+    let mut acc = StoredAccount::default_prefs(
+        "acc-trash".to_string(),
+        "https://vault.example.com".to_string(),
+        "trash@example.com".to_string(),
+        "Trash Tester".to_string(),
+        kdf.kdf,
+        kdf.kdf_iterations,
+        kdf.kdf_memory,
+        kdf.kdf_parallelism,
+        protected,
+        "dev-trash".to_string(),
+    );
+    acc.access_token = None;
+    storage.upsert_account(&acc).unwrap();
+
+    let core = AppCore::with_storage(
+        storage,
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    core.session_unlock_password("pw-trash-test").await.unwrap();
+
+    let guarded = core
+        .item_create(ItemDraft {
+            id: None,
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: "核心银行凭据".to_string(),
+            favorite: false,
+            category: ItemCategory::Login,
+            subtitle: None,
+            icon: None,
+            tags: vec![],
+            urls: vec![],
+            sections: vec![],
+            passkeys: vec![],
+            notes: "Protected".to_string(),
+            password_history: vec![],
+            watchtower: WatchtowerFlags::default(),
+            archived: false,
+            reprompt: true,
+        })
+        .await
+        .unwrap();
+    assert!(guarded.payload.reprompt);
+
+    let trashed = core
+        .item_create(ItemDraft {
+            id: None,
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: "待清空条目".to_string(),
+            favorite: false,
+            category: ItemCategory::SecureNote,
+            subtitle: None,
+            icon: None,
+            tags: vec![],
+            urls: vec![],
+            sections: vec![],
+            passkeys: vec![],
+            notes: "Discard".to_string(),
+            password_history: vec![],
+            watchtower: WatchtowerFlags::default(),
+            archived: false,
+            reprompt: false,
+        })
+        .await
+        .unwrap();
+
+    core.item_trash(&trashed.id).await.unwrap();
+    assert_eq!(core.item_get_all_stats().unwrap().trash_count, 1);
+
+    let purged = core.item_empty_trash().await.unwrap();
+    assert_eq!(purged, 1);
+    assert_eq!(core.item_get_all_stats().unwrap().trash_count, 0);
+    assert!(core.item_get(&guarded.id).unwrap().unwrap().payload.reprompt);
+}

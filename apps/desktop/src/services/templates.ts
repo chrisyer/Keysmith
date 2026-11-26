@@ -9,6 +9,7 @@ export interface TemplateMeta {
   iconName: string;
   color: string;
   order: number;
+  phase?: 1 | 2;
 }
 
 export const PHASE1_TEMPLATES: TemplateMeta[] = [
@@ -20,6 +21,7 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
     iconName: 'globe',
     color: '#0572EC',
     order: 1,
+    phase: 1,
   },
   {
     category: 'password',
@@ -29,6 +31,7 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
     iconName: 'key',
     color: '#7C3AED',
     order: 2,
+    phase: 1,
   },
   {
     category: 'secure_note',
@@ -38,6 +41,7 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
     iconName: 'file-text',
     color: '#D97706',
     order: 3,
+    phase: 1,
   },
   {
     category: 'credit_card',
@@ -47,6 +51,7 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
     iconName: 'credit-card',
     color: '#0D9488',
     order: 4,
+    phase: 1,
   },
   {
     category: 'api_credential',
@@ -56,6 +61,7 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
     iconName: 'webhook',
     color: '#2563EB',
     order: 5,
+    phase: 1,
   },
   {
     category: 'database',
@@ -65,6 +71,7 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
     iconName: 'database',
     color: '#0891B2',
     order: 6,
+    phase: 1,
   },
   {
     category: 'server',
@@ -74,6 +81,7 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
     iconName: 'server',
     color: '#4F46E5',
     order: 7,
+    phase: 1,
   },
   {
     category: 'ssh_key',
@@ -83,6 +91,7 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
     iconName: 'terminal',
     color: '#16A34A',
     order: 8,
+    phase: 1,
   },
   {
     category: 'identity',
@@ -92,6 +101,7 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
     iconName: 'user-check',
     color: '#DB2777',
     order: 9,
+    phase: 1,
   },
   {
     category: 'software_license',
@@ -101,8 +111,94 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
     iconName: 'badge-check',
     color: '#EA580C',
     order: 10,
+    phase: 1,
   },
 ];
+
+export const PHASE2_TEMPLATES: TemplateMeta[] = [
+  {
+    category: 'bank_account',
+    label: '银行账户',
+    shortLabel: '银行账户',
+    description: '开户行、账户号、Routing / SWIFT 与网银 PIN',
+    iconName: 'landmark',
+    color: '#0F766E',
+    order: 12,
+    phase: 2,
+  },
+  {
+    category: 'crypto_wallet',
+    label: '加密钱包',
+    shortLabel: '加密钱包',
+    description: '助记词、钱包地址、私钥与恢复密码',
+    iconName: 'bitcoin',
+    color: '#D97706',
+    order: 13,
+    phase: 2,
+  },
+  {
+    category: 'wifi_router',
+    label: 'Wi-Fi 路由器',
+    shortLabel: 'Wi-Fi',
+    description: 'SSID、Wi-Fi 密码、管理后台与网关 IP',
+    iconName: 'wifi',
+    color: '#0284C7',
+    order: 14,
+    phase: 2,
+  },
+  {
+    category: 'passport',
+    label: '护照',
+    shortLabel: '护照',
+    description: '护照号码、签发国家、签发与到期日期',
+    iconName: 'book-user',
+    color: '#4338CA',
+    order: 15,
+    phase: 2,
+  },
+  {
+    category: 'driver_license',
+    label: '驾驶证',
+    shortLabel: '驾驶证',
+    description: '证号、准驾车型、发证机关与有效期',
+    iconName: 'car',
+    color: '#2563EB',
+    order: 16,
+    phase: 2,
+  },
+  {
+    category: 'membership',
+    label: '会员卡',
+    shortLabel: '会员卡',
+    description: '会员编号、等级、PIN 与续费日期',
+    iconName: 'badge-percent',
+    color: '#9333EA',
+    order: 17,
+    phase: 2,
+  },
+  {
+    category: 'medical_record',
+    label: '医疗记录',
+    shortLabel: '医疗记录',
+    description: '医保号、血型、过敏史与紧急联系人',
+    iconName: 'heart-pulse',
+    color: '#E11D48',
+    order: 18,
+    phase: 2,
+  },
+  {
+    category: 'document',
+    label: '通用文档',
+    shortLabel: '通用文档',
+    description: '重要合同、证书、密钥文件与加密归档',
+    iconName: 'file-archive',
+    color: '#475569',
+    order: 19,
+    phase: 2,
+  },
+];
+
+export const ALL_TEMPLATES: TemplateMeta[] = [...PHASE1_TEMPLATES, ...PHASE2_TEMPLATES];
 
 const PASSKEY_META: TemplateMeta = {
   category: 'passkey',
@@ -115,7 +211,7 @@ const PASSKEY_META: TemplateMeta = {
 };
 
 export const TEMPLATE_MAP: Record<ItemCategory, TemplateMeta> = {
-  ...PHASE1_TEMPLATES.reduce(
+  ...ALL_TEMPLATES.reduce(
     (acc, item) => {
       acc[item.category] = item;
       return acc;
@@ -131,6 +227,7 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     vaultId,
     title: `新建${meta.label}`,
     favorite: false,
+    archived: false,
     category,
     icon: { kind: 'preset', name: meta.iconName, color: meta.color },
     tags: [],
@@ -145,6 +242,7 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
       ignoreMissing2fa: false,
       ignoreUnsecuredUrl: false,
     },
+    attachments: [],
   };
 
   switch (category) {
@@ -381,6 +479,153 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
               { id: makeId('f'), label: '依赖方域名 (RP ID)', fieldType: 'text', value: '', sensitive: false, copyable: true },
               { id: makeId('f'), label: '依赖方名称', fieldType: 'text', value: '', sensitive: false, copyable: true },
               { id: makeId('f'), label: '账户名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+            ],
+          },
+        ],
+      };
+
+    case 'bank_account':
+      return {
+        ...base,
+        sections: [
+          {
+            id: makeId('sec'),
+            title: '',
+            fields: [
+              { id: makeId('f'), label: '开户行名称', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '户名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: '账号 / IBAN', fieldType: 'number', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: 'Routing / 联行号', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'SWIFT / BIC', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '电话银行 PIN', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
+            ],
+          },
+        ],
+      };
+
+    case 'crypto_wallet':
+      return {
+        ...base,
+        sections: [
+          {
+            id: makeId('sec'),
+            title: '',
+            fields: [
+              { id: makeId('f'), label: '网络 / 币种', fieldType: 'text', value: 'Ethereum / BTC', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '钱包地址', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: '助记词 (Seed Phrase)', fieldType: 'multiline', value: '', sensitive: true, copyable: true, purpose: 'recovery_codes' },
+              { id: makeId('f'), label: '私钥', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: '钱包解锁密码', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+            ],
+          },
+        ],
+      };
+
+    case 'wifi_router':
+      return {
+        ...base,
+        urls: [{ id: makeId('u'), uri: 'http://192.168.1.1', label: '路由器管理页', matchRule: 'host' }],
+        sections: [
+          {
+            id: makeId('sec'),
+            title: '',
+            fields: [
+              { id: makeId('f'), label: '网络名称 (SSID)', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Wi-Fi 密码', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: '安全协议', fieldType: 'text', value: 'WPA3 / WPA2', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '管理后台密码', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: '网关 IP', fieldType: 'text', value: '192.168.1.1', sensitive: false, copyable: true },
+            ],
+          },
+        ],
+      };
+
+    case 'passport':
+      return {
+        ...base,
+        sections: [
+          {
+            id: makeId('sec'),
+            title: '',
+            fields: [
+              { id: makeId('f'), label: '签发国家 / 地区', fieldType: 'text', value: '中国', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '姓名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: '护照号码', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: '出生日期', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '签发日期', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '有效期至', fieldType: 'date', value: '', sensitive: false, copyable: true },
+            ],
+          },
+        ],
+      };
+
+    case 'driver_license':
+      return {
+        ...base,
+        sections: [
+          {
+            id: makeId('sec'),
+            title: '',
+            fields: [
+              { id: makeId('f'), label: '姓名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: '证号', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: '准驾车型', fieldType: 'text', value: 'C1', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '发证机关', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '有效期至', fieldType: 'date', value: '', sensitive: false, copyable: true },
+            ],
+          },
+        ],
+      };
+
+    case 'membership':
+      return {
+        ...base,
+        urls: [{ id: makeId('u'), uri: '', label: '会员官网', matchRule: 'domain' }],
+        sections: [
+          {
+            id: makeId('sec'),
+            title: '',
+            fields: [
+              { id: makeId('f'), label: '机构 / 品牌', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '会员卡号', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: '会员等级', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '查询密码 / PIN', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
+              { id: makeId('f'), label: '有效期至', fieldType: 'date', value: '', sensitive: false, copyable: true },
+            ],
+          },
+        ],
+      };
+
+    case 'medical_record':
+      return {
+        ...base,
+        sections: [
+          {
+            id: makeId('sec'),
+            title: '',
+            fields: [
+              { id: makeId('f'), label: '姓名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: '医保 / 病历号', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: '血型', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '过敏史', fieldType: 'multiline', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '紧急联系人与电话', fieldType: 'phone', value: '', sensitive: false, copyable: true },
+            ],
+          },
+        ],
+      };
+
+    case 'document':
+      return {
+        ...base,
+        sections: [
+          {
+            id: makeId('sec'),
+            title: '',
+            fields: [
+              { id: makeId('f'), label: '文档编号', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '相关方 / 机构', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: '关键口令 / 提取码', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: '归档日期', fieldType: 'date', value: '', sensitive: false, copyable: true },
             ],
           },
         ],

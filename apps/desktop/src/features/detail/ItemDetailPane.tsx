@@ -1,51 +1,46 @@
 import {
   AlertTriangle,
+  Archive,
   Check,
   ChevronDown,
   ChevronRight,
   Copy,
+  CopyPlus,
+  Download,
   ExternalLink,
   Eye,
   EyeOff,
+  FileUp,
   Fingerprint,
+  FolderInput,
   Hash,
   History,
+  Image as ImageIcon,
+  Lock,
   Maximize2,
   MoreHorizontal,
+  Paperclip,
   Pencil,
   RotateCcw,
+  Send,
   ShieldOff,
   Star,
   Trash2,
 } from 'lucide-react';
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ColoredPassword } from '../../components/ColoredPassword';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
 import { TotpRow } from '../../components/TotpRow';
-import { tauriClient } from '../../services/tauriClient';
+import { useI18n } from '../../i18n';
+import { isTauriRuntime, tauriClient } from '../../services/tauriClient';
 import { TEMPLATE_MAP } from '../../services/templates';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
-import type { ItemDetail, ItemField, WatchtowerIssueType } from '../../types/domain';
+import type { AttachmentDownloadResult, ItemDetail, ItemField } from '../../types/domain';
 import { extractDomain, formatCardNumber, formatDateTime, maskCardNumber } from '../../utils/format';
-
-const ISSUE_META: Record<WatchtowerIssueType, { label: string; desc: string }> = {
-  weak: { label: '弱密码', desc: '密码复杂度低于安全阈值，建议立即使用生成器替换。' },
-  reused: { label: '密码复用', desc: '此密码与其他条目相同，存在撞库风险。' },
-  missing_2fa: { label: '未开启 2FA', desc: '登录网站缺少 TOTP 动态口令保护。' },
-  unsecured_url: { label: '不安全 HTTP', desc: '网址使用明文 HTTP 协议，可能被窃听。' },
-  expiring: { label: '即将过期或已过期', desc: '卡片或授权有效期已临近或超过当前日期。' },
-  breached: { label: '已知泄露密码', desc: 'HIBP k-匿名检测命中公开泄露库，请立即更换。' },
-};
-
-const MATCH_RULE_LABELS: Record<string, string> = {
-  domain: '主域匹配',
-  host: '精确主机',
-  starts_with: '前缀匹配',
-  exact: '完全匹配',
-  never: '仅跳转',
-};
+import { openExternalUrl } from '../../utils/opener';
+import { formatShortcutMac } from '../../utils/shortcuts';
 
 function renderNotesLines(notes: string) {
   return notes.split('\n').map((line, i) => {
@@ -76,20 +71,48 @@ function renderNotesLines(notes: string) {
 interface FieldRowProps {
   field: ItemField;
   revealed: boolean;
+  repromptLocked?: boolean;
+  onRequireReprompt?: () => void;
   onToggleReveal: () => void;
   onCopy: (text: string, label: string, sensitive: boolean) => void;
   onLargeType: (label: string, value: string) => void;
 }
 
-function FieldRow({ field, revealed, onToggleReveal, onCopy, onLargeType }: FieldRowProps) {
+function FieldRow({
+  field,
+  revealed,
+  repromptLocked = false,
+  onRequireReprompt,
+  onToggleReveal,
+  onCopy,
+  onLargeType,
+}: FieldRowProps) {
+  const { dict, fmt } = useI18n();
   const [justCopied, setJustCopied] = useState(false);
 
   if (field.fieldType === 'totp' && field.value.trim()) {
+    if (repromptLocked) {
+      return (
+        <div
+          onClick={() => onRequireReprompt?.()}
+          className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg hover:bg-[var(--bg-hover)] cursor-pointer"
+        >
+          <div>
+            <div className="text-[11px] font-medium text-[var(--text-secondary)]">{field.label}</div>
+            <div className="mt-1 font-mono-tabular tracking-[0.18em] text-[13.5px] text-[var(--text-muted)]">
+              ••••••
+            </div>
+          </div>
+          <Lock size={14} className="text-[var(--text-muted)]" />
+        </div>
+      );
+    }
     return <TotpRow label={field.label} secretOrUri={field.value} />;
   }
 
   const displayValue = (() => {
     if (!field.value) return '—';
+    if (repromptLocked && field.sensitive) return '••••••••••••';
     if (field.purpose === 'card_number') {
       return revealed ? formatCardNumber(field.value) : maskCardNumber(field.value);
     }
@@ -99,6 +122,10 @@ function FieldRow({ field, revealed, onToggleReveal, onCopy, onLargeType }: Fiel
   const handleCopy = (e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!field.value) return;
+    if (repromptLocked && field.sensitive) {
+      onRequireReprompt?.();
+      return;
+    }
     onCopy(field.value, field.label, field.sensitive);
     setJustCopied(true);
     setTimeout(() => setJustCopied(false), 1400);
@@ -130,7 +157,7 @@ function FieldRow({ field, revealed, onToggleReveal, onCopy, onLargeType }: Fiel
         <div className="text-[11px] font-medium text-[var(--text-secondary)]">{field.label}</div>
         <div className="mt-1 text-[13.5px] leading-relaxed" data-selectable="true">
           {field.sensitive && field.purpose !== 'card_number' ? (
-            isMultiline && !revealed ? (
+            (isMultiline && !revealed) || repromptLocked ? (
               <span className="font-mono-tabular tracking-[0.18em] text-[var(--text-secondary)]">
                 ••••••••••••
               </span>
@@ -156,13 +183,17 @@ function FieldRow({ field, revealed, onToggleReveal, onCopy, onLargeType }: Fiel
             type="button"
             onClick={(e) => {
               e.stopPropagation();
+              if (repromptLocked) {
+                onRequireReprompt?.();
+                return;
+              }
               onToggleReveal();
             }}
-            title={revealed ? '隐藏' : '显示明文'}
-            aria-label={revealed ? `隐藏${field.label}` : `显示${field.label}`}
+            title={revealed ? dict.detail.hideFieldTitle : dict.detail.showFieldTitle}
+            aria-label={fmt(revealed ? dict.detail.hideFieldAria : dict.detail.showFieldAria, { label: field.label })}
             className="p-1.5 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
           >
-            {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
+            {revealed && !repromptLocked ? <EyeOff size={14} /> : <Eye size={14} />}
           </button>
         )}
         {field.sensitive && field.value && (
@@ -170,10 +201,14 @@ function FieldRow({ field, revealed, onToggleReveal, onCopy, onLargeType }: Fiel
             type="button"
             onClick={(e) => {
               e.stopPropagation();
+              if (repromptLocked) {
+                onRequireReprompt?.();
+                return;
+              }
               onLargeType(field.label, field.value);
             }}
-            title="大字展示 (Large Type)"
-            aria-label={`大字展示${field.label}`}
+            title={dict.detail.largeTypeTitle}
+            aria-label={fmt(dict.detail.largeTypeFieldAria, { label: field.label })}
             className="p-1.5 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
           >
             <Maximize2 size={14} />
@@ -183,19 +218,19 @@ function FieldRow({ field, revealed, onToggleReveal, onCopy, onLargeType }: Fiel
           <button
             type="button"
             onClick={handleCopy}
-            title="复制"
-            aria-label={`复制${field.label}`}
+            title={dict.common.copy}
+            aria-label={fmt(dict.detail.copyFieldAria, { label: field.label })}
             className="inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-[var(--bg-selected)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
           >
             {justCopied ? (
               <>
                 <Check size={13} className="text-[var(--status-success)]" />
-                <span className="text-[var(--status-success)]">已复制</span>
+                <span className="text-[var(--status-success)]">{dict.common.copied}</span>
               </>
             ) : (
               <>
                 <Copy size={13} />
-                <span>复制</span>
+                <span>{dict.common.copy}</span>
               </>
             )}
           </button>
@@ -210,6 +245,7 @@ interface ItemDetailPaneProps {
 }
 
 export function ItemDetailPane({ item }: ItemDetailPaneProps) {
+  const { dict, fmt } = useI18n();
   const uid = useId().replace(/:/g, '');
   const menuId = `item-more-${uid}`;
   const menuAnchor = `--item-more-${uid}`;
@@ -219,10 +255,23 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [historyOpen, setHistoryOpen] = useState(false);
   const [confirmUnbindCredId, setConfirmUnbindCredId] = useState<string | null>(null);
+  const [moveMenuOpen, setMoveMenuOpen] = useState(false);
+  const [uploadingAtt, setUploadingAtt] = useState(false);
+  const [previewAtt, setPreviewAtt] = useState<AttachmentDownloadResult | null>(null);
+  const [repromptPw, setRepromptPw] = useState('');
+  const [repromptBusy, setRepromptBusy] = useState(false);
+  const [repromptErr, setRepromptErr] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const repromptInputRef = useRef<HTMLInputElement>(null);
 
   const vaults = useVaultStore((s) => s.vaults);
   const watchtowerReport = useVaultStore((s) => s.watchtowerReport);
   const toggleFavorite = useVaultStore((s) => s.toggleFavorite);
+  const duplicateItem = useVaultStore((s) => s.duplicateItem);
+  const setItemArchived = useVaultStore((s) => s.setItemArchived);
+  const moveItemsToVault = useVaultStore((s) => s.moveItemsToVault);
+  const selectItem = useVaultStore((s) => s.selectItem);
+  const refreshItems = useVaultStore((s) => s.refreshItems);
   const trashItem = useVaultStore((s) => s.trashItem);
   const restoreItem = useVaultStore((s) => s.restoreItem);
   const deletePermanent = useVaultStore((s) => s.deletePermanent);
@@ -230,14 +279,26 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
   const updateItem = useVaultStore((s) => s.updateItem);
 
   const clearSec = useSessionStore((s) => s.clipboardClearSeconds);
+  const biometricEnabled = useSessionStore((s) => s.biometricEnabled);
+  const shortcuts = useUiStore((s) => s.shortcuts);
+  const repromptVerifiedIds = useUiStore((s) => s.repromptVerifiedIds);
+  const markRepromptVerified = useUiStore((s) => s.markRepromptVerified);
   const getFilter = useUiStore((s) => s.getFilter);
   const startEditingExisting = useUiStore((s) => s.startEditingExisting);
   const openLargeType = useUiStore((s) => s.openLargeType);
+  const openSendWithPrefill = useUiStore((s) => s.openSendWithPrefill);
   const showToast = useUiStore((s) => s.showToast);
   const setViewTag = useUiStore((s) => s.setViewTag);
 
+  useEffect(() => {
+    setRepromptPw('');
+    setRepromptErr(null);
+  }, [item.id]);
+
+  const repromptLocked = Boolean(item.reprompt) && !repromptVerifiedIds[item.id];
+
   const vault = vaults.find((v) => v.id === item.vaultId);
-  const tpl = TEMPLATE_MAP[item.category];
+  const tpl = TEMPLATE_MAP[item.category] ?? TEMPLATE_MAP.login;
   const itemIssues = watchtowerReport?.itemIssues[item.id] ?? [];
 
   const allFields = item.sections.flatMap((s) => s.fields);
@@ -250,8 +311,8 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
     showToast({
       label,
       text: sensitive
-        ? `已复制「${label}」· ${clearSec} 秒后自动清空剪贴板`
-        : `已复制「${label}」`,
+        ? fmt(dict.detail.copiedSensitiveToast, { label, secs: clearSec })
+        : fmt(dict.detail.copiedPlainToast, { label }),
       kind: sensitive ? 'clipboard' : 'info',
     });
   };
@@ -263,7 +324,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
     if (itemIssues.includes('missing_2fa')) flags.ignoreMissing2fa = true;
     if (itemIssues.includes('unsecured_url')) flags.ignoreUnsecuredUrl = true;
     await updateWatchtowerFlags(item.id, flags, getFilter());
-    showToast({ label: 'Watchtower', text: '已忽略当前条目的此项安全提醒', kind: 'info' });
+    showToast({ label: dict.sidebar.watchtower, text: dict.detail.watchtowerIgnoreToast, kind: 'info' });
   };
 
   const handleRestorePassword = async (oldValue: string) => {
@@ -289,28 +350,172 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
         notes: item.notes,
         passwordHistory: item.passwordHistory,
         watchtower: item.watchtower,
+        reprompt: item.reprompt,
       },
       getFilter(),
     );
-    showToast({ label: '密码历史', text: '已还原历史密码，原密码已归档至历史记录', kind: 'info' });
+    showToast({
+      label: dict.detail.passwordRestoredLabel,
+      text: dict.detail.passwordRestoredToast,
+      kind: 'info',
+    });
+  };
+
+  const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingAtt(true);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result ?? '');
+          const commaIdx = result.indexOf(',');
+          resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
+        };
+        reader.onerror = () => reject(new Error(dict.detail.fileReadFailed));
+        reader.readAsDataURL(file);
+      });
+      await tauriClient.attachmentUpload(item.id, file.name, base64);
+      await refreshItems(getFilter());
+      await selectItem(item.id);
+      showToast({
+        label: dict.detail.encryptedAttachmentLabel,
+        text: fmt(dict.detail.attachmentUploadedToast, { name: file.name }),
+        kind: 'info',
+      });
+    } catch (err) {
+      showToast({
+        label: dict.detail.attachmentUploadFailedLabel,
+        text: err instanceof Error ? err.message : dict.detail.attachmentUploadFailedText,
+        kind: 'warning',
+      });
+    } finally {
+      setUploadingAtt(false);
+    }
+  };
+
+  const handleAttachmentDownload = async (attachmentId: string, previewOnly = false) => {
+    try {
+      const res = await tauriClient.attachmentDownload(item.id, attachmentId);
+      if (previewOnly && res.mimeType.startsWith('image/')) {
+        setPreviewAtt(res);
+        return;
+      }
+      const binary = atob(res.dataBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: res.mimeType || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = res.fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      showToast({
+        label: dict.detail.attachmentReadFailedLabel,
+        text: err instanceof Error ? err.message : dict.detail.attachmentReadFailedText,
+        kind: 'warning',
+      });
+    }
+  };
+
+  const handleAttachmentDelete = async (attachmentId: string, fileName: string) => {
+    try {
+      await tauriClient.attachmentDelete(item.id, attachmentId);
+      await refreshItems(getFilter());
+      await selectItem(item.id);
+      showToast({
+        label: dict.detail.encryptedAttachmentLabel,
+        text: fmt(dict.detail.attachmentDeletedToast, { name: fileName }),
+        kind: 'info',
+      });
+    } catch (err) {
+      showToast({
+        label: dict.detail.attachmentDeleteFailedLabel,
+        text: err instanceof Error ? err.message : dict.detail.attachmentDeleteFailedText,
+        kind: 'warning',
+      });
+    }
+  };
+
+  const focusRepromptPrompt = () => {
+    repromptInputRef.current?.focus();
+    repromptInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const handleVerifyRepromptPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!repromptPw) return;
+    setRepromptBusy(true);
+    setRepromptErr(null);
+    try {
+      await tauriClient.sessionUnlockPassword(repromptPw);
+      markRepromptVerified(item.id);
+      setRepromptPw('');
+      showToast({ label: item.title, text: dict.detail.repromptVerifiedToast, kind: 'info' });
+    } catch {
+      setRepromptErr(dict.detail.repromptWrongPw);
+    } finally {
+      setRepromptBusy(false);
+    }
+  };
+
+  const handleVerifyRepromptBiometric = async () => {
+    setRepromptBusy(true);
+    setRepromptErr(null);
+    try {
+      await tauriClient.sessionUnlockBiometric();
+      markRepromptVerified(item.id);
+      showToast({ label: item.title, text: dict.detail.repromptVerifiedToast, kind: 'info' });
+    } catch (err) {
+      setRepromptErr(err instanceof Error ? err.message : dict.detail.repromptWrongPw);
+    } finally {
+      setRepromptBusy(false);
+    }
+  };
+
+  const handleShareViaSend = () => {
+    if (repromptLocked) {
+      focusRepromptPrompt();
+      return;
+    }
+    const lines: string[] = [];
+    for (const sec of item.sections) {
+      for (const f of sec.fields) {
+        if (f.value.trim()) {
+          lines.push(`${f.label}: ${f.value}`);
+        }
+      }
+    }
+    if (item.notes.trim()) {
+      lines.push('');
+      lines.push(item.notes.trim());
+    }
+    openSendWithPrefill({
+      name: fmt(dict.send.oneClickName, { title: item.title }),
+      text: lines.join('\n') || item.title,
+    });
   };
 
   return (
     <div className="h-full flex flex-col bg-[var(--bg-detail)] overflow-hidden">
       {/* Sticky Header */}
-      <header className="px-7 pt-6 pb-4 border-b border-[var(--border-subtle)] flex items-start justify-between gap-4 shrink-0">
-        <div className="flex items-center gap-4 min-w-0">
+      <header className="px-5 sm:px-7 pt-5 pb-4 border-b border-[var(--border-subtle)] flex flex-wrap items-start justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-3.5 min-w-[200px] flex-1">
           <ItemIconBadge icon={item.icon} category={item.category} title={item.title} size="lg" />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-semibold text-[var(--text-primary)] tracking-tight truncate">
                 {item.title}
               </h1>
-              <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
-                {tpl.label}
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)] whitespace-nowrap shrink-0">
+                {dict.categories[item.category] ?? tpl.label}
               </span>
               {vault && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)] whitespace-nowrap shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: vault.color }} />
                   {vault.name}
                 </span>
@@ -326,8 +531,8 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
           <button
             type="button"
             onClick={() => void toggleFavorite(item.id, !item.favorite, getFilter())}
-            title={item.favorite ? '取消收藏 (⌘D)' : '星标收藏 (⌘D)'}
-            aria-label={item.favorite ? '取消收藏' : '星标收藏'}
+            title={item.favorite ? dict.detail.favoriteRemoveTitle : dict.detail.favoriteAddTitle}
+            aria-label={item.favorite ? dict.detail.favoriteRemoveAria : dict.detail.favoriteAddAria}
             className="p-2 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer"
           >
             <Star
@@ -337,21 +542,37 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
           </button>
 
           {!item.deletedAt && (
-            <button
-              type="button"
-              onClick={startEditingExisting}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] transition-colors cursor-pointer"
-            >
-              <Pencil size={13} />
-              编辑
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleShareViaSend}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] transition-colors cursor-pointer"
+              >
+                <Send size={13} />
+                {dict.detail.sendShare}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (repromptLocked) {
+                    focusRepromptPrompt();
+                    return;
+                  }
+                  startEditingExisting();
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] transition-colors cursor-pointer"
+              >
+                <Pencil size={13} />
+                {dict.common.edit}
+              </button>
+            </>
           )}
 
           <button
             type="button"
             popoverTarget={menuId}
             style={{ anchorName: menuAnchor } as React.CSSProperties}
-            aria-label="更多条目操作"
+            aria-label={dict.detail.moreActionsAria}
             className="p-2 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
           >
             <MoreHorizontal size={16} />
@@ -365,7 +586,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
             className="ks-popover ks-anchored-popover-end w-[200px]"
           >
             <div className="p-1.5 flex flex-col gap-0.5 text-xs">
-              {passwordField && (
+              {passwordField && !repromptLocked && (
                 <button
                   type="button"
                   onClick={() => {
@@ -374,8 +595,10 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                   }}
                   className="px-2.5 py-2 rounded-lg hover:bg-[var(--bg-hover)] text-left flex items-center justify-between text-[var(--text-primary)] cursor-pointer"
                 >
-                  <span>复制密码</span>
-                  <span className="text-[10px] text-[var(--text-muted)] font-mono-tabular">⌘C</span>
+                  <span>{dict.detail.copyPassword}</span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono-tabular">
+                    {formatShortcutMac(shortcuts.copyPassword)}
+                  </span>
                 </button>
               )}
               {usernameField && (
@@ -387,25 +610,29 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                   }}
                   className="px-2.5 py-2 rounded-lg hover:bg-[var(--bg-hover)] text-left flex items-center justify-between text-[var(--text-primary)] cursor-pointer"
                 >
-                  <span>复制用户名</span>
-                  <span className="text-[10px] text-[var(--text-muted)] font-mono-tabular">⌘⇧C</span>
+                  <span>{dict.detail.copyUsername}</span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono-tabular">
+                    {formatShortcutMac(shortcuts.copyUsername)}
+                  </span>
                 </button>
               )}
-              {totpField && (
+              {totpField && !repromptLocked && (
                 <button
                   type="button"
                   onClick={async () => {
                     menuRef.current?.hidePopover?.();
                     const res = await tauriClient.totpCompute(totpField.value);
-                    await handleCopy(res.code, '一次性密码', true);
+                    await handleCopy(res.code, 'TOTP', true);
                   }}
                   className="px-2.5 py-2 rounded-lg hover:bg-[var(--bg-hover)] text-left flex items-center justify-between text-[var(--text-primary)] cursor-pointer"
                 >
-                  <span>复制 TOTP 验证码</span>
-                  <span className="text-[10px] text-[var(--text-muted)] font-mono-tabular">⌘⌥C</span>
+                  <span>{dict.detail.copyTotp}</span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono-tabular">
+                    {formatShortcutMac(shortcuts.copyTotp)}
+                  </span>
                 </button>
               )}
-              {passwordField && (
+              {passwordField && !repromptLocked && (
                 <button
                   type="button"
                   onClick={() => {
@@ -414,11 +641,79 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                   }}
                   className="px-2.5 py-2 rounded-lg hover:bg-[var(--bg-hover)] text-left flex items-center justify-between text-[var(--text-primary)] cursor-pointer"
                 >
-                  <span>Large Type 大字展示</span>
-                  <span className="text-[10px] text-[var(--text-muted)] font-mono-tabular">⌘⇧L</span>
+                  <span>{dict.detail.largeType}</span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono-tabular">
+                    {formatShortcutMac(shortcuts.largeType)}
+                  </span>
                 </button>
               )}
               <div className="my-1 border-t border-[var(--border-subtle)]" />
+              {!item.deletedAt && (
+                <>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      menuRef.current?.hidePopover?.();
+                      await duplicateItem(item.id, getFilter());
+                      showToast({ label: dict.detail.duplicate, text: `${dict.detail.duplicate}: ${item.title}`, kind: 'info' });
+                    }}
+                    className="px-2.5 py-2 rounded-lg hover:bg-[var(--bg-hover)] text-left flex items-center gap-2 text-[var(--text-primary)] cursor-pointer"
+                  >
+                    <CopyPlus size={13} />
+                    <span>{dict.detail.duplicate}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMoveMenuOpen((v) => !v)}
+                    className="px-2.5 py-2 rounded-lg hover:bg-[var(--bg-hover)] text-left flex items-center justify-between text-[var(--text-primary)] cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <FolderInput size={13} />
+                      <span>{dict.detail.moveToVault}</span>
+                    </span>
+                    <ChevronRight size={12} />
+                  </button>
+                  {moveMenuOpen && (
+                    <div className="pl-4 pr-1 py-1 flex flex-col gap-0.5 border-l border-[var(--border-subtle)] ml-2">
+                      {vaults
+                        .filter((v) => v.id !== item.vaultId && !v.isOrganization)
+                        .map((v) => (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onClick={async () => {
+                              menuRef.current?.hidePopover?.();
+                              setMoveMenuOpen(false);
+                              await moveItemsToVault([item.id], v.id, getFilter());
+                              showToast({ label: v.name, text: `${item.title} → ${v.name}`, kind: 'info' });
+                            }}
+                            className="px-2 py-1.5 rounded-md hover:bg-[var(--bg-selected)] text-left text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer truncate"
+                          >
+                            {v.name}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      menuRef.current?.hidePopover?.();
+                      const nextArchived = !item.archived;
+                      await setItemArchived(item.id, nextArchived, getFilter());
+                      showToast({
+                        label: dict.detail.archiveItem,
+                        text: `${nextArchived ? dict.detail.archiveItem : dict.detail.unarchive}: ${item.title}`,
+                        kind: 'info',
+                      });
+                    }}
+                    className="px-2.5 py-2 rounded-lg hover:bg-[var(--bg-hover)] text-left flex items-center gap-2 text-[var(--text-primary)] cursor-pointer"
+                  >
+                    <Archive size={13} />
+                    <span>{item.archived ? dict.detail.unarchive : dict.detail.archiveItem}</span>
+                  </button>
+                  <div className="my-1 border-t border-[var(--border-subtle)]" />
+                </>
+              )}
               {item.deletedAt ? (
                 <>
                   <button
@@ -429,7 +724,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                     }}
                     className="px-2.5 py-2 rounded-lg hover:bg-[var(--bg-hover)] text-left text-[var(--accent-primary)] cursor-pointer"
                   >
-                    从废纸篓恢复
+                    {dict.detail.restoreFromTrash}
                   </button>
                   <button
                     type="button"
@@ -439,7 +734,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                     }}
                     className="px-2.5 py-2 rounded-lg hover:bg-[var(--status-danger)]/10 text-left text-[var(--status-danger)] cursor-pointer"
                   >
-                    永久删除
+                    {dict.detail.deleteForever}
                   </button>
                 </>
               ) : (
@@ -448,12 +743,14 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                   onClick={() => {
                     menuRef.current?.hidePopover?.();
                     void trashItem(item.id, getFilter());
-                    showToast({ label: '废纸篓', text: `已将「${item.title}」移入废纸篓`, kind: 'info' });
+                    showToast({ label: dict.sidebar.trash, text: `${dict.detail.moveToTrash}: ${item.title}`, kind: 'info' });
                   }}
                   className="px-2.5 py-2 rounded-lg hover:bg-[var(--status-danger)]/10 text-left flex items-center justify-between text-[var(--status-danger)] cursor-pointer"
                 >
-                  <span>移入废纸篓</span>
-                  <span className="text-[10px] opacity-70 font-mono-tabular">⌘⌫</span>
+                  <span>{dict.detail.moveToTrash}</span>
+                  <span className="text-[10px] opacity-70 font-mono-tabular">
+                    {formatShortcutMac(shortcuts.moveToTrash)}
+                  </span>
                 </button>
               )}
             </div>
@@ -467,7 +764,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
         {item.deletedAt && (
           <div className="p-3.5 rounded-xl bg-[var(--status-danger)]/10 border border-[var(--status-danger)]/30 flex items-center justify-between gap-3">
             <div className="text-xs text-[var(--text-primary)]">
-              此条目位于废纸篓（删除于 {formatDateTime(item.deletedAt)}）
+              {fmt(dict.detail.trashedBanner, { time: formatDateTime(item.deletedAt) })}
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button
@@ -475,16 +772,84 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                 onClick={() => void restoreItem(item.id, getFilter())}
                 className="px-3 py-1 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
               >
-                恢复条目
+                {dict.detail.restoreFromTrash}
               </button>
               <button
                 type="button"
                 onClick={() => void deletePermanent(item.id, getFilter())}
                 className="px-3 py-1 rounded-lg bg-[var(--status-danger)] text-xs font-medium text-white cursor-pointer"
               >
-                永久删除
+                {dict.detail.deleteForever}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Archive Banner */}
+        {!item.deletedAt && item.archived && (
+          <div className="p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-strong)] flex items-center justify-between gap-3">
+            <div className="text-xs text-[var(--text-secondary)] flex items-center gap-2">
+              <Archive size={14} className="text-[var(--accent-primary)] shrink-0" />
+              {dict.detail.archivedBanner}
+            </div>
+            <button
+              type="button"
+              onClick={() => void setItemArchived(item.id, false, getFilter())}
+              className="px-3 py-1 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] shrink-0 cursor-pointer"
+            >
+              {dict.detail.unarchive}
+            </button>
+          </div>
+        )}
+
+        {/* Reprompt Verification Card */}
+        {repromptLocked && (
+          <div className="p-4 rounded-xl bg-[var(--bg-card)] border border-[var(--accent-primary)]/35 flex flex-col gap-3">
+            <div className="flex items-start gap-2.5">
+              <Lock size={16} className="text-[var(--accent-primary)] shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold text-[var(--text-primary)]">
+                  {dict.detail.repromptTitle}
+                </div>
+                <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">
+                  {dict.detail.repromptDesc}
+                </div>
+              </div>
+            </div>
+            <form
+              onSubmit={(e) => void handleVerifyRepromptPassword(e)}
+              className="flex flex-wrap items-center gap-2"
+            >
+              <input
+                ref={repromptInputRef}
+                type="password"
+                value={repromptPw}
+                onChange={(e) => setRepromptPw(e.target.value)}
+                placeholder={dict.detail.repromptPlaceholder}
+                className="ks-input flex-1 min-w-[160px]"
+              />
+              <button
+                type="submit"
+                disabled={repromptBusy || !repromptPw}
+                className="px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-45 text-xs font-medium text-white cursor-pointer"
+              >
+                {dict.detail.repromptVerifyPw}
+              </button>
+              {biometricEnabled && isTauriRuntime() && (
+                <button
+                  type="button"
+                  disabled={repromptBusy}
+                  onClick={() => void handleVerifyRepromptBiometric()}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-strong)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+                >
+                  <Fingerprint size={13} />
+                  {dict.detail.repromptUseTouchId}
+                </button>
+              )}
+            </form>
+            {repromptErr && (
+              <div className="text-[11px] text-[var(--status-danger)]">{repromptErr}</div>
+            )}
           </div>
         )}
 
@@ -495,11 +860,10 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
               <AlertTriangle size={16} className="text-[var(--status-warning)] shrink-0 mt-0.5" />
               <div className="text-xs">
                 <div className="font-semibold text-[var(--text-primary)]">
-                  Watchtower 安全提醒：{itemIssues.map((k) => ISSUE_META[k].label).join(' · ')}
+                  {fmt(dict.detail.watchtowerBanner, {
+                    labels: itemIssues.map((k) => dict.detail.issues[k] ?? k).join(' · '),
+                  })}
                 </div>
-                <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
-                  {ISSUE_META[itemIssues[0]].desc}
-                </p>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -508,17 +872,16 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                 onClick={startEditingExisting}
                 className="px-2.5 py-1 rounded-lg bg-[var(--accent-primary)] text-white text-[11px] font-medium cursor-pointer"
               >
-                立即修复
+                {dict.detail.fixNow}
               </button>
               {itemIssues.some((i) => i !== 'expiring' && i !== 'breached') && (
                 <button
                   type="button"
                   onClick={() => void handleIgnoreIssues()}
-                  title="忽略可豁免的风险提醒"
                   className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--bg-hover)] text-[11px] text-[var(--text-secondary)] cursor-pointer"
                 >
                   <ShieldOff size={12} />
-                  忽略
+                  {dict.detail.ignore}
                 </button>
               )}
             </div>
@@ -527,20 +890,20 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
 
         {/* Credit Card Visual Preview */}
         {item.category === 'credit_card' && (() => {
-          const holder = allFields.find((f) => f.label.includes('持卡人'))?.value || 'CARDHOLDER';
+          const holder = allFields.find((f) => f.label.includes('持卡人') || f.label.toLowerCase().includes('holder'))?.value || 'CARDHOLDER';
           const num = allFields.find((f) => f.purpose === 'card_number')?.value || '';
           const exp = allFields.find((f) => f.purpose === 'card_expiry')?.value || 'MM/YY';
-          const brand = allFields.find((f) => f.label.includes('卡类型'))?.value || 'CARD';
+          const brand = allFields.find((f) => f.label.includes('卡类型') || f.label.toLowerCase().includes('type') || f.label.toLowerCase().includes('brand'))?.value || 'CARD';
           const showCardNum = Boolean(revealedIds['card-preview']);
           return (
             <div
               onClick={() => setRevealedIds((p) => ({ ...p, 'card-preview': !p['card-preview'] }))}
               className="w-full max-w-[380px] rounded-2xl p-5 bg-gradient-to-br from-[#0F2942] via-[#123A5C] to-[#0D9488] text-white shadow-lg cursor-pointer select-none"
-              title="点击切换卡号显隐"
+              title={dict.detail.cardClickTitle}
             >
               <div className="flex items-center justify-between text-xs text-white/75">
                 <span className="font-semibold tracking-wider uppercase">{brand}</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/15">点击切换显示</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/15">{dict.detail.cardClickBadge}</span>
               </div>
               <div className="font-mono-tabular text-lg tracking-widest mt-5 font-semibold">
                 {showCardNum ? formatCardNumber(num) : maskCardNumber(num)}
@@ -582,7 +945,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                     {section.title}
                   </span>
                   <span className="font-mono-tabular text-[10px] text-[var(--text-muted)]">
-                    {section.fields.length} 项
+                    {fmt(dict.detail.sectionItemCount, { count: section.fields.length })}
                   </span>
                 </button>
               )}
@@ -594,6 +957,8 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                       key={field.id}
                       field={field}
                       revealed={Boolean(revealedIds[field.id])}
+                      repromptLocked={repromptLocked}
+                      onRequireReprompt={focusRepromptPrompt}
                       onToggleReveal={() =>
                         setRevealedIds((p) => ({ ...p, [field.id]: !p[field.id] }))
                       }
@@ -607,15 +972,14 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
           );
         })}
 
-        {/* Passkeys Section (Read-only Metadata & Unbind) */}
-        {item.passkeys.length > 0 ? (
+        {/* Passkeys Section (Only rendered when passkeys exist) */}
+        {item.passkeys.length > 0 && (
           <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] overflow-hidden">
             <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] flex items-center justify-between">
               <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)]">
                 <Fingerprint size={14} className="text-sky-500" />
-                已保存的通行密钥 (Passkey · {item.passkeys.length})
+                {fmt(dict.detail.savedPasskeys, { count: item.passkeys.length })}
               </span>
-              <span className="text-[10px] text-[var(--text-muted)]">由网站 WebAuthn 自动绑定</span>
             </div>
 
             <div className="divide-y divide-[var(--border-subtle)]">
@@ -623,40 +987,59 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                 const isConfirming = confirmUnbindCredId === pk.credentialId;
                 return (
                   <div key={pk.credentialId} className="p-4 flex flex-col gap-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[13px] font-semibold text-[var(--text-primary)]">
-                            {pk.rpName} ({pk.rpId})
+                    <div className="flex items-start justify-between gap-3 min-w-0">
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            title={pk.rpName || pk.rpId}
+                            className="text-[13px] font-semibold text-[var(--text-primary)] truncate"
+                          >
+                            {pk.rpName || pk.rpId}
                           </span>
-                          <span className="px-1.5 py-0.5 rounded bg-sky-500/12 text-sky-600 dark:text-sky-400 text-[10px] font-mono-tabular font-medium">
-                            {pk.algorithm === -7 ? 'ES256 · P-256' : 'EdDSA'}
+                          {pk.rpId && pk.rpName && pk.rpName !== pk.rpId && (
+                            <span
+                              title={pk.rpId}
+                              className="text-[11px] text-[var(--text-muted)] truncate min-w-0"
+                            >
+                              ({pk.rpId})
+                            </span>
+                          )}
+                          <span className="px-1.5 py-0.5 rounded bg-sky-500/12 text-sky-600 dark:text-sky-400 text-[10px] font-mono-tabular font-medium shrink-0">
+                            {pk.algorithm === -8 ? 'EdDSA' : pk.algorithm === -257 ? 'RS256' : 'ES256'}
                           </span>
                         </div>
-                        <div className="text-xs text-[var(--text-secondary)] mt-0.5">
-                          账户：{pk.userName} · 创建于 {formatDateTime(pk.createdAt)} · 签名 {pk.signCount} 次
-                          {pk.lastUsedAt ? ` · 最近使用 ${formatDateTime(pk.lastUsedAt)}` : ''}
+                        <div
+                          title={pk.userName || pk.userDisplayName}
+                          className="text-xs text-[var(--text-secondary)] mt-0.5 truncate"
+                        >
+                          {pk.userName || pk.userDisplayName}
                         </div>
+                        {pk.createdAt && (
+                          <div className="text-[11px] text-[var(--text-muted)] mt-0.5 truncate">
+                            {formatDateTime(pk.createdAt)}
+                          </div>
+                        )}
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <a
-                          href={`https://${pk.rpId}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[var(--bg-detail)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)]"
-                        >
-                          <span>前往网站管理</span>
-                          <ExternalLink size={12} />
-                        </a>
+                      <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+                        {pk.rpId && (
+                          <button
+                            type="button"
+                            onClick={() => void openExternalUrl(`https://${pk.rpId}`)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[var(--bg-detail)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer shrink-0"
+                          >
+                            <span>{dict.detail.manageOnSite}</span>
+                            <ExternalLink size={12} />
+                          </button>
+                        )}
                         {!item.deletedAt && !isConfirming && (
                           <button
                             type="button"
                             onClick={() => setConfirmUnbindCredId(pk.credentialId)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-[var(--status-danger)]/10 border border-[var(--border-subtle)] text-xs font-medium text-[var(--status-danger)] cursor-pointer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-[var(--status-danger)]/10 border border-[var(--border-subtle)] text-xs font-medium text-[var(--status-danger)] cursor-pointer shrink-0"
                           >
                             <Trash2 size={12} />
-                            移除
+                            {dict.common.remove}
                           </button>
                         )}
                       </div>
@@ -665,7 +1048,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                     {isConfirming && (
                       <div className="p-3 rounded-lg bg-[var(--status-danger)]/10 border border-[var(--status-danger)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                         <span className="text-[var(--text-primary)]">
-                          仅从 Keysmith 移除本地与同步凭据，请同步前往 {pk.rpId} 安全设置撤销对应公钥。
+                          {fmt(dict.detail.unbindPasskeyConfirm, { rpId: pk.rpId || 'website' })}
                         </span>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button
@@ -673,7 +1056,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                             onClick={() => setConfirmUnbindCredId(null)}
                             className="px-2.5 py-1 rounded-md bg-[var(--bg-detail)] border border-[var(--border-strong)] text-[11px] text-[var(--text-secondary)] cursor-pointer"
                           >
-                            取消
+                            {dict.common.cancel}
                           </button>
                           <button
                             type="button"
@@ -707,29 +1090,32 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                                 );
                               }
                               showToast({
-                                label: '通行密钥',
-                                text: `已移除 ${pk.rpId} 通行密钥，请记得在网站端同步撤销`,
+                                label: dict.sidebar.passkeys,
+                                text: `${dict.common.remove}: ${pk.rpId || pk.rpName}`,
                                 kind: 'warning',
                               });
                             }}
                             className="px-2.5 py-1 rounded-md bg-[var(--status-danger)] text-white text-[11px] font-medium cursor-pointer"
                           >
-                            确认移除
+                            {dict.detail.confirmRemove}
                           </button>
                         </div>
                       </div>
                     )}
 
-                    <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[11px]">
-                      <span className="font-mono-tabular text-[var(--text-muted)] truncate">
+                    <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[11px] min-w-0">
+                      <span
+                        title={pk.credentialId}
+                        className="font-mono-tabular text-[var(--text-muted)] truncate min-w-0 flex-1"
+                      >
                         Credential ID: {pk.credentialId}
                       </span>
                       <button
                         type="button"
-                        onClick={() => void handleCopy(pk.credentialId, 'Passkey Credential ID', false)}
+                        onClick={() => void handleCopy(pk.credentialId, 'Credential ID', false)}
                         className="text-[var(--accent-primary)] hover:underline shrink-0 cursor-pointer"
                       >
-                        复制 ID
+                        {dict.detail.copyId}
                       </button>
                     </div>
                   </div>
@@ -737,27 +1123,6 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
               })}
             </div>
           </div>
-        ) : (
-          !item.deletedAt &&
-          item.category === 'login' && (
-            <div className="rounded-xl bg-[var(--bg-card)]/60 border border-dashed border-[var(--border-strong)] px-4 py-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 text-xs text-[var(--text-secondary)]">
-                <Fingerprint size={15} className="text-sky-500 shrink-0" />
-                <span>在网站账户安全设置中添加通行密钥时，Keysmith 扩展或 macOS 自动填充将自动唤起保存</span>
-              </div>
-              {item.urls[0]?.uri && (
-                <a
-                  href={item.urls[0].uri}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-selected)] border border-[var(--border-strong)] text-xs font-medium text-[var(--accent-primary)] shrink-0"
-                >
-                  <span>前往网站</span>
-                  <ExternalLink size={12} />
-                </a>
-              )}
-            </div>
-          )
         )}
 
         {/* URLs */}
@@ -771,40 +1136,38 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-medium text-[var(--text-secondary)]">
-                      {u.label || '网址'}
+                      {u.label || dict.detail.urlDefaultLabel}
                     </span>
                     <span className="px-1.5 py-0.2 rounded text-[10px] bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-muted)]">
-                      {MATCH_RULE_LABELS[u.matchRule] ?? u.matchRule}
+                      {dict.detail.matchRules[u.matchRule] ?? u.matchRule}
                     </span>
                   </div>
-                  <a
-                    href={u.uri}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block text-[13px] font-mono-tabular text-[var(--accent-primary)] hover:underline truncate mt-0.5"
+                  <button
+                    type="button"
+                    onClick={() => void openExternalUrl(u.uri)}
+                    className="block max-w-full text-left text-[13px] font-mono-tabular text-[var(--accent-primary)] hover:underline truncate mt-0.5 cursor-pointer"
                   >
                     {u.uri}
-                  </a>
+                  </button>
                 </div>
 
                 <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 flex items-center gap-1 shrink-0">
                   <button
                     type="button"
-                    onClick={() => void handleCopy(u.uri, u.label || '网址', false)}
+                    onClick={() => void handleCopy(u.uri, u.label || dict.detail.urlDefaultLabel, false)}
                     className="p-1.5 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
-                    aria-label="复制网址"
+                    aria-label={dict.detail.copyUrlAria}
                   >
                     <Copy size={13} />
                   </button>
-                  <a
-                    href={u.uri}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label="在新标签页打开网址"
-                    className="p-1.5 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)]"
+                  <button
+                    type="button"
+                    onClick={() => void openExternalUrl(u.uri)}
+                    aria-label={dict.detail.openUrlAria}
+                    className="p-1.5 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
                   >
                     <ExternalLink size={13} />
-                  </a>
+                  </button>
                 </div>
               </div>
             ))}
@@ -814,8 +1177,110 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
         {/* Notes */}
         {item.notes.trim() && (
           <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] px-4 py-3.5">
-            <div className="text-[11px] font-medium text-[var(--text-secondary)] mb-1.5">备注</div>
+            <div className="text-[11px] font-medium text-[var(--text-secondary)] mb-1.5">{dict.detail.notes}</div>
             <div data-selectable="true">{renderNotesLines(item.notes)}</div>
+          </div>
+        )}
+
+        {/* Encrypted Attachments */}
+        {!item.deletedAt && (
+          <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--text-secondary)]">
+                <Paperclip size={13} />
+                {fmt(dict.detail.attachments, { count: item.attachments?.length ?? 0 })}
+              </span>
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => void handleAttachmentUpload(e)}
+                />
+                <button
+                  type="button"
+                  disabled={uploadingAtt}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[11px] font-medium text-[var(--text-primary)] cursor-pointer"
+                >
+                  <FileUp size={12} />
+                  {uploadingAtt ? dict.detail.uploadingAttachment : dict.detail.uploadAttachment}
+                </button>
+              </div>
+            </div>
+
+            {(item.attachments?.length ?? 0) === 0 ? (
+              <div className="px-4 py-3 text-[11px] text-[var(--text-muted)]">
+                {dict.detail.attachmentsEmpty}
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--border-subtle)]">
+                {item.attachments?.map((att) => {
+                  const isImage = /\.(png|jpe?g|webp|gif|svg)$/i.test(att.fileName);
+                  return (
+                    <div
+                      key={att.id}
+                      className="px-4 py-2.5 flex items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-medium text-[var(--text-primary)] truncate">{att.fileName}</div>
+                        <div className="text-[10px] text-[var(--text-muted)]">
+                          {att.sizeName} · {att.hasLocalData ? dict.detail.attachmentCachedLocal : dict.detail.attachmentCloudOnly}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isImage && (
+                          <button
+                            type="button"
+                            onClick={() => void handleAttachmentDownload(att.id, true)}
+                            aria-label={fmt(dict.detail.previewAttachmentAria, { name: att.fileName })}
+                            className="p-1.5 rounded-md hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
+                          >
+                            <ImageIcon size={13} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void handleAttachmentDownload(att.id, false)}
+                          aria-label={fmt(dict.detail.downloadAttachmentAria, { name: att.fileName })}
+                          className="p-1.5 rounded-md hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
+                        >
+                          <Download size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleAttachmentDelete(att.id, att.fileName)}
+                          aria-label={fmt(dict.detail.deleteAttachmentAria, { name: att.fileName })}
+                          className="p-1.5 rounded-md hover:bg-[var(--status-danger)]/10 text-[var(--text-muted)] hover:text-[var(--status-danger)] cursor-pointer"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {previewAtt && (
+              <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-detail)] flex flex-col gap-2">
+                <div className="flex items-center justify-between text-[11px] text-[var(--text-secondary)]">
+                  <span>{fmt(dict.detail.imagePreviewTitle, { name: previewAtt.fileName })}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewAtt(null)}
+                    className="text-[var(--accent-primary)] hover:underline cursor-pointer"
+                  >
+                    {dict.detail.collapsePreviewBtn}
+                  </button>
+                </div>
+                <img
+                  src={`data:${previewAtt.mimeType};base64,${previewAtt.dataBase64}`}
+                  alt={previewAtt.fileName}
+                  className="max-h-60 object-contain rounded-lg border border-[var(--border-subtle)] bg-black/10"
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -846,7 +1311,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
             >
               <span className="flex items-center gap-1.5">
                 <History size={14} />
-                密码历史记录 ({item.passwordHistory.length})
+                {fmt(dict.detail.passwordHistoryTitle, { count: item.passwordHistory.length })}
               </span>
               {historyOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             </button>
@@ -864,34 +1329,34 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                       <div className="min-w-0 flex-1">
                         <ColoredPassword value={hist.value} revealed={isShown} />
                         <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
-                          归档于 {formatDateTime(hist.changedAt)}
+                          {fmt(dict.detail.archivedAtTime, { time: formatDateTime(hist.changedAt) })}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
                           onClick={() => setRevealedIds((p) => ({ ...p, [key]: !p[key] }))}
-                          aria-label={isShown ? '隐藏历史密码' : '显示历史密码'}
+                          aria-label={isShown ? dict.detail.hideHistoryPwAria : dict.detail.showHistoryPwAria}
                           className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer"
                         >
                           {isShown ? <EyeOff size={13} /> : <Eye size={13} />}
                         </button>
                         <button
                           type="button"
-                          onClick={() => void handleCopy(hist.value, '历史密码', true)}
-                          aria-label="复制历史密码"
+                          onClick={() => void handleCopy(hist.value, dict.detail.historyPwLabel, true)}
+                          aria-label={dict.detail.copyHistoryPwAria}
                           className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer"
                         >
                           <Copy size={13} />
                         </button>
-                        {passwordField && (
+                        {passwordField && !repromptLocked && (
                           <button
                             type="button"
                             onClick={() => void handleRestorePassword(hist.value)}
                             className="inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-[var(--bg-selected)] text-[11px] font-medium text-[var(--accent-primary)] cursor-pointer"
                           >
                             <RotateCcw size={11} />
-                            还原
+                            {dict.detail.restoreShort}
                           </button>
                         )}
                       </div>
@@ -905,8 +1370,8 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
 
         {/* Footer Timestamps */}
         <div className="pt-2 pb-4 flex items-center justify-between text-[11px] text-[var(--text-muted)]">
-          <span>更新于 {formatDateTime(item.updatedAt)}</span>
-          <span>创建于 {formatDateTime(item.createdAt)}</span>
+          <span>{fmt(dict.detail.updatedAt, { time: formatDateTime(item.updatedAt) })}</span>
+          <span>{fmt(dict.detail.createdAt, { time: formatDateTime(item.createdAt) })}</span>
         </div>
       </div>
     </div>
