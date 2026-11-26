@@ -1,7 +1,19 @@
+importScripts('i18n.js');
+
 const NMH_HOST = 'dev.keysmith.desktop';
 const RPC_TIMEOUT_MS = 18000;
 const NEVER_SAVE_KEY = 'neverSaveOrigins';
 const TAKEOVER_BROWSER_PM_KEY = 'takeoverBrowserPasswordManager';
+
+function t(key, vars) {
+  return self.KeysmithI18n ? self.KeysmithI18n.t(key, vars) : key;
+}
+
+if (self.KeysmithI18n && typeof self.KeysmithI18n.onChange === 'function') {
+  self.KeysmithI18n.onChange(() => {
+    registerContextMenus();
+  });
+}
 
 let nextRpcId = 1;
 
@@ -20,7 +32,7 @@ function rpcRaw(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
         } catch {
           // Ignore disconnect errors
         }
-        resolve({ connected: false, ok: false, error: '连接 Keysmith 桌面端超时' });
+        resolve({ connected: false, ok: false, error: t('errNmhTimeout') });
       }
     }, timeoutMs);
 
@@ -31,7 +43,7 @@ function rpcRaw(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
       resolve({
         connected: false,
         ok: false,
-        error: err?.message || '无法连接 Keysmith Native Messaging 主机'
+        error: err?.message || t('errNmhConnect')
       });
       return;
     }
@@ -62,7 +74,7 @@ function rpcRaw(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
       resolve({
         connected: false,
         ok: false,
-        error: lastErr || 'Keysmith 桌面端未运行或 Native Messaging Host 未配置'
+        error: lastErr || t('errNmhNotRunning')
       });
     });
 
@@ -75,7 +87,7 @@ function rpcRaw(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
         resolve({
           connected: false,
           ok: false,
-          error: err?.message || '发送 Native Messaging 请求失败'
+          error: err?.message || t('errNmhSend')
         });
       }
     }
@@ -291,7 +303,7 @@ async function sendToTab(tabId, payload) {
   try {
     return await chrome.tabs.sendMessage(tabId, payload);
   } catch (err) {
-    return { ok: false, error: err?.message || '页面暂不支持注入填充' };
+    return { ok: false, error: err?.message || t('errInjectUnsupported') };
   }
 }
 
@@ -302,28 +314,28 @@ async function showToastInTab(tabId, message, kind = 'info') {
 
 async function autofillBestMatchOnTab(tab) {
   if (!tab?.id || !isWebUrl(tab.url)) {
-    return { ok: false, error: '当前标签页不支持自动填充' };
+    return { ok: false, error: t('toastTabUnsupported') };
   }
   const st = await rpcRaw('status', {});
   if (!st.connected) {
-    await showToastInTab(tab.id, 'Keysmith 桌面端未连接，请先打开 Keysmith', 'warn');
+    await showToastInTab(tab.id, t('toastConnectDesktopFirst'), 'warn');
     return { ok: false, error: st.error };
   }
   if (!st.ok || st.result?.status !== 'Unlocked') {
-    await showToastInTab(tab.id, 'Keysmith 已锁定，请先在桌面端解锁', 'warn');
-    return { ok: false, error: 'Keysmith 已锁定' };
+    await showToastInTab(tab.id, t('toastUnlockDesktopFirst'), 'warn');
+    return { ok: false, error: t('statusLocked') };
   }
 
   const matched = await rpcRaw('url_match', { url: tab.url });
   const list = matched.ok && Array.isArray(matched.result) ? matched.result : [];
   if (list.length === 0) {
-    await showToastInTab(tab.id, '未找到当前网站的已保存登录信息', 'info');
-    return { ok: false, error: '无匹配条目' };
+    await showToastInTab(tab.id, t('toastNoSavedForSite'), 'info');
+    return { ok: false, error: t('errNoMatchingItem') };
   }
 
   const item = list[0];
   if (item.reprompt) {
-    await showToastInTab(tab.id, `「${item.title}」已启用主密码重验证，请在桌面端查看`, 'warn');
+    await showToastInTab(tab.id, t('ddItemRepromptDesktop', { title: item.title || t('ddUnnamed') }), 'warn');
     return { ok: false, error: 'Reprompt protected' };
   }
 
@@ -342,9 +354,9 @@ async function autofillBestMatchOnTab(tab) {
     totp
   });
   if (fillRes?.ok) {
-    await showToastInTab(tab.id, `已填充：${item.title}`, 'success');
+    await showToastInTab(tab.id, t('ddFilledItem', { title: item.title || t('ddUnnamed') }), 'success');
   } else {
-    await showToastInTab(tab.id, fillRes?.error || '未找到可填充的输入框', 'warn');
+    await showToastInTab(tab.id, fillRes?.error || t('ddCouldNotFill'), 'warn');
   }
   return fillRes;
 }
@@ -359,16 +371,16 @@ async function generateAndFillOnTab(tab) {
     excludeAmbiguous: true
   });
   if (!gen.connected || !gen.ok || !gen.result?.value) {
-    await showToastInTab(tab.id, gen.error || '生成密码失败，请打开 Keysmith 桌面端', 'warn');
+    await showToastInTab(tab.id, gen.error || t('toastGenFailedOpen'), 'warn');
     return;
   }
   const password = gen.result.value;
-  await rpcRaw('clipboard_copy', { value: password, label: '新生成密码', sensitive: true });
+  await rpcRaw('clipboard_copy', { value: password, label: t('newGenPasswordLabel'), sensitive: true });
   const res = await sendToTab(tab.id, { type: 'FILL_GENERATED_PASSWORD', password });
   if (res?.ok) {
-    await showToastInTab(tab.id, '已生成强密码并填充（已复制到剪贴板）', 'success');
+    await showToastInTab(tab.id, t('toastGenCopiedFilled'), 'success');
   } else {
-    await showToastInTab(tab.id, '已生成强密码并复制到剪贴板', 'info');
+    await showToastInTab(tab.id, t('toastGenCopiedOnly'), 'info');
   }
 }
 
@@ -378,12 +390,12 @@ async function copyTotpForTab(tab) {
   const list = matched.ok && Array.isArray(matched.result) ? matched.result : [];
   const totpItem = list.find((item) => item.hasTotp && !item.reprompt);
   if (!totpItem) {
-    await showToastInTab(tab.id, '当前网站未配置可用 2FA 验证码', 'info');
+    await showToastInTab(tab.id, t('toastNoTotpSite'), 'info');
     return;
   }
   const tRes = await rpcRaw('totp', { idOrTitle: totpItem.id });
   if (!tRes.ok || !tRes.result?.code) {
-    await showToastInTab(tab.id, tRes.error || '获取 2FA 验证码失败', 'warn');
+    await showToastInTab(tab.id, tRes.error || t('toastTotpError'), 'warn');
     return;
   }
   await rpcRaw('clipboard_copy', {
@@ -391,11 +403,14 @@ async function copyTotpForTab(tab) {
     label: `${totpItem.title} 2FA`,
     sensitive: true
   });
-  await showToastInTab(tab.id, `已复制 2FA 验证码：${tRes.result.formattedCode || tRes.result.code}`, 'success');
+  await showToastInTab(tab.id, t('toastTotpCopied', { code: tRes.result.formattedCode || tRes.result.code }), 'success');
 }
 
-function registerContextMenus() {
+async function registerContextMenus() {
   if (!chrome.contextMenus) return;
+  if (self.KeysmithI18n && typeof self.KeysmithI18n.ready === 'function') {
+    await self.KeysmithI18n.ready();
+  }
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: 'ks-root',
@@ -405,19 +420,19 @@ function registerContextMenus() {
     chrome.contextMenus.create({
       id: 'ks-fill-login',
       parentId: 'ks-root',
-      title: '自动填充最佳匹配登录信息',
+      title: t('menuAutofillBest'),
       contexts: ['page', 'editable']
     });
     chrome.contextMenus.create({
       id: 'ks-gen-fill',
       parentId: 'ks-root',
-      title: '生成并填充高强度密码',
+      title: t('menuGenFill'),
       contexts: ['editable', 'page']
     });
     chrome.contextMenus.create({
       id: 'ks-copy-totp',
       parentId: 'ks-root',
-      title: '复制当前网站 2FA 验证码',
+      title: t('menuCopyTotp'),
       contexts: ['page', 'editable']
     });
     chrome.contextMenus.create({
@@ -429,7 +444,7 @@ function registerContextMenus() {
     chrome.contextMenus.create({
       id: 'ks-open-app',
       parentId: 'ks-root',
-      title: '打开 Keysmith 桌面端',
+      title: t('menuOpenDesktop'),
       contexts: ['page', 'editable']
     });
   });
@@ -551,7 +566,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse(
           await rpcRaw('clipboard_copy', {
             value: message.value || '',
-            label: message.label || '浏览器扩展',
+            label: message.label || t('labelBrowserExt'),
             sensitive: message.sensitive !== false
           })
         );
@@ -702,7 +717,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'FILL_ACTIVE_TAB': {
         if (!message.tabId) {
-          sendResponse({ ok: false, error: '未找到目标标签页' });
+          sendResponse({ ok: false, error: t('errNoTargetTab') });
           break;
         }
         sendResponse(
@@ -717,7 +732,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'FILL_GENERATED_ACTIVE_TAB': {
         if (!message.tabId) {
-          sendResponse({ ok: false, error: '未找到目标标签页' });
+          sendResponse({ ok: false, error: t('errNoTargetTab') });
           break;
         }
         sendResponse(
@@ -730,7 +745,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'FILL_CARD_ACTIVE_TAB': {
         if (!message.tabId) {
-          sendResponse({ ok: false, error: '未找到目标标签页' });
+          sendResponse({ ok: false, error: t('errNoTargetTab') });
           break;
         }
         sendResponse(
@@ -743,7 +758,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'FILL_IDENTITY_ACTIVE_TAB': {
         if (!message.tabId) {
-          sendResponse({ ok: false, error: '未找到目标标签页' });
+          sendResponse({ ok: false, error: t('errNoTargetTab') });
           break;
         }
         sendResponse(

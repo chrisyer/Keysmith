@@ -1,6 +1,6 @@
 import { ArrowLeft, CheckCircle2, Eye, EyeOff, Fingerprint, Globe, KeyRound, Loader2, Server } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { useI18n } from '../../i18n';
+import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
 import { evaluatePasswordStrength } from '../../services/generator';
 import { isTauriRuntime, KeysmithIpcError, tauriClient } from '../../services/tauriClient';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -10,7 +10,7 @@ import type { AccountPasskey } from '../../types/domain';
 
 export function AuthScreen() {
   const inTauri = isTauriRuntime();
-  const { dict, locale, setLanguageMode, fmt } = useI18n();
+  const { dict, languageMode, setLanguageMode, fmt } = useI18n();
 
   const addingAccount = useSessionStore((s) => s.addingAccount);
   const savedAccounts = useSessionStore((s) => s.savedAccounts);
@@ -192,14 +192,22 @@ export function AuthScreen() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setLanguageMode(locale === 'zh-CN' ? 'en' : 'zh-CN')}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[11px] font-medium text-[var(--text-secondary)] cursor-pointer shrink-0"
-            >
+            <label className="inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[11px] font-medium text-[var(--text-secondary)] cursor-pointer shrink-0">
               <Globe size={12} />
-              {locale === 'zh-CN' ? 'EN' : '中文'}
-            </button>
+              <select
+                aria-label={dict.settings.languageLabel}
+                value={languageMode}
+                onChange={(e) => setLanguageMode(e.target.value as LanguageMode)}
+                className="bg-transparent focus:outline-none cursor-pointer text-[11px] font-medium text-[var(--text-secondary)]"
+              >
+                <option value="system">{dict.settings.languageSystem}</option>
+                {SUPPORTED_LOCALES.map((loc) => (
+                  <option key={loc.id} value={loc.id}>
+                    {loc.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           {!addingAccount && savedAccounts.length > 0 && (
@@ -399,7 +407,16 @@ export function AuthScreen() {
                   />
                 </div>
                 <span className="text-[11px] text-[var(--text-secondary)]">
-                  {dict.auth.passwordStrength}: {strength.label}
+                  {dict.auth.passwordStrength}:{' '}
+                  {(
+                    [
+                      dict.generator.strength0,
+                      dict.generator.strength1,
+                      dict.generator.strength2,
+                      dict.generator.strength3,
+                      dict.generator.strength4,
+                    ] as const
+                  )[strength.score] ?? strength.label}
                 </span>
               </div>
             )}

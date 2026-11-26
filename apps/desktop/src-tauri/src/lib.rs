@@ -35,14 +35,260 @@ const DOCK_ICON_PNG: &[u8] = include_bytes!("../icons/128x128@2x.png");
 const TRAY_ICON_PNG: &[u8] = include_bytes!("../icons/tray-icon@2x.png");
 const TRAY_ID: &str = "main-tray";
 
-fn is_zh_language(lang: &str) -> bool {
-    match lang {
-        "zh-CN" | "zh" => true,
-        "en" => false,
-        _ => std::env::var("LANG")
-            .or_else(|_| std::env::var("LC_ALL"))
-            .map(|v| v.to_ascii_lowercase().starts_with("zh"))
-            .unwrap_or(true),
+fn resolve_menu_locale(lang: &str) -> &'static str {
+    let raw = match lang.trim() {
+        "" | "system" => {
+            let env_lang = std::env::var("LANG")
+                .or_else(|_| std::env::var("LC_ALL"))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if env_lang.starts_with("zh_tw") || env_lang.starts_with("zh_hk") || env_lang.starts_with("zh-hant") {
+                return "zh-TW";
+            }
+            if env_lang.starts_with("zh") {
+                return "zh-CN";
+            }
+            if env_lang.starts_with("ja") {
+                return "ja";
+            }
+            if env_lang.starts_with("ko") {
+                return "ko";
+            }
+            if env_lang.starts_with("de") {
+                return "de";
+            }
+            if env_lang.starts_with("fr") {
+                return "fr";
+            }
+            if env_lang.starts_with("es") {
+                return "es";
+            }
+            return "en";
+        }
+        other => other,
+    };
+    match raw {
+        "zh-CN" | "zh" => "zh-CN",
+        "zh-TW" | "zh-HK" => "zh-TW",
+        "ja" => "ja",
+        "ko" => "ko",
+        "de" => "de",
+        "fr" => "fr",
+        "es" => "es",
+        _ => "en",
+    }
+}
+
+struct MenuLabels {
+    show: &'static str,
+    quick_access: &'static str,
+    generator: &'static str,
+    copy_pw: &'static str,
+    lock: &'static str,
+    quit: &'static str,
+    about: &'static str,
+    hide: &'static str,
+    hide_others: &'static str,
+    show_all: &'static str,
+    edit: &'static str,
+    undo: &'static str,
+    redo: &'static str,
+    cut: &'static str,
+    copy: &'static str,
+    paste: &'static str,
+    select_all: &'static str,
+    window: &'static str,
+    minimize: &'static str,
+    zoom: &'static str,
+    close_window: &'static str,
+}
+
+fn menu_labels(lang: &str) -> MenuLabels {
+    match resolve_menu_locale(lang) {
+        "zh-CN" => MenuLabels {
+            show: "显示 Keysmith",
+            quick_access: "Quick Access",
+            generator: "密码生成器",
+            copy_pw: "快速复制新密码",
+            lock: "锁定保险库",
+            quit: "退出 Keysmith",
+            about: "关于 Keysmith",
+            hide: "隐藏 Keysmith",
+            hide_others: "隐藏其他",
+            show_all: "全部显示",
+            edit: "编辑",
+            undo: "撤销",
+            redo: "重做",
+            cut: "剪切",
+            copy: "拷贝",
+            paste: "粘贴",
+            select_all: "全选",
+            window: "窗口",
+            minimize: "最小化",
+            zoom: "缩放",
+            close_window: "关闭窗口",
+        },
+        "zh-TW" => MenuLabels {
+            show: "顯示 Keysmith",
+            quick_access: "Quick Access",
+            generator: "密碼產生器",
+            copy_pw: "快速複製新密碼",
+            lock: "鎖定保險庫",
+            quit: "結束 Keysmith",
+            about: "關於 Keysmith",
+            hide: "隱藏 Keysmith",
+            hide_others: "隱藏其他",
+            show_all: "顯示全部",
+            edit: "編輯",
+            undo: "還原",
+            redo: "重做",
+            cut: "剪下",
+            copy: "複製",
+            paste: "貼上",
+            select_all: "全選",
+            window: "視窗",
+            minimize: "最小化",
+            zoom: "縮放",
+            close_window: "關閉視窗",
+        },
+        "ja" => MenuLabels {
+            show: "Keysmith を表示",
+            quick_access: "Quick Access",
+            generator: "パスワード生成",
+            copy_pw: "新しいパスワードをコピー",
+            lock: "保管庫をロック",
+            quit: "Keysmith を終了",
+            about: "Keysmith について",
+            hide: "Keysmith を隠す",
+            hide_others: "ほかを隠す",
+            show_all: "すべて表示",
+            edit: "編集",
+            undo: "取り消す",
+            redo: "やり直す",
+            cut: "カット",
+            copy: "コピー",
+            paste: "ペースト",
+            select_all: "すべてを選択",
+            window: "ウィンドウ",
+            minimize: "最小化",
+            zoom: "拡大/縮小",
+            close_window: "ウィンドウを閉じる",
+        },
+        "ko" => MenuLabels {
+            show: "Keysmith 보기",
+            quick_access: "Quick Access",
+            generator: "비밀번호 생성기",
+            copy_pw: "새 비밀번호 복사",
+            lock: "금고 잠그기",
+            quit: "Keysmith 종료",
+            about: "Keysmith 정보",
+            hide: "Keysmith 가리기",
+            hide_others: "기타 가리기",
+            show_all: "모두 보기",
+            edit: "편집",
+            undo: "실행 취소",
+            redo: "다시 실행",
+            cut: "오려두기",
+            copy: "복사하기",
+            paste: "붙여넣기",
+            select_all: "모두 선택",
+            window: "윈도우",
+            minimize: "최소화",
+            zoom: "확대/축소",
+            close_window: "윈도우 닫기",
+        },
+        "de" => MenuLabels {
+            show: "Keysmith anzeigen",
+            quick_access: "Quick Access",
+            generator: "Passwortgenerator",
+            copy_pw: "Neues Passwort kopieren",
+            lock: "Tresor sperren",
+            quit: "Keysmith beenden",
+            about: "Über Keysmith",
+            hide: "Keysmith ausblenden",
+            hide_others: "Andere ausblenden",
+            show_all: "Alle einblenden",
+            edit: "Bearbeiten",
+            undo: "Widerrufen",
+            redo: "Wiederholen",
+            cut: "Ausschneiden",
+            copy: "Kopieren",
+            paste: "Einsetzen",
+            select_all: "Alles auswählen",
+            window: "Fenster",
+            minimize: "Minimieren",
+            zoom: "Zoomen",
+            close_window: "Fenster schließen",
+        },
+        "fr" => MenuLabels {
+            show: "Afficher Keysmith",
+            quick_access: "Quick Access",
+            generator: "Générateur de mots de passe",
+            copy_pw: "Copier un nouveau mot de passe",
+            lock: "Verrouiller le coffre",
+            quit: "Quitter Keysmith",
+            about: "À propos de Keysmith",
+            hide: "Masquer Keysmith",
+            hide_others: "Masquer les autres",
+            show_all: "Tout afficher",
+            edit: "Édition",
+            undo: "Annuler",
+            redo: "Rétablir",
+            cut: "Couper",
+            copy: "Copier",
+            paste: "Coller",
+            select_all: "Tout sélectionner",
+            window: "Fenêtre",
+            minimize: "Réduire",
+            zoom: "Agrandir",
+            close_window: "Fermer la fenêtre",
+        },
+        "es" => MenuLabels {
+            show: "Mostrar Keysmith",
+            quick_access: "Quick Access",
+            generator: "Generador de contraseñas",
+            copy_pw: "Copiar nueva contraseña",
+            lock: "Bloquear bóveda",
+            quit: "Salir de Keysmith",
+            about: "Acerca de Keysmith",
+            hide: "Ocultar Keysmith",
+            hide_others: "Ocultar otros",
+            show_all: "Mostrar todo",
+            edit: "Edición",
+            undo: "Deshacer",
+            redo: "Rehacer",
+            cut: "Cortar",
+            copy: "Copiar",
+            paste: "Pegar",
+            select_all: "Seleccionar todo",
+            window: "Ventana",
+            minimize: "Minimizar",
+            zoom: "Zoom",
+            close_window: "Cerrar ventana",
+        },
+        _ => MenuLabels {
+            show: "Show Keysmith",
+            quick_access: "Quick Access",
+            generator: "Password Generator",
+            copy_pw: "Copy New Password",
+            lock: "Lock Vault",
+            quit: "Quit Keysmith",
+            about: "About Keysmith",
+            hide: "Hide Keysmith",
+            hide_others: "Hide Others",
+            show_all: "Show All",
+            edit: "Edit",
+            undo: "Undo",
+            redo: "Redo",
+            cut: "Cut",
+            copy: "Copy",
+            paste: "Paste",
+            select_all: "Select All",
+            window: "Window",
+            minimize: "Minimize",
+            zoom: "Zoom",
+            close_window: "Close Window",
+        },
     }
 }
 
@@ -106,33 +352,27 @@ fn handle_menu_action(app: &AppHandle, raw_id: &str) {
 }
 
 fn build_app_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>> {
-    let zh = is_zh_language(lang);
-    let show_item = MenuItem::with_id(
-        app,
-        "app:show",
-        if zh { "显示 Keysmith" } else { "Show Keysmith" },
-        true,
-        None::<&str>,
-    )?;
-    let quick_item = MenuItem::with_id(app, "app:quick_access", "Quick Access", true, None::<&str>)?;
+    let l = menu_labels(lang);
+    let show_item = MenuItem::with_id(app, "app:show", l.show, true, None::<&str>)?;
+    let quick_item = MenuItem::with_id(app, "app:quick_access", l.quick_access, true, None::<&str>)?;
     let generator_item = MenuItem::with_id(
         app,
         "app:generator",
-        if zh { "密码生成器" } else { "Password Generator" },
+        l.generator,
         true,
         Some("CommandOrControl+Shift+G"),
     )?;
     let lock_item = MenuItem::with_id(
         app,
         "app:lock",
-        if zh { "锁定保险库" } else { "Lock Vault" },
+        l.lock,
         true,
         Some("CommandOrControl+L"),
     )?;
     let quit_item = MenuItem::with_id(
         app,
         "app:quit",
-        if zh { "退出 Keysmith" } else { "Quit Keysmith" },
+        l.quit,
         true,
         Some("CommandOrControl+Q"),
     )?;
@@ -142,29 +382,16 @@ fn build_app_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>
         "Keysmith",
         true,
         &[
-            &PredefinedMenuItem::about(
-                app,
-                Some(if zh { "关于 Keysmith" } else { "About Keysmith" }),
-                None,
-            )?,
+            &PredefinedMenuItem::about(app, Some(l.about), None)?,
             &PredefinedMenuItem::separator(app)?,
             &show_item,
             &quick_item,
             &generator_item,
             &lock_item,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(
-                app,
-                Some(if zh { "隐藏 Keysmith" } else { "Hide Keysmith" }),
-            )?,
-            &PredefinedMenuItem::hide_others(
-                app,
-                Some(if zh { "隐藏其他" } else { "Hide Others" }),
-            )?,
-            &PredefinedMenuItem::show_all(
-                app,
-                Some(if zh { "全部显示" } else { "Show All" }),
-            )?,
+            &PredefinedMenuItem::hide(app, Some(l.hide))?,
+            &PredefinedMenuItem::hide_others(app, Some(l.hide_others))?,
+            &PredefinedMenuItem::show_all(app, Some(l.show_all))?,
             &PredefinedMenuItem::separator(app)?,
             &quit_item,
         ],
@@ -172,30 +399,27 @@ fn build_app_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>
 
     let edit_submenu = Submenu::with_items(
         app,
-        if zh { "编辑" } else { "Edit" },
+        l.edit,
         true,
         &[
-            &PredefinedMenuItem::undo(app, Some(if zh { "撤销" } else { "Undo" }))?,
-            &PredefinedMenuItem::redo(app, Some(if zh { "重做" } else { "Redo" }))?,
+            &PredefinedMenuItem::undo(app, Some(l.undo))?,
+            &PredefinedMenuItem::redo(app, Some(l.redo))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::cut(app, Some(if zh { "剪切" } else { "Cut" }))?,
-            &PredefinedMenuItem::copy(app, Some(if zh { "拷贝" } else { "Copy" }))?,
-            &PredefinedMenuItem::paste(app, Some(if zh { "粘贴" } else { "Paste" }))?,
-            &PredefinedMenuItem::select_all(app, Some(if zh { "全选" } else { "Select All" }))?,
+            &PredefinedMenuItem::cut(app, Some(l.cut))?,
+            &PredefinedMenuItem::copy(app, Some(l.copy))?,
+            &PredefinedMenuItem::paste(app, Some(l.paste))?,
+            &PredefinedMenuItem::select_all(app, Some(l.select_all))?,
         ],
     )?;
 
     let window_submenu = Submenu::with_items(
         app,
-        if zh { "窗口" } else { "Window" },
+        l.window,
         true,
         &[
-            &PredefinedMenuItem::minimize(app, Some(if zh { "最小化" } else { "Minimize" }))?,
-            &PredefinedMenuItem::maximize(app, Some(if zh { "缩放" } else { "Zoom" }))?,
-            &PredefinedMenuItem::close_window(
-                app,
-                Some(if zh { "关闭窗口" } else { "Close Window" }),
-            )?,
+            &PredefinedMenuItem::minimize(app, Some(l.minimize))?,
+            &PredefinedMenuItem::maximize(app, Some(l.zoom))?,
+            &PredefinedMenuItem::close_window(app, Some(l.close_window))?,
         ],
     )?;
 
@@ -203,44 +427,16 @@ fn build_app_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>
 }
 
 fn build_tray_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>> {
-    let zh = is_zh_language(lang);
-    let show_item = MenuItem::with_id(
-        app,
-        "tray:show",
-        if zh { "显示 Keysmith" } else { "Show Keysmith" },
-        true,
-        None::<&str>,
-    )?;
+    let l = menu_labels(lang);
+    let show_item = MenuItem::with_id(app, "tray:show", l.show, true, None::<&str>)?;
     let quick_item =
-        MenuItem::with_id(app, "tray:quick_access", "Quick Access", true, None::<&str>)?;
-    let generator_item = MenuItem::with_id(
-        app,
-        "tray:generator",
-        if zh { "密码生成器" } else { "Password Generator" },
-        true,
-        None::<&str>,
-    )?;
-    let quick_copy_item = MenuItem::with_id(
-        app,
-        "tray:quick_copy_password",
-        if zh { "快速复制新密码" } else { "Copy New Password" },
-        true,
-        None::<&str>,
-    )?;
-    let lock_item = MenuItem::with_id(
-        app,
-        "tray:lock",
-        if zh { "锁定保险库" } else { "Lock Vault" },
-        true,
-        None::<&str>,
-    )?;
-    let quit_item = MenuItem::with_id(
-        app,
-        "tray:quit",
-        if zh { "退出 Keysmith" } else { "Quit Keysmith" },
-        true,
-        None::<&str>,
-    )?;
+        MenuItem::with_id(app, "tray:quick_access", l.quick_access, true, None::<&str>)?;
+    let generator_item =
+        MenuItem::with_id(app, "tray:generator", l.generator, true, None::<&str>)?;
+    let quick_copy_item =
+        MenuItem::with_id(app, "tray:quick_copy_password", l.copy_pw, true, None::<&str>)?;
+    let lock_item = MenuItem::with_id(app, "tray:lock", l.lock, true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "tray:quit", l.quit, true, None::<&str>)?;
 
     Menu::with_items(
         app,

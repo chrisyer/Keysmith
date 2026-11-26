@@ -1,3 +1,4 @@
+import { getDictionary, readStoredLanguage, resolveLocale } from '../i18n';
 import type { ItemCategory, ItemDraft } from '../types/domain';
 import { makeId } from '../utils/format';
 
@@ -15,9 +16,9 @@ export interface TemplateMeta {
 export const PHASE1_TEMPLATES: TemplateMeta[] = [
   {
     category: 'login',
-    label: '登录',
-    shortLabel: '登录',
-    description: '网站与应用的账号、密码、TOTP 与网址',
+    label: 'Login',
+    shortLabel: 'Login',
+    description: 'Websites & apps with username, password, TOTP and URLs',
     iconName: 'globe',
     color: '#0572EC',
     order: 1,
@@ -25,9 +26,9 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'password',
-    label: '密码',
-    shortLabel: '密码',
-    description: '独立口令或本地加密密钥',
+    label: 'Password',
+    shortLabel: 'Password',
+    description: 'Standalone passphrase or local encryption secret',
     iconName: 'key',
     color: '#7C3AED',
     order: 2,
@@ -35,9 +36,9 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'secure_note',
-    label: '安全笔记',
-    shortLabel: '安全笔记',
-    description: '支持 Markdown 的加密文本与备忘',
+    label: 'Secure Note',
+    shortLabel: 'Note',
+    description: 'Encrypted Markdown text and private memos',
     iconName: 'file-text',
     color: '#D97706',
     order: 3,
@@ -45,9 +46,9 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'credit_card',
-    label: '银行卡',
-    shortLabel: '银行卡',
-    description: '信用卡、借记卡、有效期与 CVV',
+    label: 'Credit Card',
+    shortLabel: 'Card',
+    description: 'Credit/debit cards, expiration dates and CVV',
     iconName: 'credit-card',
     color: '#0D9488',
     order: 4,
@@ -55,9 +56,9 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'api_credential',
-    label: 'API 凭证',
-    shortLabel: 'API 凭证',
-    description: 'API Key、Secret、Scope 与接口地址',
+    label: 'API Credential',
+    shortLabel: 'API',
+    description: 'API key, secret, scope and endpoint URLs',
     iconName: 'webhook',
     color: '#2563EB',
     order: 5,
@@ -65,9 +66,9 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'database',
-    label: '数据库',
-    shortLabel: '数据库',
-    description: 'PostgreSQL / MySQL / Redis 连接凭据',
+    label: 'Database',
+    shortLabel: 'Database',
+    description: 'PostgreSQL / MySQL / Redis connection credentials',
     iconName: 'database',
     color: '#0891B2',
     order: 6,
@@ -75,9 +76,9 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'server',
-    label: '服务器',
-    shortLabel: '服务器',
-    description: '主机 IP、端口、Root 密码与托管面板',
+    label: 'Server',
+    shortLabel: 'Server',
+    description: 'Host IP, SSH port, root password and hosting panel',
     iconName: 'server',
     color: '#4F46E5',
     order: 7,
@@ -85,9 +86,9 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'ssh_key',
-    label: 'SSH 密钥',
-    shortLabel: 'SSH 密钥',
-    description: '公钥、私钥、口令与 SHA256 指纹',
+    label: 'SSH Key',
+    shortLabel: 'SSH Key',
+    description: 'Public key, private key, passphrase and SHA256 fingerprint',
     iconName: 'terminal',
     color: '#16A34A',
     order: 8,
@@ -95,9 +96,9 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'identity',
-    label: '身份信息',
-    shortLabel: '身份信息',
-    description: '姓名、联系方式与身份证/护照号',
+    label: 'Identity',
+    shortLabel: 'Identity',
+    description: 'Full name, contact details, address and ID numbers',
     iconName: 'user-check',
     color: '#DB2777',
     order: 9,
@@ -105,9 +106,9 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'software_license',
-    label: '软件许可',
-    shortLabel: '软件许可',
-    description: 'License Key、订单号与到期日期',
+    label: 'Software License',
+    shortLabel: 'License',
+    description: 'License key, order ID and renewal/expiry dates',
     iconName: 'badge-check',
     color: '#EA580C',
     order: 10,
@@ -118,9 +119,9 @@ export const PHASE1_TEMPLATES: TemplateMeta[] = [
 export const PHASE2_TEMPLATES: TemplateMeta[] = [
   {
     category: 'bank_account',
-    label: '银行账户',
-    shortLabel: '银行账户',
-    description: '开户行、账户号、Routing / SWIFT 与网银 PIN',
+    label: 'Bank Account',
+    shortLabel: 'Bank',
+    description: 'Bank name, account number, Routing / SWIFT and PIN',
     iconName: 'landmark',
     color: '#0F766E',
     order: 12,
@@ -128,9 +129,9 @@ export const PHASE2_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'crypto_wallet',
-    label: '加密钱包',
-    shortLabel: '加密钱包',
-    description: '助记词、钱包地址、私钥与恢复密码',
+    label: 'Crypto Wallet',
+    shortLabel: 'Wallet',
+    description: 'Seed phrase, wallet address, private key and passphrase',
     iconName: 'bitcoin',
     color: '#D97706',
     order: 13,
@@ -138,9 +139,9 @@ export const PHASE2_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'wifi_router',
-    label: 'Wi-Fi 路由器',
+    label: 'Wi-Fi Router',
     shortLabel: 'Wi-Fi',
-    description: 'SSID、Wi-Fi 密码、管理后台与网关 IP',
+    description: 'SSID, Wi-Fi password, admin console and gateway IP',
     iconName: 'wifi',
     color: '#0284C7',
     order: 14,
@@ -148,9 +149,9 @@ export const PHASE2_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'passport',
-    label: '护照',
-    shortLabel: '护照',
-    description: '护照号码、签发国家、签发与到期日期',
+    label: 'Passport',
+    shortLabel: 'Passport',
+    description: 'Passport number, issuing country, issue and expiry dates',
     iconName: 'book-user',
     color: '#4338CA',
     order: 15,
@@ -158,9 +159,9 @@ export const PHASE2_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'driver_license',
-    label: '驾驶证',
-    shortLabel: '驾驶证',
-    description: '证号、准驾车型、发证机关与有效期',
+    label: 'Driver License',
+    shortLabel: 'License',
+    description: 'License number, class, issuing authority and expiry',
     iconName: 'car',
     color: '#2563EB',
     order: 16,
@@ -168,9 +169,9 @@ export const PHASE2_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'membership',
-    label: '会员卡',
-    shortLabel: '会员卡',
-    description: '会员编号、等级、PIN 与续费日期',
+    label: 'Membership',
+    shortLabel: 'Member',
+    description: 'Member ID, tier, PIN and renewal date',
     iconName: 'badge-percent',
     color: '#9333EA',
     order: 17,
@@ -178,9 +179,9 @@ export const PHASE2_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'medical_record',
-    label: '医疗记录',
-    shortLabel: '医疗记录',
-    description: '医保号、血型、过敏史与紧急联系人',
+    label: 'Medical Record',
+    shortLabel: 'Medical',
+    description: 'Insurance ID, blood type, allergies and emergency contact',
     iconName: 'heart-pulse',
     color: '#E11D48',
     order: 18,
@@ -188,9 +189,9 @@ export const PHASE2_TEMPLATES: TemplateMeta[] = [
   },
   {
     category: 'document',
-    label: '通用文档',
-    shortLabel: '通用文档',
-    description: '重要合同、证书、密钥文件与加密归档',
+    label: 'Document',
+    shortLabel: 'Document',
+    description: 'Contracts, certificates, key files and encrypted archives',
     iconName: 'file-archive',
     color: '#475569',
     order: 19,
@@ -202,9 +203,9 @@ export const ALL_TEMPLATES: TemplateMeta[] = [...PHASE1_TEMPLATES, ...PHASE2_TEM
 
 const PASSKEY_META: TemplateMeta = {
   category: 'passkey',
-  label: '通行密钥',
-  shortLabel: '通行密钥',
-  description: '由网站 WebAuthn 注册自动保存的免密登录凭据',
+  label: 'Passkey',
+  shortLabel: 'Passkey',
+  description: 'Passwordless WebAuthn passkeys saved automatically during registration',
   iconName: 'fingerprint',
   color: '#0EA5E9',
   order: 11,
@@ -223,9 +224,11 @@ export const TEMPLATE_MAP: Record<ItemCategory, TemplateMeta> = {
 
 export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemDraft {
   const meta = TEMPLATE_MAP[category];
+  const dict = getDictionary(resolveLocale(readStoredLanguage()));
+  const catLabel = dict.categories[category] ?? meta.label;
   const base: ItemDraft = {
     vaultId,
-    title: `新建${meta.label}`,
+    title: `${dict.newItem.title} · ${catLabel}`,
     favorite: false,
     archived: false,
     category,
@@ -249,15 +252,15 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'login':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: '登录页', matchRule: 'domain' }],
+        urls: [{ id: makeId('u'), uri: '', label: 'Login Page', matchRule: 'domain' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '用户名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: '密码', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
-              { id: makeId('f'), label: '一次性密码', fieldType: 'totp', value: '', sensitive: true, copyable: true, purpose: 'totp' },
+              { id: makeId('f'), label: 'Username', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: 'One-Time Password', fieldType: 'totp', value: '', sensitive: true, copyable: true, purpose: 'totp' },
             ],
           },
         ],
@@ -266,13 +269,13 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'password':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: '关联地址', matchRule: 'domain' }],
+        urls: [{ id: makeId('u'), uri: '', label: 'Website', matchRule: 'domain' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '密码', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: 'Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
             ],
           },
         ],
@@ -292,20 +295,20 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '持卡人', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '卡号', fieldType: 'number', value: '', sensitive: true, copyable: true, purpose: 'card_number' },
-              { id: makeId('f'), label: '有效期', fieldType: 'month_year', value: '', sensitive: false, copyable: true, purpose: 'card_expiry' },
-              { id: makeId('f'), label: '安全码 CVV', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'card_cvv' },
-              { id: makeId('f'), label: '卡类型', fieldType: 'text', value: 'Visa', sensitive: false, copyable: false },
+              { id: makeId('f'), label: 'Cardholder Name', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Card Number', fieldType: 'number', value: '', sensitive: true, copyable: true, purpose: 'card_number' },
+              { id: makeId('f'), label: 'Expiration', fieldType: 'month_year', value: '', sensitive: false, copyable: true, purpose: 'card_expiry' },
+              { id: makeId('f'), label: 'Security Code (CVV)', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'card_cvv' },
+              { id: makeId('f'), label: 'Card Type', fieldType: 'text', value: 'Visa', sensitive: false, copyable: false },
             ],
           },
           {
             id: makeId('sec'),
-            title: '账单信息',
+            title: 'Billing & Bank',
             fields: [
-              { id: makeId('f'), label: '银行名称', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Issuing Bank', fieldType: 'text', value: '', sensitive: false, copyable: true },
               { id: makeId('f'), label: 'ATM PIN', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
-              { id: makeId('f'), label: '客服电话', fieldType: 'phone', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Support Phone', fieldType: 'phone', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -319,27 +322,27 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '姓', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '名', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '性别', fieldType: 'text', value: '', sensitive: false, copyable: false },
-              { id: makeId('f'), label: '出生日期', fieldType: 'date', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '公司 / 职位', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Last Name', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'First Name', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Gender', fieldType: 'text', value: '', sensitive: false, copyable: false },
+              { id: makeId('f'), label: 'Birth Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Company / Title', fieldType: 'text', value: '', sensitive: false, copyable: true },
             ],
           },
           {
             id: makeId('sec'),
-            title: '联系方式',
+            title: 'Contact Information',
             fields: [
-              { id: makeId('f'), label: '邮箱', fieldType: 'email', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: '手机', fieldType: 'phone', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '地址', fieldType: 'address', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Email', fieldType: 'email', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Phone', fieldType: 'phone', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Address', fieldType: 'address', value: '', sensitive: false, copyable: true },
             ],
           },
           {
             id: makeId('sec'),
-            title: '证件号',
+            title: 'Identification',
             fields: [
-              { id: makeId('f'), label: '身份证 / 社保号', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: 'National ID / SSN', fieldType: 'password', value: '', sensitive: true, copyable: true },
             ],
           },
         ],
@@ -348,23 +351,23 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'api_credential':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: '接口基址', matchRule: 'host' }],
+        urls: [{ id: makeId('u'), uri: '', label: 'Endpoint URL', matchRule: 'host' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '用户名 / AppID', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Username / App ID', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
               { id: makeId('f'), label: 'API Key', fieldType: 'password', value: '', sensitive: true, copyable: true },
               { id: makeId('f'), label: 'API Secret', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
             ],
           },
           {
             id: makeId('sec'),
-            title: '权限与有效期',
+            title: 'Permissions & Expiry',
             fields: [
               { id: makeId('f'), label: 'Scope', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '过期时间', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Expiration Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -378,20 +381,20 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '类型', fieldType: 'text', value: 'PostgreSQL', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '主机', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '端口', fieldType: 'number', value: '5432', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '数据库名', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '用户名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: '密码', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: 'Type', fieldType: 'text', value: 'PostgreSQL', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Host', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Port', fieldType: 'number', value: '5432', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Database', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Username', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
             ],
           },
           {
             id: makeId('sec'),
-            title: '连接串',
+            title: 'Connection',
             fields: [
               { id: makeId('f'), label: 'Connection URI', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'SSL 模式', fieldType: 'text', value: 'require', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'SSL Mode', fieldType: 'text', value: 'require', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -400,25 +403,25 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'server':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: '面板网址', matchRule: 'host' }],
+        urls: [{ id: makeId('u'), uri: '', label: 'Control Panel', matchRule: 'host' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '主机 / IP', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '端口', fieldType: 'number', value: '22', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '用户名', fieldType: 'text', value: 'root', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: '密码', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
-              { id: makeId('f'), label: 'Root / Admin 密码', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: 'Host / IP', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Port', fieldType: 'number', value: '22', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Username', fieldType: 'text', value: 'root', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: 'Root / Admin Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
             ],
           },
           {
             id: makeId('sec'),
-            title: '托管商',
+            title: 'Provider',
             fields: [
-              { id: makeId('f'), label: '控制台账号', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '所在机房', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Console Account', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Region / Datacenter', fieldType: 'text', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -432,10 +435,10 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '公钥', fieldType: 'ssh_public_key', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '私钥', fieldType: 'ssh_private_key', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: '密钥口令 Passphrase', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
-              { id: makeId('f'), label: '指纹', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Public Key', fieldType: 'ssh_public_key', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Private Key', fieldType: 'ssh_private_key', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: 'Passphrase', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: 'Fingerprint', fieldType: 'text', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -444,24 +447,24 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'software_license':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: '下载页', matchRule: 'domain' }],
+        urls: [{ id: makeId('u'), uri: '', label: 'Download Page', matchRule: 'domain' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '许可证密钥', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: '注册邮箱', fieldType: 'email', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: '版本', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'License Key', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: 'Registered Email', fieldType: 'email', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Version', fieldType: 'text', value: '', sensitive: false, copyable: true },
             ],
           },
           {
             id: makeId('sec'),
-            title: '购买信息',
+            title: 'Purchase Details',
             fields: [
-              { id: makeId('f'), label: '购买日期', fieldType: 'date', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '到期日期', fieldType: 'date', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '订单号', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Purchase Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Expiration Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Order Number', fieldType: 'text', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -470,15 +473,15 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'passkey':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: '关联站点', matchRule: 'domain' }],
+        urls: [{ id: makeId('u'), uri: '', label: 'Website', matchRule: 'domain' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '依赖方域名 (RP ID)', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '依赖方名称', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '账户名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Relying Party ID (RP ID)', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Relying Party Name', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Account Username', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
             ],
           },
         ],
@@ -492,12 +495,12 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '开户行名称', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '户名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: '账号 / IBAN', fieldType: 'number', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'Routing / 联行号', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Bank Name', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Account Holder', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Account Number / IBAN', fieldType: 'number', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: 'Routing Number', fieldType: 'text', value: '', sensitive: false, copyable: true },
               { id: makeId('f'), label: 'SWIFT / BIC', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '电话银行 PIN', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
+              { id: makeId('f'), label: 'Phone Banking PIN', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
             ],
           },
         ],
@@ -511,11 +514,11 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '网络 / 币种', fieldType: 'text', value: 'Ethereum / BTC', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '钱包地址', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: '助记词 (Seed Phrase)', fieldType: 'multiline', value: '', sensitive: true, copyable: true, purpose: 'recovery_codes' },
-              { id: makeId('f'), label: '私钥', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: '钱包解锁密码', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: 'Network / Asset', fieldType: 'text', value: 'Ethereum / BTC', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Wallet Address', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Seed Phrase', fieldType: 'multiline', value: '', sensitive: true, copyable: true, purpose: 'recovery_codes' },
+              { id: makeId('f'), label: 'Private Key', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: 'Wallet Passphrase', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
             ],
           },
         ],
@@ -524,17 +527,17 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'wifi_router':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: 'http://192.168.1.1', label: '路由器管理页', matchRule: 'host' }],
+        urls: [{ id: makeId('u'), uri: 'http://192.168.1.1', label: 'Router Admin', matchRule: 'host' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '网络名称 (SSID)', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Wi-Fi 密码', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
-              { id: makeId('f'), label: '安全协议', fieldType: 'text', value: 'WPA3 / WPA2', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '管理后台密码', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: '网关 IP', fieldType: 'text', value: '192.168.1.1', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Network Name (SSID)', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Wi-Fi Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: 'Security Protocol', fieldType: 'text', value: 'WPA3 / WPA2', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Admin Password', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: 'Gateway IP', fieldType: 'text', value: '192.168.1.1', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -548,12 +551,12 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '签发国家 / 地区', fieldType: 'text', value: '中国', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '姓名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: '护照号码', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: '出生日期', fieldType: 'date', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '签发日期', fieldType: 'date', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '有效期至', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Issuing Country', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Full Name', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Passport Number', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: 'Birth Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Issue Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Expiration Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -567,11 +570,11 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '姓名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: '证号', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: '准驾车型', fieldType: 'text', value: 'C1', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '发证机关', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '有效期至', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Full Name', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'License Number', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: 'License Class', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Issuing Authority', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Expiration Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -580,17 +583,17 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'membership':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: '会员官网', matchRule: 'domain' }],
+        urls: [{ id: makeId('u'), uri: '', label: 'Member Portal', matchRule: 'domain' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '机构 / 品牌', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '会员卡号', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: '会员等级', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '查询密码 / PIN', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
-              { id: makeId('f'), label: '有效期至', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Organization / Brand', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Member ID', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Membership Tier', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'PIN / Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
+              { id: makeId('f'), label: 'Expiration Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -604,11 +607,11 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '姓名', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: '医保 / 病历号', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: '血型', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '过敏史', fieldType: 'multiline', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '紧急联系人与电话', fieldType: 'phone', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Patient Name', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: 'Policy / Record ID', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: 'Blood Type', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Allergies', fieldType: 'multiline', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Emergency Contact', fieldType: 'phone', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -622,10 +625,10 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: '文档编号', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '相关方 / 机构', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: '关键口令 / 提取码', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
-              { id: makeId('f'), label: '归档日期', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Document ID', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Issuer / Organization', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: 'Access Passcode', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: 'Archive Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
             ],
           },
         ],

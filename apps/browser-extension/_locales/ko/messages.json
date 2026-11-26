@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "Keysmith"
+  },
+  "extDesc": {
+    "message": "Keysmith — 영지식 비밀번호 관리자, 웹 자동 채우기 및 패스키 도우미"
+  },
+  "cmdAutofill": {
+    "message": "현재 사이트에 가장 일치하는 로그인 정보 자동 채우기"
+  }
+}

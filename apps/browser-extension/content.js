@@ -4,6 +4,18 @@
   }
   window.__KEYSMITH_CONTENT_LOADED__ = true;
 
+  const t = (key, vars) =>
+    globalThis.KeysmithI18n ? globalThis.KeysmithI18n.t(key, vars) : key;
+  if (globalThis.KeysmithI18n && typeof globalThis.KeysmithI18n.onChange === 'function') {
+    globalThis.KeysmithI18n.onChange(() => {
+      try {
+        scheduleIconRender();
+      } catch {
+        // ignore if not ready yet
+      }
+    });
+  }
+
   const isWeb =
     window.location.protocol === 'https:' || window.location.protocol === 'http:';
 
@@ -155,7 +167,7 @@
   function autofillLogin(username, password, totp, anchorInput) {
     const allVisible = Array.from(document.querySelectorAll('input')).filter(isVisible);
     if (allVisible.length === 0) {
-      return { ok: false, error: '当前页面没有可见的登录输入框' };
+      return { ok: false, error: t('errNoVisibleInputs') };
     }
 
     const scoped = findFormInputs(anchorInput);
@@ -197,13 +209,13 @@
     }
 
     if (filled === 0) {
-      return { ok: false, error: '未匹配到可填充的用户名、密码或验证码输入框' };
+      return { ok: false, error: t('errNoMatchedAuth') };
     }
     return { ok: true, filled };
   }
 
   function autofillGeneratedPassword(password, anchorInput) {
-    if (!password) return { ok: false, error: '缺少密码' };
+    if (!password) return { ok: false, error: t('errMissingPassword') };
     const allVisible = Array.from(document.querySelectorAll('input')).filter(isVisible);
     const scoped = findFormInputs(anchorInput);
     const candidates =
@@ -211,7 +223,7 @@
         ? scoped.passwords
         : allVisible.filter((el) => el.type === 'password');
     if (candidates.length === 0) {
-      return { ok: false, error: '当前页面未找到密码输入框' };
+      return { ok: false, error: t('errNoPasswordInput') };
     }
     for (const pwInput of candidates) {
       markProgrammaticFill(pwInput);
@@ -263,7 +275,7 @@
     }
     return filled > 0
       ? { ok: true, filled }
-      : { ok: false, error: '当前页面未找到银行卡输入框' };
+      : { ok: false, error: t('errNoCardInputs') };
   }
 
   function autofillIdentity(ident) {
@@ -299,7 +311,7 @@
     }
     return filled > 0
       ? { ok: true, filled }
-      : { ok: false, error: '当前页面未找到身份信息输入框' };
+      : { ok: false, error: t('errNoIdentInputs') };
   }
 
   // ==================== Shadow DOM Overlay UI ====================
@@ -755,10 +767,10 @@
     const stSpan = document.createElement('span');
     stSpan.textContent =
       data.status === 'Unlocked'
-        ? `${data.matches.length} 匹配`
+        ? t('ddMatchCount', { count: data.matches.length })
         : data.connected
-          ? '已锁定'
-          : '未连接';
+          ? t('statusLocked')
+          : t('statusDisconnected');
     head.append(hostSpan, stSpan);
     dd.appendChild(head);
 
@@ -768,13 +780,13 @@
       genBtn.className = 'ks-dd-row ks-dd-gen';
       const meta = document.createElement('div');
       meta.className = 'ks-dd-meta';
-      const t = document.createElement('div');
-      t.className = 'ks-dd-title';
-      t.textContent = '生成高强度密码并填充';
+      const tEl = document.createElement('div');
+      tEl.className = 'ks-dd-title';
+      tEl.textContent = t('ddGenTitle');
       const s = document.createElement('div');
       s.className = 'ks-dd-sub';
-      s.textContent = '20 位随机强密码，自动复制到剪贴板';
-      meta.append(t, s);
+      s.textContent = t('ddGenSub');
+      meta.append(tEl, s);
       genBtn.appendChild(meta);
       genBtn.addEventListener('mousedown', (e) => e.preventDefault());
       genBtn.addEventListener('click', async () => {
@@ -792,13 +804,13 @@
           await sendMsg({
             type: 'COPY_SECRET',
             value: gRes.result.value,
-            label: '新生成密码'
+            label: t('newGenPasswordLabel')
           });
           autofillGeneratedPassword(gRes.result.value, input);
-          showToast('已填充强密码并复制到剪贴板', 'success');
+          showToast(t('ddCopiedFilledPw'), 'success');
           closeDropdown();
         } else {
-          showToast(gRes.error || '请先打开 Keysmith 桌面端', 'warn');
+          showToast(gRes.error || t('ddOpenDesktopPrompt'), 'warn');
         }
       });
       dd.appendChild(genBtn);
@@ -820,13 +832,13 @@
       unlockBtn.className = 'ks-dd-row';
       const meta = document.createElement('div');
       meta.className = 'ks-dd-meta';
-      const t = document.createElement('div');
-      t.className = 'ks-dd-title';
-      t.textContent = data.connected ? 'Keysmith 已锁定' : '未连接到 Keysmith 桌面端';
+      const tEl = document.createElement('div');
+      tEl.className = 'ks-dd-title';
+      tEl.textContent = data.connected ? t('ddLockedTitle') : t('ddDisconnectedTitle');
       const s = document.createElement('div');
       s.className = 'ks-dd-sub';
-      s.textContent = data.connected ? '点击打开 Keysmith 桌面端解锁' : '请启动 Keysmith 桌面应用';
-      meta.append(t, s);
+      s.textContent = data.connected ? t('ddClickOpenDesktop') : t('ddStartDesktopApp');
+      meta.append(tEl, s);
       unlockBtn.appendChild(meta);
       unlockBtn.addEventListener('mousedown', (e) => e.preventDefault());
       unlockBtn.addEventListener('click', async () => {
@@ -837,7 +849,7 @@
     } else if (data.matches.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'ks-dd-empty';
-      empty.textContent = '当前网站暂无已保存登录凭据';
+      empty.textContent = t('ddNoSavedCreds');
       dd.appendChild(empty);
     } else {
       for (const item of data.matches) {
@@ -849,10 +861,10 @@
         meta.className = 'ks-dd-meta';
         const title = document.createElement('div');
         title.className = 'ks-dd-title';
-        title.textContent = item.title || '未命名';
+        title.textContent = item.title || t('ddUnnamed');
         const sub = document.createElement('div');
         sub.className = 'ks-dd-sub';
-        sub.textContent = item.username || '无用户名';
+        sub.textContent = item.username || t('ddNoUsername');
         meta.append(title, sub);
         row.appendChild(meta);
 
@@ -872,7 +884,7 @@
         row.addEventListener('mousedown', (e) => e.preventDefault());
         row.addEventListener('click', async () => {
           if (item.reprompt) {
-            showToast(`「${item.title}」已启用主密码重验证，请在桌面端查看`, 'warn');
+            showToast(t('ddItemRepromptDesktop', { title: item.title || t('ddUnnamed') }), 'warn');
             await sendMsg({ type: 'OPEN_DESKTOP' });
             closeDropdown();
             return;
@@ -894,11 +906,13 @@
           }
           if (res.ok) {
             showToast(
-              totp ? `已填充凭据并复制 2FA：${totp}` : `已填充：${item.title}`,
+              totp
+                ? t('ddFilledWithTotp', { code: totp })
+                : t('ddFilledItem', { title: item.title || t('ddUnnamed') }),
               'success'
             );
           } else {
-            showToast(res.error || '未能填充输入框', 'warn');
+            showToast(res.error || t('ddCouldNotFill'), 'warn');
           }
           closeDropdown();
         });
@@ -957,8 +971,8 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ks-icon-btn';
-      btn.title = '使用 Keysmith 填充';
-      btn.setAttribute('aria-label', 'Keysmith 自动填充');
+      btn.title = t('iconTitle');
+      btn.setAttribute('aria-label', t('iconAria'));
       btn.style.left = `${Math.max(4, rect.right - 28)}px`;
       btn.style.top = `${Math.round(rect.top + (rect.height - 22) / 2)}px`;
       btn.appendChild(createKeySvg(13));
@@ -1033,8 +1047,8 @@
     const titleSpan = document.createElement('span');
     titleSpan.textContent =
       info.mode === 'update'
-        ? `更新「${info.title}」的密码？`
-        : '保存登录信息到 Keysmith？';
+        ? t('bannerUpdateTitle', { title: info.title || '' })
+        : t('bannerSaveTitle');
     const closeX = document.createElement('button');
     closeX.type = 'button';
     closeX.className = 'ks-btn ks-btn-ghost';
@@ -1049,7 +1063,7 @@
     const titleFieldWrap = document.createElement('div');
     titleFieldWrap.className = 'ks-field';
     const titleLabel = document.createElement('label');
-    titleLabel.textContent = '条目名称';
+    titleLabel.textContent = t('bannerLabelTitle');
     const titleInput = document.createElement('input');
     titleInput.className = 'ks-input';
     titleInput.value = info.title || info.suggestedTitle || window.location.hostname;
@@ -1059,7 +1073,7 @@
     const userFieldWrap = document.createElement('div');
     userFieldWrap.className = 'ks-field';
     const userLabel = document.createElement('label');
-    userLabel.textContent = '用户名 / 邮箱';
+    userLabel.textContent = t('bannerLabelUsername');
     const userInput = document.createElement('input');
     userInput.className = 'ks-input';
     userInput.value = creds.username || info.existingUsername || '';
@@ -1072,10 +1086,10 @@
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
     saveBtn.className = 'ks-btn ks-btn-primary';
-    saveBtn.textContent = info.mode === 'update' ? '更新密码' : '保存到 Keysmith';
+    saveBtn.textContent = info.mode === 'update' ? t('bannerBtnUpdate') : t('bannerBtnSave');
     saveBtn.addEventListener('click', async () => {
       saveBtn.disabled = true;
-      saveBtn.textContent = '保存中…';
+      saveBtn.textContent = t('bannerBtnSaving');
       const resp = await sendMsg({
         type: 'SAVE_LOGIN',
         url: creds.url || window.location.href,
@@ -1088,12 +1102,12 @@
       bannerContainer.textContent = '';
       if (resp.ok) {
         showToast(
-          info.mode === 'update' ? '已更新密码并保存历史记录' : '已保存到 Keysmith 保险库',
+          info.mode === 'update' ? t('bannerToastUpdated') : t('bannerToastSaved'),
           'success'
         );
         fetchAutofillData(true);
       } else {
-        showToast(resp.error || '保存失败', 'warn');
+        showToast(resp.error || t('toastSaveFailed'), 'warn');
       }
     });
     actions.appendChild(saveBtn);
@@ -1102,7 +1116,7 @@
       const neverBtn = document.createElement('button');
       neverBtn.type = 'button';
       neverBtn.className = 'ks-btn ks-btn-sec';
-      neverBtn.textContent = '此网站永不提示';
+      neverBtn.textContent = t('bannerNeverBtn');
       neverBtn.addEventListener('click', async () => {
         await sendMsg({ type: 'NEVER_SAVE_ORIGIN', origin: window.location.origin });
         bannerContainer.textContent = '';
@@ -1190,7 +1204,7 @@
       title.className = 'ks-modal-title';
       title.appendChild(createKeySvg(18));
       const titleText = document.createElement('span');
-      titleText.textContent = '保存通行密钥 (Passkey) 到 Keysmith';
+      titleText.textContent = t('pkSaveModalTitle');
       title.appendChild(titleText);
 
       const rpId = options?.rp?.id || window.location.hostname;
@@ -1198,13 +1212,13 @@
 
       const sub = document.createElement('div');
       sub.className = 'ks-modal-sub';
-      sub.textContent = `网站：${rpId} · 账号：${userName}`;
+      sub.textContent = t('pkModalSubSiteAccount', { rpId, user: userName });
       modal.append(title, sub);
 
       if (listInfo.locked) {
         const lockNote = document.createElement('div');
         lockNote.className = 'ks-dd-empty';
-        lockNote.textContent = 'Keysmith 保险库当前已锁定，请先解锁或改用设备通行密钥。';
+        lockNote.textContent = t('pkLockedNote');
         modal.appendChild(lockNote);
 
         const row = document.createElement('div');
@@ -1212,7 +1226,7 @@
         const unlockBtn = document.createElement('button');
         unlockBtn.type = 'button';
         unlockBtn.className = 'ks-btn ks-btn-primary';
-        unlockBtn.textContent = '打开 Keysmith 解锁';
+        unlockBtn.textContent = t('pkBtnUnlockDesktop');
         unlockBtn.addEventListener('click', async () => {
           await sendMsg({ type: 'OPEN_DESKTOP' });
           closeModal();
@@ -1221,7 +1235,7 @@
         const fbBtn = document.createElement('button');
         fbBtn.type = 'button';
         fbBtn.className = 'ks-btn ks-btn-sec';
-        fbBtn.textContent = '改用浏览器/设备 Passkey';
+        fbBtn.textContent = t('pkBtnBrowserDevice');
         fbBtn.addEventListener('click', () => {
           closeModal();
           resolve({ handled: false, fallback: true });
@@ -1229,7 +1243,7 @@
         const cancelBtn = document.createElement('button');
         cancelBtn.type = 'button';
         cancelBtn.className = 'ks-btn ks-btn-ghost';
-        cancelBtn.textContent = '取消';
+        cancelBtn.textContent = t('btnCancel');
         cancelBtn.addEventListener('click', () => {
           closeModal();
           resolve({ handled: false, cancelled: true, errorName: 'NotAllowedError' });
@@ -1245,17 +1259,20 @@
       const targetWrap = document.createElement('div');
       targetWrap.className = 'ks-field';
       const targetLbl = document.createElement('label');
-      targetLbl.textContent = '保存位置';
+      targetLbl.textContent = t('pkLabelSaveTo');
       const select = document.createElement('select');
       select.className = 'ks-select';
       const newOpt = document.createElement('option');
       newOpt.value = '';
-      newOpt.textContent = `新建登录条目 (${options?.rp?.name || rpId})`;
+      newOpt.textContent = t('pkNewLoginOpt', { name: options?.rp?.name || rpId });
       select.appendChild(newOpt);
       for (const cand of candidates) {
         const opt = document.createElement('option');
         opt.value = cand.itemId;
-        opt.textContent = `绑定到：${cand.title}${cand.username ? ` (${cand.username})` : ''}`;
+        opt.textContent = t('pkBindOpt', {
+          title: cand.title || t('unnamedItem'),
+          userPart: cand.username ? ` (${cand.username})` : ''
+        });
         select.appendChild(opt);
       }
       if (candidates.length > 0) {
@@ -1270,7 +1287,7 @@
       const titleFieldWrap = document.createElement('div');
       titleFieldWrap.className = 'ks-field';
       const titleLbl = document.createElement('label');
-      titleLbl.textContent = '新条目名称';
+      titleLbl.textContent = t('pkLabelNewTitle');
       const itemTitleInput = document.createElement('input');
       itemTitleInput.className = 'ks-input';
       itemTitleInput.value = options?.rp?.name || rpId;
@@ -1287,10 +1304,10 @@
       const saveBtn = document.createElement('button');
       saveBtn.type = 'button';
       saveBtn.className = 'ks-btn ks-btn-primary';
-      saveBtn.textContent = '保存通行密钥';
+      saveBtn.textContent = t('pkBtnSavePasskey');
       saveBtn.addEventListener('click', async () => {
         saveBtn.disabled = true;
-        saveBtn.textContent = '生成密钥中…';
+        saveBtn.textContent = t('pkBtnCreating');
         const res = await sendMsg({
           type: 'PASSKEY_CREATE',
           origin,
@@ -1300,7 +1317,7 @@
         });
         closeModal();
         if (res.ok && res.result?.handled && res.result?.credential) {
-          showToast('通行密钥已保存到 Keysmith', 'success');
+          showToast(t('pkToastSaved'), 'success');
           resolve({ handled: true, credential: res.result.credential });
         } else if (res.ok && res.result?.errorName) {
           resolve({
@@ -1309,7 +1326,7 @@
             error: res.result.error
           });
         } else {
-          showToast(res.error || res.result?.error || '创建通行密钥失败', 'warn');
+          showToast(res.error || res.result?.error || t('pkErrCreate'), 'warn');
           resolve({ handled: false, fallback: true });
         }
       });
@@ -1317,7 +1334,7 @@
       const fbBtn = document.createElement('button');
       fbBtn.type = 'button';
       fbBtn.className = 'ks-btn ks-btn-sec';
-      fbBtn.textContent = '改用设备通行密钥';
+      fbBtn.textContent = t('pkBtnBrowserDevice');
       fbBtn.addEventListener('click', () => {
         closeModal();
         resolve({ handled: false, fallback: true });
@@ -1326,7 +1343,7 @@
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
       cancelBtn.className = 'ks-btn ks-btn-ghost';
-      cancelBtn.textContent = '取消';
+      cancelBtn.textContent = t('btnCancel');
       cancelBtn.addEventListener('click', () => {
         closeModal();
         resolve({ handled: false, cancelled: true, errorName: 'NotAllowedError' });
@@ -1357,13 +1374,13 @@
       title.className = 'ks-modal-title';
       title.appendChild(createKeySvg(18));
       const titleText = document.createElement('span');
-      titleText.textContent = '使用 Keysmith 通行密钥登录';
+      titleText.textContent = t('pkSelectModalTitle');
       title.appendChild(titleText);
 
       const rpId = options?.rpId || window.location.hostname;
       const sub = document.createElement('div');
       sub.className = 'ks-modal-sub';
-      sub.textContent = `选择要用于验证 ${rpId} 的 Passkey 凭据`;
+      sub.textContent = t('pkSelectModalSub', { rpId });
       modal.append(title, sub);
 
       const listEl = document.createElement('div');
@@ -1376,27 +1393,27 @@
 
         const meta = document.createElement('div');
         meta.className = 'ks-dd-meta';
-        const t = document.createElement('div');
-        t.className = 'ks-dd-title';
-        t.textContent = pk.itemTitle || pk.rpName || pk.rpId;
+        const tEl = document.createElement('div');
+        tEl.className = 'ks-dd-title';
+        tEl.textContent = pk.itemTitle || pk.rpName || pk.rpId;
         const s = document.createElement('div');
         s.className = 'ks-dd-sub';
         s.textContent = pk.userName || pk.userDisplayName || pk.rpId;
-        meta.append(t, s);
+        meta.append(tEl, s);
         btn.appendChild(meta);
 
         const pill = document.createElement('span');
         pill.className = 'ks-pill';
-        pill.textContent = pk.reprompt ? '🔒 重验证' : 'Passkey';
+        pill.textContent = pk.reprompt ? t('repromptBadge') : 'Passkey';
         btn.appendChild(pill);
 
         btn.addEventListener('click', async () => {
           if (pk.reprompt) {
-            showToast('该 Passkey 启用了主密码重验证，请改用其他凭据或桌面端确认', 'warn');
+            showToast(t('pkErrRepromptAssert'), 'warn');
             return;
           }
           btn.disabled = true;
-          pill.textContent = '签名中…';
+          pill.textContent = t('pkPillSigning');
           const res = await sendMsg({
             type: 'PASSKEY_ASSERT',
             origin,
@@ -1406,10 +1423,10 @@
           });
           closeModal();
           if (res.ok && res.result?.handled && res.result?.credential) {
-            showToast(`已通过 Passkey 登录 ${pk.rpId}`, 'success');
+            showToast(t('pkToastSignedIn', { rpId: pk.rpId }), 'success');
             resolve({ handled: true, credential: res.result.credential });
           } else {
-            showToast(res.error || 'Passkey 签名失败', 'warn');
+            showToast(res.error || t('pkErrSign'), 'warn');
             resolve({ handled: false, fallback: true });
           }
         });
@@ -1424,7 +1441,7 @@
       const fbBtn = document.createElement('button');
       fbBtn.type = 'button';
       fbBtn.className = 'ks-btn ks-btn-sec';
-      fbBtn.textContent = '使用浏览器/设备 Passkey';
+      fbBtn.textContent = t('pkBtnBrowserDevice');
       fbBtn.addEventListener('click', () => {
         closeModal();
         resolve({ handled: false, fallback: true });
@@ -1433,7 +1450,7 @@
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
       cancelBtn.className = 'ks-btn ks-btn-ghost';
-      cancelBtn.textContent = '取消';
+      cancelBtn.textContent = t('btnCancel');
       cancelBtn.addEventListener('click', () => {
         closeModal();
         resolve({ handled: false, cancelled: true, errorName: 'NotAllowedError' });
@@ -1492,7 +1509,7 @@
           reply({
             handled: false,
             errorName: 'InvalidStateError',
-            error: '此账号已在 Keysmith 中注册过通行密钥'
+            error: t('pkErrDuplicate')
           });
           return;
         }

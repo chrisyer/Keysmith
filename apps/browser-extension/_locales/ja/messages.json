@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "Keysmith"
+  },
+  "extDesc": {
+    "message": "Keysmith — ゼロ知識パスワード管理、自動入力、パスキー認証アシスタント"
+  },
+  "cmdAutofill": {
+    "message": "現在のサイトに最適なログイン情報を自動入力"
+  }
+}

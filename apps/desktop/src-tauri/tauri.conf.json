@@ -40,7 +40,15 @@
     ],
     "resources": {
       "../../browser-extension/*": "browser-extension/",
-      "../../browser-extension/icons/*": "browser-extension/icons/"
+      "../../browser-extension/icons/*": "browser-extension/icons/",
+      "../../browser-extension/_locales/en/*": "browser-extension/_locales/en/",
+      "../../browser-extension/_locales/zh_CN/*": "browser-extension/_locales/zh_CN/",
+      "../../browser-extension/_locales/zh_TW/*": "browser-extension/_locales/zh_TW/",
+      "../../browser-extension/_locales/ja/*": "browser-extension/_locales/ja/",
+      "../../browser-extension/_locales/ko/*": "browser-extension/_locales/ko/",
+      "../../browser-extension/_locales/de/*": "browser-extension/_locales/de/",
+      "../../browser-extension/_locales/fr/*": "browser-extension/_locales/fr/",
+      "../../browser-extension/_locales/es/*": "browser-extension/_locales/es/"
     },
     "macOS": {
       "minimumSystemVersion": "13.0"

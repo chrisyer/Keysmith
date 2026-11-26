@@ -1,6 +1,6 @@
 import { ArrowRight, Fingerprint, Globe, KeyRound, Loader2, Lock, LogOut, UserPlus } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useI18n } from '../../i18n';
+import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
 import { isTauriRuntime, tauriClient } from '../../services/tauriClient';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -8,7 +8,7 @@ import { useVaultStore } from '../../stores/vaultStore';
 
 export function LockScreen() {
   const inTauri = isTauriRuntime();
-  const { dict, locale, setLanguageMode, fmt } = useI18n();
+  const { dict, languageMode, setLanguageMode, fmt } = useI18n();
 
   const accountId = useSessionStore((s) => s.accountId);
   const email = useSessionStore((s) => s.email);
@@ -135,14 +135,22 @@ export function LockScreen() {
     <div className="h-dvh w-full flex flex-col items-center justify-center bg-[var(--bg-sidebar)] p-6">
       {inTauri && <div data-tauri-drag-region className="fixed top-0 left-0 right-0 h-9" />}
       <div className="relative w-full max-w-[360px] rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-xl p-7 flex flex-col items-center text-center">
-        <button
-          type="button"
-          onClick={() => setLanguageMode(locale === 'zh-CN' ? 'en' : 'zh-CN')}
-          className="absolute top-3.5 right-3.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-md hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[10.5px] font-medium text-[var(--text-secondary)] cursor-pointer"
-        >
+        <label className="absolute top-3.5 right-3.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-md hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[10.5px] font-medium text-[var(--text-secondary)] cursor-pointer">
           <Globe size={11} />
-          {locale === 'zh-CN' ? 'EN' : '中文'}
-        </button>
+          <select
+            aria-label={dict.settings.languageLabel}
+            value={languageMode}
+            onChange={(e) => setLanguageMode(e.target.value as LanguageMode)}
+            className="bg-transparent focus:outline-none cursor-pointer text-[10.5px] font-medium text-[var(--text-secondary)]"
+          >
+            <option value="system">{dict.settings.languageSystem}</option>
+            {SUPPORTED_LOCALES.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                {loc.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div className="relative">
           <div className="w-14 h-14 rounded-full bg-[var(--accent-primary)] text-white text-lg font-semibold flex items-center justify-center">

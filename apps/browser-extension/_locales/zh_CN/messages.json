@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "Keysmith"
+  },
+  "extDesc": {
+    "message": "Keysmith — 零知识密码管理、网页自动填充与 Passkey 认证助手"
+  },
+  "cmdAutofill": {
+    "message": "自动填充当前网站的最佳匹配登录信息"
+  }
+}

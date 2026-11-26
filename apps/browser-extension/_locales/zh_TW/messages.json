@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "Keysmith"
+  },
+  "extDesc": {
+    "message": "Keysmith — 零知識密碼管理、網頁自動填入與 Passkey 驗證助手"
+  },
+  "cmdAutofill": {
+    "message": "自動填入目前網站的最佳相符登入資訊"
+  }
+}

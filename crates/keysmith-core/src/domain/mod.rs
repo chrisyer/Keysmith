@@ -661,7 +661,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            language: "system".to_string(),
+            language: "en".to_string(),
             theme: "system".to_string(),
             custom_shortcuts: HashMap::new(),
             last_server_url: None,

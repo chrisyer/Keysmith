@@ -247,7 +247,7 @@ async function invokeCore<T>(cmd: string, args?: Record<string, unknown>): Promi
         twoFactorRequired?: boolean;
         twoFactorProviders?: number[];
       };
-      throw new KeysmithIpcError(obj.message || '操作失败', {
+      throw new KeysmithIpcError(obj.message || 'Operation failed', {
         code: obj.code,
         twoFactorRequired: obj.twoFactorRequired,
         twoFactorProviders: obj.twoFactorProviders,
@@ -723,8 +723,8 @@ class KeysmithPrototypeClient implements KeysmithClient {
       id: 'send-demo-1',
       accessId: 'demo-send-api-token',
       sendType: 'text',
-      name: 'Staging Webhook 临时密钥',
-      notes: '仅发给前端同事用于本地联调',
+      name: 'Staging Webhook Temp Key',
+      notes: 'For local frontend integration testing only',
       text: 'whsec_demo_9f4b8c2a7d1e6f3a0b5c8d2e',
       hidden: true,
       shareUrl: 'http://localhost:8080/#/send/demo-send-api-token/c2VuZC1kZW1vLXNlZWQxNg',
@@ -741,7 +741,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
       id: 'send-demo-2',
       accessId: 'demo-send-backup-doc',
       sendType: 'file',
-      name: '恢复码加密包',
+      name: 'Recovery Codes Bundle',
       fileName: 'recovery-codes.txt',
       fileSize: 2048,
       fileSizeName: '2.0 KB',
@@ -841,7 +841,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
   }): Promise<SessionState> {
     await new Promise((r) => setTimeout(r, 320));
     if (!params.email.trim() || !params.masterPassword) {
-      throw new Error('请输入邮箱与主密码');
+      throw new Error('Please enter email and master password');
     }
     this.demoMasterPassword = params.masterPassword;
     this.session = {
@@ -865,7 +865,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
   }): Promise<SessionState> {
     await new Promise((r) => setTimeout(r, 380));
     if (!params.email.trim() || params.masterPassword.length < 6) {
-      throw new Error('请填写有效邮箱与至少 6 位主密码');
+      throw new Error('Please enter a valid email and master password (min 6 characters)');
     }
     this.demoMasterPassword = params.masterPassword;
     this.session = {
@@ -900,7 +900,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
   async sessionUnlockPassword(masterPassword: string): Promise<SessionState> {
     await new Promise((r) => setTimeout(r, 140));
     if (masterPassword !== this.demoMasterPassword) {
-      throw new Error('主密码校验失败，请重试（演示密码：keysmith）');
+      throw new Error('Incorrect master password (demo password: keysmith)');
     }
     this.session = { ...this.session, status: 'Unlocked' };
     this.emit('session:state_changed', { status: 'Unlocked', reason: 'password' });
@@ -933,7 +933,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
       (credentialId ? this.accountPasskeys.find((c) => c.id === credentialId) : undefined) ??
       this.accountPasskeys[0];
     if (!cred) {
-      throw new Error('未找到可用的账户通行密钥，请使用主密码登录');
+      throw new Error('No account passkey found. Please sign in with your master password.');
     }
     cred.counter += 1;
     cred.lastUsedAt = Date.now();
@@ -971,7 +971,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
       credentialDeviceType: deviceType,
       credentialBackedUp: deviceType === 'multiDevice',
       aaguid: deviceType === 'multiDevice' ? APPLE_TOUCH_ID_AAGUID : YUBIKEY_5_AAGUID,
-      name: name.trim() || (deviceType === 'multiDevice' ? '新平台通行密钥' : '外置硬件安全密钥'),
+      name: name.trim() || (deviceType === 'multiDevice' ? 'New Platform Passkey' : 'Hardware Security Key'),
       transports: deviceType === 'multiDevice' ? ['internal', 'hybrid'] : ['usb', 'nfc'],
       registeredAt: Date.now(),
       counter: 0,
@@ -983,7 +983,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async accountPasskeyRename(id: string, name: string): Promise<AccountPasskey> {
     const target = this.accountPasskeys.find((c) => c.id === id);
-    if (!target) throw new Error('通行密钥不存在');
+    if (!target) throw new Error('Passkey not found');
     target.name = name.trim() || target.name;
     return structuredClone(target);
   }
@@ -1039,7 +1039,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async vaultCreate(name: string, color = '#0572EC', icon = 'folder'): Promise<Vault> {
     const trimmed = name.trim();
-    if (!trimmed) throw new Error('保险库名称不能为空');
+    if (!trimmed) throw new Error('Vault name cannot be empty');
     const created: Omit<Vault, 'itemCount'> = {
       id: makeId('vault'),
       name: trimmed,
@@ -1055,7 +1055,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async vaultRename(id: string, name: string): Promise<Vault> {
     const v = this.vaults.find((item) => item.id === id);
-    if (!v) throw new Error('保险库不存在');
+    if (!v) throw new Error('Vault not found');
     v.name = name.trim() || v.name;
     this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [], deletedItemIds: [] });
     return {
@@ -1066,7 +1066,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async vaultDelete(id: string): Promise<void> {
     const target = this.vaults.find((v) => v.id === id);
-    if (!target || target.isDefault) throw new Error('默认保险库不可删除');
+    if (!target || target.isDefault) throw new Error('Default vault cannot be deleted');
     const fallback = this.vaults.find((v) => v.isDefault) ?? this.vaults[0];
     this.items = this.items.map((it) => (it.vaultId === id ? { ...it, vaultId: fallback.id } : it));
     this.vaults = this.vaults.filter((v) => v.id !== id);
@@ -1089,7 +1089,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
         for (const entry of parsed.items ?? []) {
           await this.itemCreate({
             vaultId: fallbackVault,
-            title: entry.name?.trim() || '导入条目',
+            title: entry.name?.trim() || 'Imported Item',
             favorite: false,
             category: 'login',
             tags: ['imported'],
@@ -1103,7 +1103,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
           importedItems += 1;
         }
       } catch {
-        warnings.push('JSON 解析失败，请检查文件格式');
+        warnings.push('Failed to parse JSON. Please verify the file format.');
       }
     } else if (format === 'chrome_csv' || format === 'bitwarden_csv') {
       const lines = data.split(/\r?\n/).filter((l) => l.trim());
@@ -1112,7 +1112,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
         if (cols.length < 2) continue;
         await this.itemCreate({
           vaultId: fallbackVault,
-          title: cols[0]?.replace(/^"|"$/g, '').trim() || '导入条目',
+          title: cols[0]?.replace(/^"|"$/g, '').trim() || 'Imported Item',
           favorite: false,
           category: 'login',
           tags: ['imported'],
@@ -1122,8 +1122,8 @@ class KeysmithPrototypeClient implements KeysmithClient {
               id: makeId('sec'),
               title: '',
               fields: [
-                { id: makeId('f'), label: '用户名', fieldType: 'text', value: cols[2]?.replace(/^"|"$/g, '') ?? '', sensitive: false, copyable: true, purpose: 'username' },
-                { id: makeId('f'), label: '密码', fieldType: 'password', value: cols[3]?.replace(/^"|"$/g, '') ?? '', sensitive: true, copyable: true, purpose: 'password' },
+                { id: makeId('f'), label: 'Username', fieldType: 'text', value: cols[2]?.replace(/^"|"$/g, '') ?? '', sensitive: false, copyable: true, purpose: 'username' },
+                { id: makeId('f'), label: 'Password', fieldType: 'password', value: cols[3]?.replace(/^"|"$/g, '') ?? '', sensitive: true, copyable: true, purpose: 'password' },
               ],
             },
           ],
@@ -1135,7 +1135,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
         importedItems += 1;
       }
     } else {
-      warnings.push('浏览器预览模式暂不支持二进制 .1pux 解压，请在 macOS 客户端中导入');
+      warnings.push('Binary .1pux extraction is not supported in browser preview mode. Please import in the desktop app.');
     }
 
     return { importedVaults: 0, importedItems, skippedItems: 0, warnings };
@@ -1147,7 +1147,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     _exportPassphrase?: string,
   ): Promise<ExportResult> {
     if (masterPassword !== this.demoMasterPassword) {
-      throw new Error('主密码验证失败');
+      throw new Error('Master password verification failed');
     }
     const active = this.items.filter((i) => !i.deletedAt);
     const stamp = new Date().toISOString().slice(0, 10);
@@ -1306,7 +1306,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     const created: ItemDetail = {
       id: makeId('item'),
       vaultId: draft.vaultId,
-      title: draft.title.trim() || '未命名条目',
+      title: draft.title.trim() || 'Untitled Item',
       favorite: draft.favorite,
       archived: Boolean(draft.archived),
       reprompt: Boolean(draft.reprompt),
@@ -1332,7 +1332,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async itemUpdate(id: string, draft: ItemDraft): Promise<ItemDetail> {
     const idx = this.items.findIndex((i) => i.id === id);
-    if (idx === -1) throw new Error('条目不存在');
+    if (idx === -1) throw new Error('Item not found');
     const prev = this.items[idx];
     const now = new Date().toISOString();
 
@@ -1379,7 +1379,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async itemUpdateWatchtowerFlags(id: string, flags: Partial<WatchtowerFlags>): Promise<ItemDetail> {
     const item = this.items.find((i) => i.id === id);
-    if (!item) throw new Error('条目不存在');
+    if (!item) throw new Error('Item not found');
     item.watchtower = { ...item.watchtower, ...flags };
     item.updatedAt = new Date().toISOString();
     this.emit('sync:data_changed', { vaultChanged: false, updatedItemIds: [id], deletedItemIds: [] });
@@ -1388,7 +1388,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async itemToggleFavorite(id: string, favorite: boolean): Promise<ItemDetail> {
     const item = this.items.find((i) => i.id === id);
-    if (!item) throw new Error('条目不存在');
+    if (!item) throw new Error('Item not found');
     item.favorite = favorite;
     item.updatedAt = new Date().toISOString();
     this.emit('sync:data_changed', { vaultChanged: false, updatedItemIds: [id], deletedItemIds: [] });
@@ -1397,12 +1397,12 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async itemDuplicate(id: string): Promise<ItemDetail> {
     const source = this.items.find((i) => i.id === id);
-    if (!source) throw new Error('条目不存在');
+    if (!source) throw new Error('Item not found');
     const now = new Date().toISOString();
     const copy: ItemDetail = {
       ...structuredClone(source),
       id: makeId('item'),
-      title: `${source.title} (副本)`,
+      title: `${source.title} (Copy)`,
       favorite: false,
       archived: false,
       attachments: [],
@@ -1417,7 +1417,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async itemSetArchived(id: string, archived: boolean): Promise<ItemDetail> {
     const item = this.items.find((i) => i.id === id);
-    if (!item) throw new Error('条目不存在');
+    if (!item) throw new Error('Item not found');
     item.archived = archived;
     item.updatedAt = new Date().toISOString();
     this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [id], deletedItemIds: [] });
@@ -1509,8 +1509,8 @@ class KeysmithPrototypeClient implements KeysmithClient {
   }
 
   async sendCreateText(input: SendCreateTextInput): Promise<SendItem> {
-    if (!input.name.trim()) throw new Error('Send 名称不能为空');
-    if (!input.text) throw new Error('Send 文本内容不能为空');
+    if (!input.name.trim()) throw new Error('Send name cannot be empty');
+    if (!input.text) throw new Error('Send text content cannot be empty');
     const now = new Date().toISOString();
     const id = makeId('send');
     const accessId = makeId('acc').replace(/_/g, '');
@@ -1538,11 +1538,11 @@ class KeysmithPrototypeClient implements KeysmithClient {
   }
 
   async sendCreateFile(input: SendCreateFileInput): Promise<SendItem> {
-    if (!input.name.trim()) throw new Error('Send 名称不能为空');
-    if (!input.fileName.trim()) throw new Error('文件名不能为空');
+    if (!input.name.trim()) throw new Error('Send name cannot be empty');
+    if (!input.fileName.trim()) throw new Error('File name cannot be empty');
     const raw = input.dataBase64.includes('base64,') ? input.dataBase64.split('base64,')[1] : input.dataBase64;
     const size = estimateBase64Bytes(raw);
-    if (size > 10 * 1024 * 1024) throw new Error('文件大小超过 10 MB 上限');
+    if (size > 10 * 1024 * 1024) throw new Error('File exceeds the 10 MB limit');
     const now = new Date().toISOString();
     const id = makeId('send');
     const accessId = makeId('acc').replace(/_/g, '');
@@ -1573,7 +1573,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async sendUpdate(id: string, input: SendUpdateInput): Promise<SendItem> {
     const idx = this.sends.findIndex((s) => s.id === id);
-    if (idx === -1) throw new Error('Send 不存在');
+    if (idx === -1) throw new Error('Send not found');
     const prev = this.sends[idx];
     const updated: SendItem = {
       ...prev,
@@ -1595,7 +1595,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async sendRemovePassword(id: string): Promise<SendItem> {
     const target = this.sends.find((s) => s.id === id);
-    if (!target) throw new Error('Send 不存在');
+    if (!target) throw new Error('Send not found');
     target.hasPassword = false;
     target.revisionDate = new Date().toISOString();
     return structuredClone(target);
@@ -1609,7 +1609,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async attachmentUpload(itemId: string, fileName: string, dataBase64: string): Promise<ItemAttachment> {
     const item = this.items.find((i) => i.id === itemId);
-    if (!item) throw new Error('条目不存在');
+    if (!item) throw new Error('Item not found');
     const id = makeId('att');
     const size = estimateBase64Bytes(dataBase64);
     const att: ItemAttachment = {
@@ -1633,7 +1633,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
   async attachmentDownload(itemId: string, attachmentId: string): Promise<AttachmentDownloadResult> {
     const stored = this.attachmentPayloads.get(`${itemId}:${attachmentId}`);
     if (!stored) {
-      throw new Error('未找到本地附件内容');
+      throw new Error('Local attachment data not found');
     }
     return structuredClone(stored);
   }
@@ -1677,7 +1677,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
   }
 
   async totpParseQrImage(_imageBase64: string): Promise<string> {
-    throw new Error('浏览器预览模式暂不支持离线识别二维码，请在 macOS 客户端中使用');
+    throw new Error('Offline QR code recognition is not supported in browser preview mode. Please use the desktop app.');
   }
 
   async generatorGenerate(options: GeneratorOptions): Promise<GeneratorResult> {
@@ -1786,7 +1786,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
   }
 
   async clipboardClearNow(): Promise<void> {
-    const label = this.clipboardState?.label ?? '敏感内容';
+    const label = this.clipboardState?.label ?? 'Sensitive data';
     if (this.clipboardTimer !== null) {
       window.clearInterval(this.clipboardTimer);
       this.clipboardTimer = null;

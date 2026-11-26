@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "Keysmith"
+  },
+  "extDesc": {
+    "message": "Keysmith — Gestor de contraseñas de conocimiento cero, autocompletado web y asistente de Passkey"
+  },
+  "cmdAutofill": {
+    "message": "Autocompletar el inicio de sesión más adecuado para el sitio actual"
+  }
+}

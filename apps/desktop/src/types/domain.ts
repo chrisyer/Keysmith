@@ -413,7 +413,16 @@ export interface AppUpdateInfo {
   checkedAt?: string;
 }
 
-export type LanguageMode = 'system' | 'zh-CN' | 'en';
+export type LanguageMode =
+  | 'system'
+  | 'en'
+  | 'zh-CN'
+  | 'zh-TW'
+  | 'ja'
+  | 'ko'
+  | 'de'
+  | 'fr'
+  | 'es';
 
 export interface AppSettings {
   language: LanguageMode;

@@ -281,7 +281,16 @@ export function GeneratorPanel({ onUseValue, onClose, compact = false }: Generat
                   />
                 </div>
                 <span className="text-[10px] font-medium text-[var(--text-secondary)] shrink-0">
-                  {result.strength.label} · {result.strength.entropyBits} bits
+                  {(
+                    [
+                      dict.generator.strength0,
+                      dict.generator.strength1,
+                      dict.generator.strength2,
+                      dict.generator.strength3,
+                      dict.generator.strength4,
+                    ] as const
+                  )[result.strength.score] ?? result.strength.label}{' '}
+                  · {result.strength.entropyBits} bits
                 </span>
               </div>
             )}

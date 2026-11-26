@@ -63,27 +63,16 @@ let currentDetailItem = null;
 let totpInterval = null;
 let toastTimer = null;
 
-const CATEGORY_LABELS = {
-  login: '登录',
-  passkey: 'Passkey',
-  credit_card: '银行卡',
-  identity: '身份',
-  secure_note: '安全笔记',
-  password: '密码',
-  api_credential: 'API 凭据',
-  database: '数据库',
-  server: '服务器',
-  ssh_key: 'SSH 密钥',
-  software_license: '软件许可',
-  bank_account: '银行账户',
-  crypto_wallet: '加密钱包',
-  wifi_router: 'Wi-Fi',
-  passport: '护照',
-  driver_license: '驾照',
-  membership: '会员卡',
-  medical_record: '医疗记录',
-  document: '文档'
-};
+const langSelectEl = document.getElementById('lang-select');
+const i18n = globalThis.KeysmithI18n;
+
+function t(key, vars) {
+  return i18n ? i18n.t(key, vars) : key;
+}
+
+function getCategoryLabel(category) {
+  return i18n ? i18n.categoryLabel(category) : t('itemLabel');
+}
 
 function showToast(text) {
   toastEl.textContent = text;
@@ -96,16 +85,16 @@ function showToast(text) {
 
 async function copyText(text, label) {
   if (!text) {
-    showToast('没有可复制的内容');
+    showToast(t('toastNothingToCopy'));
     return;
   }
   try {
     await navigator.clipboard.writeText(text);
   } catch {
-    // Desktop clipboard_copy_secret below still writes to system clipboard
+    // Desktop clipboard_copy still writes to system clipboard
   }
   await sendBg({ type: 'COPY_SECRET', value: text, label, sensitive: true });
-  showToast(`已复制${label}`);
+  showToast(t('toastCopied', { label }));
 }
 
 function sendBg(msg) {
@@ -133,11 +122,11 @@ function extractHostname(url) {
   try {
     const parsed = new URL(url);
     if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      return parsed.hostname || '当前标签页';
+      return parsed.hostname || t('domainCurrentPage');
     }
-    return '非网页标签';
+    return t('domainNonWeb');
   } catch {
-    return '当前标签页';
+    return t('domainCurrentPage');
   }
 }
 
@@ -163,18 +152,18 @@ function renderStatus(connected, status) {
   statusBadge.className = 'status-badge';
   if (!connected) {
     statusBadge.classList.add('status-disconnected');
-    statusBadge.textContent = '未连接';
+    statusBadge.textContent = t('statusDisconnected');
     return;
   }
   if (status === 'Unlocked') {
     statusBadge.classList.add('status-unlocked');
-    statusBadge.textContent = '已解锁';
+    statusBadge.textContent = t('statusUnlocked');
   } else if (status === 'Locked') {
     statusBadge.classList.add('status-locked');
-    statusBadge.textContent = '已锁定';
+    statusBadge.textContent = t('statusLocked');
   } else {
     statusBadge.classList.add('status-disconnected');
-    statusBadge.textContent = status || '未登录';
+    statusBadge.textContent = t('statusSignedOut');
   }
 }
 
@@ -201,11 +190,11 @@ function switchTab(name) {
 
 async function autofillSummaryItem(item, isVaultSummary = false) {
   if (!activeTab?.id || !isHttpUrl(activeTab?.url || '')) {
-    showToast('当前标签页不支持网页填充');
+    showToast(t('toastTabUnsupported'));
     return;
   }
   if (item.reprompt) {
-    showToast('该条目已启用重验证，请在桌面端查看');
+    showToast(t('toastRepromptDesktop'));
     await sendBg({ type: 'FOCUS_DESKTOP_ITEM', itemId: item.id });
     return;
   }
@@ -214,7 +203,7 @@ async function autofillSummaryItem(item, isVaultSummary = false) {
   if (isVaultSummary || (!item.password && item.hasPassword)) {
     const g = await sendBg({ type: 'ITEM_GET', itemId: item.id });
     if (!g.ok || !g.result) {
-      showToast(g.error || '读取凭据失败');
+      showToast(g.error || t('toastReadCredError'));
       return;
     }
     detail = g.result;
@@ -222,9 +211,9 @@ async function autofillSummaryItem(item, isVaultSummary = false) {
 
   let totp = detail.totp || '';
   if (!totp && (detail.hasTotp || item.hasTotp)) {
-    const t = await sendBg({ type: 'TOTP', itemId: item.id });
-    if (t.ok && t.result?.code) {
-      totp = t.result.code;
+    const tRes = await sendBg({ type: 'TOTP', itemId: item.id });
+    if (tRes.ok && tRes.result?.code) {
+      totp = tRes.result.code;
     }
   }
 
@@ -236,10 +225,10 @@ async function autofillSummaryItem(item, isVaultSummary = false) {
     totp
   });
   if (res.ok) {
-    showToast('已自动填充到页面');
+    showToast(t('toastAutofilled'));
     setTimeout(() => window.close(), 420);
   } else {
-    showToast(res.error || '页面未检测到登录输入框');
+    showToast(res.error || t('toastNoLoginFields'));
   }
 }
 
@@ -250,7 +239,7 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
   detailViewEl.classList.remove('hidden');
   detailBodyEl.textContent = '';
 
-  const fallbackTitle = fallbackSummary?.title || cardOrIdent?.data?.title || '加载中...';
+  const fallbackTitle = fallbackSummary?.title || cardOrIdent?.data?.title || t('detailLoadingTitle');
   detailTitleEl.textContent = fallbackTitle;
   detailSubtitleEl.textContent =
     fallbackSummary?.username ||
@@ -259,8 +248,12 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
     cardOrIdent?.data?.fullName ||
     '';
   detailCatBadgeEl.textContent =
-    CATEGORY_LABELS[fallbackSummary?.category] ||
-    (cardOrIdent?.kind === 'card' ? '银行卡' : cardOrIdent?.kind === 'identity' ? '身份' : '条目');
+    (fallbackSummary?.category ? getCategoryLabel(fallbackSummary.category) : null) ||
+    (cardOrIdent?.kind === 'card'
+      ? t('cardLabel')
+      : cardOrIdent?.kind === 'identity'
+        ? t('identityLabel')
+        : t('itemLabel'));
 
   if (fallbackSummary?.reprompt || cardOrIdent?.data?.reprompt) {
     currentDetailItem = { id: itemId, reprompt: true };
@@ -271,7 +264,7 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
 
   const loadingCard = document.createElement('div');
   loadingCard.className = 'card empty-state';
-  loadingCard.textContent = '正在加载条目详情...';
+  loadingCard.textContent = t('detailLoadingCard');
   detailBodyEl.appendChild(loadingCard);
 
   const resp = await sendBg({ type: 'ITEM_GET', itemId });
@@ -279,13 +272,13 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
 
   if (!resp.ok || !resp.result) {
     currentDetailItem = { id: itemId, reprompt: true };
-    if ((resp.error || '').includes('重验证')) {
+    if ((resp.error || '').includes('重验证') || (resp.error || '').toLowerCase().includes('reprompt')) {
       detailFillBtn.classList.add('hidden');
       renderRepromptDetailCard(itemId);
     } else {
       const errCard = document.createElement('div');
       errCard.className = 'card empty-state';
-      errCard.textContent = resp.error || '加载条目详情失败';
+      errCard.textContent = resp.error || t('detailLoadError');
       detailBodyEl.appendChild(errCard);
     }
     return;
@@ -293,9 +286,9 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
 
   const detail = resp.result;
   currentDetailItem = detail;
-  detailTitleEl.textContent = detail.title || '未命名条目';
+  detailTitleEl.textContent = detail.title || t('unnamedItem');
   detailSubtitleEl.textContent = detail.username || detail.subtitle || fallbackSummary?.subtitle || '';
-  detailCatBadgeEl.textContent = CATEGORY_LABELS[detail.category] || '条目';
+  detailCatBadgeEl.textContent = getCategoryLabel(detail.category);
 
   const canFillLogin = Boolean(detail.username || detail.password || detail.hasTotp);
   const canFillCard = detail.category === 'credit_card' || cardOrIdent?.kind === 'card';
@@ -303,7 +296,7 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
   detailFillBtn.classList.toggle('hidden', !canFillLogin && !canFillCard && !canFillIdent);
   detailFillBtn.onclick = async () => {
     if (!activeTab?.id || !isHttpUrl(activeTab?.url || '')) {
-      showToast('当前标签页不支持网页填充');
+      showToast(t('toastTabUnsupported'));
       return;
     }
     if (cardOrIdent?.kind === 'card') {
@@ -312,7 +305,7 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
         tabId: activeTab.id,
         card: cardOrIdent.data
       });
-      showToast(res.ok ? '银行卡已填充' : res.error || '未找到银行卡字段');
+      showToast(res.ok ? t('toastCardFilled') : res.error || t('toastNoCardFields'));
       return;
     }
     if (cardOrIdent?.kind === 'identity') {
@@ -321,7 +314,7 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
         tabId: activeTab.id,
         identity: cardOrIdent.data
       });
-      showToast(res.ok ? '身份信息已填充' : res.error || '未找到身份字段');
+      showToast(res.ok ? t('toastIdentFilled') : res.error || t('toastNoIdentFields'));
       return;
     }
     await autofillSummaryItem(detail, false);
@@ -355,7 +348,7 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
       head.className = 'detail-field-head';
       const lbl = document.createElement('span');
       lbl.className = 'detail-field-label';
-      lbl.textContent = field.label || '字段';
+      lbl.textContent = field.label || t('fieldDefault');
 
       const actions = document.createElement('div');
       actions.className = 'detail-field-actions';
@@ -377,10 +370,10 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
         const toggleBtn = document.createElement('button');
         toggleBtn.type = 'button';
         toggleBtn.className = 'btn btn-secondary btn-sm';
-        toggleBtn.textContent = '显示';
+        toggleBtn.textContent = t('btnShow');
         toggleBtn.addEventListener('click', () => {
           revealed = !revealed;
-          toggleBtn.textContent = revealed ? '隐藏' : '显示';
+          toggleBtn.textContent = revealed ? t('btnHide') : t('btnShow');
           valEl.textContent = revealed ? field.value : '••••••••••••';
         });
         actions.appendChild(toggleBtn);
@@ -389,8 +382,8 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
       const copyBtn = document.createElement('button');
       copyBtn.type = 'button';
       copyBtn.className = 'btn btn-secondary btn-sm';
-      copyBtn.textContent = '复制';
-      copyBtn.addEventListener('click', () => void copyText(field.value, field.label || '字段'));
+      copyBtn.textContent = t('btnCopy');
+      copyBtn.addEventListener('click', () => void copyText(field.value, field.label || t('fieldDefault')));
       actions.appendChild(copyBtn);
 
       head.append(lbl, actions);
@@ -407,7 +400,7 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
     card.className = 'card';
     const st = document.createElement('div');
     st.className = 'detail-section-title';
-    st.textContent = `通行密钥 (Passkey · ${passkeys.length})`;
+    st.textContent = t('passkeysSectionTitle', { count: passkeys.length });
     card.appendChild(st);
 
     for (const pk of passkeys) {
@@ -420,11 +413,14 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
       lbl.textContent = pk.rpId || 'Passkey';
       const pill = document.createElement('span');
       pill.className = 'mini-badge';
-      pill.textContent = `签名 ${pk.signCount || 0} 次`;
+      pill.textContent = t('passkeySignCount', { count: pk.signCount || 0 });
       head.append(lbl, pill);
       const val = document.createElement('div');
       val.className = 'detail-field-value';
-      val.textContent = `${pk.userName || pk.userDisplayName || '用户'} · 创建于 ${(pk.createdAt || '').slice(0, 10)}`;
+      val.textContent = t('passkeyUserCreated', {
+        user: pk.userName || pk.userDisplayName || t('userDefault'),
+        date: (pk.createdAt || '').slice(0, 10)
+      });
       row.append(head, val);
       card.appendChild(row);
     }
@@ -438,7 +434,7 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
     card.className = 'card';
     const st = document.createElement('div');
     st.className = 'detail-section-title';
-    st.textContent = '关联网址';
+    st.textContent = t('urlsSectionTitle');
     card.appendChild(st);
 
     for (const u of urls) {
@@ -448,14 +444,14 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
       head.className = 'detail-field-head';
       const lbl = document.createElement('span');
       lbl.className = 'detail-field-label';
-      lbl.textContent = u.label || '网站地址';
+      lbl.textContent = u.label || t('urlDefaultLabel');
       const actions = document.createElement('div');
       actions.className = 'detail-field-actions';
       if (isHttpUrl(u.uri)) {
         const openBtn = document.createElement('button');
         openBtn.type = 'button';
         openBtn.className = 'btn btn-secondary btn-sm';
-        openBtn.textContent = '打开';
+        openBtn.textContent = t('btnOpen');
         openBtn.addEventListener('click', () => {
           chrome.tabs.create({ url: u.uri });
         });
@@ -464,8 +460,8 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
       const copyBtn = document.createElement('button');
       copyBtn.type = 'button';
       copyBtn.className = 'btn btn-secondary btn-sm';
-      copyBtn.textContent = '复制';
-      copyBtn.addEventListener('click', () => void copyText(u.uri, '网址'));
+      copyBtn.textContent = t('btnCopy');
+      copyBtn.addEventListener('click', () => void copyText(u.uri, t('labelUrl')));
       actions.appendChild(copyBtn);
       head.append(lbl, actions);
       const val = document.createElement('div');
@@ -485,12 +481,12 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
     head.className = 'detail-field-head';
     const st = document.createElement('div');
     st.className = 'detail-section-title';
-    st.textContent = '备注';
+    st.textContent = t('notesSectionTitle');
     const copyBtn = document.createElement('button');
     copyBtn.type = 'button';
     copyBtn.className = 'btn btn-secondary btn-sm';
-    copyBtn.textContent = '复制';
-    copyBtn.addEventListener('click', () => void copyText(detail.notes, '备注'));
+    copyBtn.textContent = t('btnCopy');
+    copyBtn.addEventListener('click', () => void copyText(detail.notes, t('labelNotes')));
     head.append(st, copyBtn);
     const body = document.createElement('div');
     body.className = 'detail-field-value';
@@ -505,14 +501,14 @@ function renderRepromptDetailCard(itemId) {
   card.className = 'card';
   const title = document.createElement('div');
   title.className = 'card-title';
-  title.textContent = '此条目已开启主密码重验证保护';
+  title.textContent = t('repromptCardTitle');
   const desc = document.createElement('p');
   desc.className = 'card-desc';
-  desc.textContent = '出于零知识安全隔离策略，开启重验证的条目需在 Keysmith 桌面端验证后查看详情或复制密钥。';
+  desc.textContent = t('repromptCardDesc');
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'btn btn-primary btn-sm';
-  btn.textContent = '在 Keysmith 桌面端验证并查看';
+  btn.textContent = t('repromptCardBtn');
   btn.addEventListener('click', () => void sendBg({ type: 'FOCUS_DESKTOP_ITEM', itemId }));
   card.append(title, desc, btn);
   detailBodyEl.appendChild(card);
@@ -523,7 +519,7 @@ function renderLiveTotpCard(itemId) {
   card.className = 'card';
   const st = document.createElement('div');
   st.className = 'detail-section-title';
-  st.textContent = '两步验证 (2FA / TOTP)';
+  st.textContent = t('totpSectionTitle');
 
   const row = document.createElement('div');
   row.className = 'totp-row';
@@ -538,7 +534,7 @@ function renderLiveTotpCard(itemId) {
   const copyBtn = document.createElement('button');
   copyBtn.type = 'button';
   copyBtn.className = 'btn btn-secondary btn-sm';
-  copyBtn.textContent = '复制';
+  copyBtn.textContent = t('btnCopy');
   let latestCode = '';
   copyBtn.addEventListener('click', () => void copyText(latestCode, `2FA (${latestCode})`));
 
@@ -575,21 +571,20 @@ function renderPrivacyStatus(resp) {
   takeoverStatusEl.className = 'takeover-status';
   if (!resp || !resp.supported) {
     takeoverStatusEl.classList.add('warn');
-    takeoverStatusEl.textContent = '当前浏览器不支持 chrome.privacy 控制接口。';
+    takeoverStatusEl.textContent = t('takeoverUnsupported');
     return;
   }
   takeoverToggleEl.checked = Boolean(resp.enabled);
   const level = resp.levelOfControl;
   if (level === 'controlled_by_this_extension') {
     takeoverStatusEl.classList.add('ok');
-    takeoverStatusEl.textContent = '已由 Keysmith 接管（Chrome 自带保存密码与 Passkey 提示已关闭）。';
+    takeoverStatusEl.textContent = t('takeoverControlledSelf');
   } else if (level === 'controlled_by_other_extensions') {
     takeoverStatusEl.classList.add('warn');
-    takeoverStatusEl.textContent =
-      '当前被其他扩展（例如 Bitwarden）控制；请关闭对方扩展的「默认密码管理器」或将其停用后再切换本开关。';
+    takeoverStatusEl.textContent = t('takeoverControlledOther');
   } else {
     takeoverStatusEl.classList.add('muted');
-    takeoverStatusEl.textContent = '未接管（Chrome 自带密码提示保持开启）。';
+    takeoverStatusEl.textContent = t('takeoverOff');
   }
 }
 
@@ -606,7 +601,7 @@ function renderNeverSaveOrigins(origins) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn btn-secondary btn-sm';
-    btn.textContent = '移除';
+    btn.textContent = t('btnRemove');
     btn.addEventListener('click', async () => {
       const rem = await sendBg({ type: 'NEVER_SAVE_REMOVE', origin: orig });
       if (Array.isArray(rem.origins)) {
@@ -629,6 +624,9 @@ async function openSettingsView() {
   hideAllMainViews();
   settingsViewEl.classList.remove('hidden');
   settingsExtIdEl.textContent = chrome.runtime.id;
+  if (langSelectEl && i18n) {
+    langSelectEl.value = i18n.getLanguageMode();
+  }
   const pRes = await sendBg({ type: 'GET_PRIVACY_CONTROL' });
   renderPrivacyStatus(pRes);
   await refreshNeverSaveList();
@@ -642,7 +640,7 @@ function createItemCard(item, isVaultSummary = false) {
 
   const top = document.createElement('div');
   top.className = 'item-top';
-  top.title = '点击查看详情';
+  top.title = t('clickViewDetails');
   top.addEventListener('click', () => {
     void openDetailView(item.id, item, null);
   });
@@ -652,11 +650,11 @@ function createItemCard(item, isVaultSummary = false) {
 
   const titleEl = document.createElement('div');
   titleEl.className = 'item-title';
-  titleEl.textContent = item.title || '未命名条目';
+  titleEl.textContent = item.title || t('unnamedItem');
 
   const userEl = document.createElement('div');
   userEl.className = 'item-username';
-  userEl.textContent = item.username || item.subtitle || '点击查看详情';
+  userEl.textContent = item.username || item.subtitle || t('clickViewDetails');
 
   meta.append(titleEl, userEl);
   top.appendChild(meta);
@@ -666,7 +664,7 @@ function createItemCard(item, isVaultSummary = false) {
   if (item.reprompt) {
     const b = document.createElement('span');
     b.className = 'mini-badge';
-    b.textContent = '🔒 重验证';
+    b.textContent = t('repromptBadge');
     badges.appendChild(b);
   }
   if (item.hasPasskey) {
@@ -694,22 +692,22 @@ function createItemCard(item, isVaultSummary = false) {
 
   const fillBtn = document.createElement('button');
   fillBtn.className = 'btn btn-primary btn-sm';
-  fillBtn.textContent = '自动填充';
+  fillBtn.textContent = t('btnAutofill');
   fillBtn.addEventListener('click', () => void autofillSummaryItem(item, isVaultSummary));
   actions.appendChild(fillBtn);
 
   const detailBtn = document.createElement('button');
   detailBtn.className = 'btn btn-secondary btn-sm';
-  detailBtn.textContent = '详情';
+  detailBtn.textContent = t('btnDetails');
   detailBtn.addEventListener('click', () => void openDetailView(item.id, item, null));
   actions.appendChild(detailBtn);
 
   const copyPwBtn = document.createElement('button');
   copyPwBtn.className = 'btn btn-secondary btn-sm';
-  copyPwBtn.textContent = '复制密码';
+  copyPwBtn.textContent = t('btnCopyPassword');
   copyPwBtn.addEventListener('click', async () => {
     if (item.reprompt) {
-      showToast('已启用主密码重验证，请在桌面端查看');
+      showToast(t('toastRepromptDesktop'));
       return;
     }
     let pw = item.password || '';
@@ -717,7 +715,7 @@ function createItemCard(item, isVaultSummary = false) {
       const g = await sendBg({ type: 'ITEM_GET', itemId: item.id });
       pw = g.result?.password || '';
     }
-    await copyText(pw, '密码');
+    await copyText(pw, t('labelPassword'));
   });
   actions.appendChild(copyPwBtn);
 
@@ -727,7 +725,7 @@ function createItemCard(item, isVaultSummary = false) {
     copyTotpBtn.textContent = '2FA';
     copyTotpBtn.addEventListener('click', async () => {
       if (item.reprompt) {
-        showToast('已启用主密码重验证，请在桌面端查看');
+        showToast(t('toastRepromptDesktop'));
         return;
       }
       const res = await sendBg({ type: 'TOTP', itemId: item.id });
@@ -758,27 +756,27 @@ function renderCardsAndIdentities(cards, identities) {
     card.className = 'item-card';
     const top = document.createElement('div');
     top.className = 'item-top';
-    top.title = '点击查看详情';
+    top.title = t('clickViewDetails');
     top.addEventListener('click', () => {
       void openDetailView(entry.data.id, null, entry);
     });
     const meta = document.createElement('div');
     meta.className = 'item-meta';
-    const t = document.createElement('div');
-    t.className = 'item-title';
-    t.textContent = entry.data.title || (entry.kind === 'card' ? '银行卡' : '身份信息');
-    const s = document.createElement('div');
-    s.className = 'item-username';
-    s.textContent =
+    const titleNode = document.createElement('div');
+    titleNode.className = 'item-title';
+    titleNode.textContent = entry.data.title || (entry.kind === 'card' ? t('cardLabel') : t('identityLabel'));
+    const subNode = document.createElement('div');
+    subNode.className = 'item-username';
+    subNode.textContent =
       entry.kind === 'card'
-        ? entry.data.maskedNumber || entry.data.holder || '信用卡'
-        : entry.data.fullName || entry.data.email || entry.data.phone || '个人资料';
-    meta.append(t, s);
+        ? entry.data.maskedNumber || entry.data.holder || t('creditCardDefault')
+        : entry.data.fullName || entry.data.email || entry.data.phone || t('profileDefault');
+    meta.append(titleNode, subNode);
     const right = document.createElement('div');
     right.className = 'item-badges';
     const pill = document.createElement('span');
     pill.className = 'mini-badge';
-    pill.textContent = entry.kind === 'card' ? '银行卡' : '身份';
+    pill.textContent = entry.kind === 'card' ? t('cardLabel') : t('identityLabel');
     const chev = document.createElement('span');
     chev.className = 'chevron';
     chev.textContent = '›';
@@ -791,14 +789,14 @@ function renderCardsAndIdentities(cards, identities) {
 
     const btn = document.createElement('button');
     btn.className = 'btn btn-secondary btn-sm';
-    btn.textContent = '填充到当前页';
+    btn.textContent = t('btnFillCurrentPage');
     btn.addEventListener('click', async () => {
       if (!activeTab?.id || !isHttpUrl(activeTab?.url || '')) {
-        showToast('当前页面不支持填充');
+        showToast(t('toastTabUnsupported'));
         return;
       }
       if (entry.data.reprompt) {
-        showToast('该条目已启用重验证，请在桌面端查看');
+        showToast(t('toastRepromptDesktop'));
         return;
       }
       const res = await sendBg({
@@ -807,15 +805,15 @@ function renderCardsAndIdentities(cards, identities) {
         [entry.kind]: entry.data
       });
       if (res.ok) {
-        showToast('填充完成');
+        showToast(t('toastFilledDone'));
         setTimeout(() => window.close(), 380);
       } else {
-        showToast(res.error || '未找到可填充的表单字段');
+        showToast(res.error || t('toastNoFormFields'));
       }
     });
     const detailBtn = document.createElement('button');
     detailBtn.className = 'btn btn-secondary btn-sm';
-    detailBtn.textContent = '详情';
+    detailBtn.textContent = t('btnDetails');
     detailBtn.addEventListener('click', () => void openDetailView(entry.data.id, null, entry));
 
     actions.append(btn, detailBtn);
@@ -885,9 +883,14 @@ async function runGenerator() {
   if (res.ok && res.result?.value) {
     currentGeneratedValue = res.result.value;
     genOutputEl.textContent = currentGeneratedValue;
-    genStrengthEl.textContent = `${res.result.strength?.label || '强'} (${res.result.strength?.entropyBits || 0}b)`;
+    const score = res.result.strength?.score;
+    const strengthText =
+      typeof score === 'number' && score >= 0 && score <= 4
+        ? t(`genStrength${score}`)
+        : t('genStrength3');
+    genStrengthEl.textContent = `${strengthText} (${res.result.strength?.entropyBits || 0}b)`;
   } else {
-    genOutputEl.textContent = res.error || '生成失败';
+    genOutputEl.textContent = res.error || t('genFailed');
   }
 }
 
@@ -898,7 +901,11 @@ function updateGeneratorControlsForMode() {
   optSymbolsWrap.classList.toggle('hidden', !isPw);
   optAmbigWrap.classList.toggle('hidden', !isPw);
 
-  genLenLabel.textContent = isPhrase ? '词数：' : genMode === 'pin' ? '位数：' : '长度：';
+  genLenLabel.textContent = isPhrase
+    ? t('genWordsLabel')
+    : genMode === 'pin'
+      ? t('genDigitsLabel')
+      : t('genLenLabel');
   const strong = document.createElement('strong');
   strong.id = 'gen-len-val';
   strong.textContent = isPhrase ? '5' : genMode === 'pin' ? '6' : '20';
@@ -920,13 +927,19 @@ function updateGeneratorControlsForMode() {
 }
 
 async function init() {
+  if (i18n) {
+    await i18n.ready();
+    i18n.applyDom(document);
+  }
+  updateGeneratorControlsForMode();
+
   const extId = chrome.runtime.id;
   extIdTextEl.textContent = extId;
   installCmdEl.textContent = `ks install-nmh --chrome ${extId}`;
 
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   activeTab = tabs[0] || null;
-  domainLabel.textContent = activeTab?.url ? extractHostname(activeTab.url) : '当前页面';
+  domainLabel.textContent = activeTab?.url ? extractHostname(activeTab.url) : t('domainCurrentPage');
   addTitleInput.value = activeTab?.url ? extractHostname(activeTab.url) : '';
 
   const st = await sendBg({ type: 'STATUS' });
@@ -938,9 +951,8 @@ async function init() {
   hideAllMainViews();
 
   if (!connected) {
-    lockedTitle.textContent = '请先启动 Keysmith 桌面端';
-    lockedDesc.textContent =
-      '扩展通过系统安全的 Native Messaging 通道直连桌面应用，打开 Keysmith 后点击「重新检测」即可。';
+    lockedTitle.textContent = t('disconnectedTitle');
+    lockedDesc.textContent = t('disconnectedDesc');
     advancedNmh.classList.remove('hidden');
     lockedPanel.classList.remove('hidden');
     return;
@@ -948,8 +960,8 @@ async function init() {
 
   if (!isVaultUnlocked) {
     lockedTitle.textContent =
-      sessionStatus === 'Locked' ? 'Keysmith 保险库已锁定' : '尚未登录 Keysmith 账户';
-    lockedDesc.textContent = '请在 Keysmith 桌面端完成 Touch ID 或主密码解锁，然后点击「重新检测」。';
+      sessionStatus === 'Locked' ? t('lockedTitleDesktop') : t('lockedTitleSignedOut');
+    lockedDesc.textContent = t('lockedDescDesktop');
     advancedNmh.classList.add('hidden');
     lockedPanel.classList.remove('hidden');
     return;
@@ -965,8 +977,22 @@ document.getElementById('retry-connect-btn').addEventListener('click', () => voi
 document.getElementById('open-app-btn').addEventListener('click', () => void sendBg({ type: 'OPEN_DESKTOP' }));
 document.getElementById('unlock-open-btn').addEventListener('click', () => void sendBg({ type: 'OPEN_DESKTOP' }));
 document.getElementById('copy-cmd-btn').addEventListener('click', () =>
-  void copyText(installCmdEl.textContent, '排查命令')
+  void copyText(installCmdEl.textContent, t('labelTroubleshootCmd'))
 );
+
+if (langSelectEl && i18n) {
+  langSelectEl.addEventListener('change', async () => {
+    await i18n.setLanguageMode(langSelectEl.value);
+    i18n.applyDom(document);
+    updateGeneratorControlsForMode();
+    if (currentGeneratedValue) {
+      await runGenerator();
+    }
+    const pRes = await sendBg({ type: 'GET_PRIVACY_CONTROL' });
+    renderPrivacyStatus(pRes);
+    showToast(t('langSaved'));
+  });
+}
 
 document.getElementById('settings-btn').addEventListener('click', () => {
   if (!settingsViewEl.classList.contains('hidden')) {
@@ -1012,7 +1038,7 @@ document.getElementById('add-gen-pw-btn').addEventListener('click', async () => 
   if (g.ok && g.result?.value) {
     addPwInput.type = 'text';
     addPwInput.value = g.result.value;
-    showToast('已生成强密码');
+    showToast(t('toastGeneratedStrong'));
   }
 });
 
@@ -1020,7 +1046,7 @@ quickAddForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const url = activeTab?.url || '';
   if (!isHttpUrl(url)) {
-    showToast('仅支持为 http/https 网页新增登录条目');
+    showToast(t('toastHttpOnlyAdd'));
     return;
   }
   const res = await sendBg({
@@ -1034,10 +1060,10 @@ quickAddForm.addEventListener('submit', async (e) => {
   if (res.ok) {
     addPwInput.value = '';
     quickAddForm.classList.add('hidden');
-    showToast('已保存到 Keysmith');
+    showToast(t('toastSavedKeysmith'));
     await loadCurrentSite();
   } else {
-    showToast(res.error || '保存失败');
+    showToast(res.error || t('toastSaveFailed'));
   }
 });
 
@@ -1080,11 +1106,11 @@ for (const chk of [genDigitsEl, genSymbolsEl, genAmbigEl]) {
 }
 document.getElementById('gen-regen-btn').addEventListener('click', () => void runGenerator());
 document.getElementById('gen-copy-btn').addEventListener('click', () =>
-  void copyText(currentGeneratedValue, '密码')
+  void copyText(currentGeneratedValue, t('labelPassword'))
 );
 document.getElementById('gen-fill-btn').addEventListener('click', async () => {
   if (!currentGeneratedValue) return;
-  await copyText(currentGeneratedValue, '密码');
+  await copyText(currentGeneratedValue, t('labelPassword'));
   if (activeTab?.id && isHttpUrl(activeTab?.url || '')) {
     const res = await sendBg({
       type: 'FILL_GENERATED_ACTIVE_TAB',
@@ -1092,7 +1118,7 @@ document.getElementById('gen-fill-btn').addEventListener('click', async () => {
       password: currentGeneratedValue
     });
     if (res.ok) {
-      showToast('已生成并填充到当前页面');
+      showToast(t('toastGenAndFilled'));
       setTimeout(() => window.close(), 380);
     }
   }

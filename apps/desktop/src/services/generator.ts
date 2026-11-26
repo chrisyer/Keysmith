@@ -49,7 +49,7 @@ function randomInt(max: number): number {
 
 export function evaluatePasswordStrength(password: string): PasswordStrength {
   if (!password) {
-    return { score: 0, label: '空密码', entropyBits: 0 };
+    return { score: 0, label: 'Empty', entropyBits: 0 };
   }
 
   let pool = 0;
@@ -76,19 +76,19 @@ export function evaluatePasswordStrength(password: string): PasswordStrength {
   }
 
   let score: 0 | 1 | 2 | 3 | 4 = 0;
-  let label = '极弱';
+  let label = 'Weak';
   if (entropy >= 80) {
     score = 4;
-    label = '极强';
+    label = 'Very Strong';
   } else if (entropy >= 60) {
     score = 3;
-    label = '强';
+    label = 'Strong';
   } else if (entropy >= 45) {
     score = 2;
-    label = '中等';
+    label = 'Fair';
   } else if (entropy >= 28) {
     score = 1;
-    label = '较弱';
+    label = 'Weak';
   }
 
   return { score, label, entropyBits: entropy };

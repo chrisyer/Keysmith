@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "Keysmith"
+  },
+  "extDesc": {
+    "message": "Keysmith — Gestionnaire de mots de passe zéro-connaissance, saisie automatique et assistant Passkey"
+  },
+  "cmdAutofill": {
+    "message": "Remplir automatiquement le meilleur identifiant pour ce site"
+  }
+}

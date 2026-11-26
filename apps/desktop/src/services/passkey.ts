@@ -13,12 +13,12 @@ export interface AaguidProviderInfo {
 
 const AAGUID_REGISTRY: Record<string, AaguidProviderInfo> = {
   [KEYSMITH_AAGUID]: {
-    name: 'Keysmith 内置通行密钥',
+    name: 'Keysmith Built-in Passkey',
     badgeText: 'KS',
     color: '#0EA5E9',
   },
   [APPLE_TOUCH_ID_AAGUID]: {
-    name: 'iCloud 钥匙串 · Touch ID',
+    name: 'iCloud Keychain · Touch ID',
     badgeText: 'AP',
     color: '#1D1D1F',
   },
@@ -31,11 +31,11 @@ const AAGUID_REGISTRY: Record<string, AaguidProviderInfo> = {
 
 export function resolveAaguidProvider(aaguid: string): AaguidProviderInfo {
   if (!aaguid || aaguid === ZERO_AAGUID) {
-    return { name: '未知通行密钥提供方', badgeText: 'PK', color: '#64748B' };
+    return { name: 'Unknown Passkey Provider', badgeText: 'PK', color: '#64748B' };
   }
   return (
     AAGUID_REGISTRY[aaguid.toLowerCase()] ?? {
-      name: 'FIDO2 认证器',
+      name: 'FIDO2 Authenticator',
       badgeText: 'F2',
       color: '#6366F1',
     }

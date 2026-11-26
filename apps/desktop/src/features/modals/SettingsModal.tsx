@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { ModalDialog } from '../../components/ModalDialog';
-import { useI18n, type LanguageMode } from '../../i18n';
+import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
 import {
   detectPasskeyCapabilities,
   resolveAaguidProvider,
@@ -393,8 +393,7 @@ export function SettingsModal() {
 
   const langOptions: Array<{ id: LanguageMode; label: string }> = [
     { id: 'system', label: dict.settings.languageSystem },
-    { id: 'zh-CN', label: dict.settings.languageZh },
-    { id: 'en', label: dict.settings.languageEn },
+    ...SUPPORTED_LOCALES.map((loc) => ({ id: loc.id, label: loc.label })),
   ];
 
   return (
@@ -459,21 +458,20 @@ export function SettingsModal() {
                   <h2 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">
                     {dict.settings.languageLabel}
                   </h2>
-                  <div className="grid grid-cols-3 p-1 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] gap-1">
-                    {langOptions.map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setLanguageMode(opt.id)}
-                        className={`py-1.5 px-2 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                          languageMode === opt.id
-                            ? 'bg-[var(--bg-elevated)] text-[var(--accent-primary)] shadow-2xs border border-[var(--border-subtle)]'
-                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
+                  <div className="relative flex items-center">
+                    <Globe size={14} className="absolute left-3 text-[var(--text-muted)] pointer-events-none" />
+                    <select
+                      aria-label={dict.settings.languageLabel}
+                      value={languageMode}
+                      onChange={(e) => setLanguageMode(e.target.value as LanguageMode)}
+                      className="w-full pl-9 pr-3 py-2 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--border-strong)] focus:border-[var(--accent-primary)] focus:outline-none text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+                    >
+                      {langOptions.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 

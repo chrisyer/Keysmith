@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -13,46 +13,46 @@
         <img src="icons/48.png" alt="Keysmith" class="brand-logo" />
         <div class="brand-text">
           <span class="brand-name">Keysmith</span>
-          <span id="domain-label" class="domain-label">当前页面</span>
+          <span id="domain-label" class="domain-label" data-i18n="domainCurrentPage">Current Page</span>
         </div>
       </div>
       <div class="header-actions">
-        <span id="status-badge" class="status-badge status-disconnected">检查中...</span>
-        <button id="settings-btn" class="icon-btn" title="扩展设置" aria-label="扩展设置">⚙</button>
-        <button id="open-app-btn" class="icon-btn" title="打开 Keysmith 桌面端" aria-label="打开 Keysmith 桌面端">↗</button>
-        <button id="refresh-btn" class="icon-btn" title="刷新状态" aria-label="刷新状态">↻</button>
+        <span id="status-badge" class="status-badge status-disconnected" data-i18n="statusChecking">Checking...</span>
+        <button id="settings-btn" class="icon-btn" title="Extension Settings" aria-label="Extension Settings" data-i18n-title="btnSettingsTitle" data-i18n-aria="btnSettingsTitle">⚙</button>
+        <button id="open-app-btn" class="icon-btn" title="Open Keysmith Desktop" aria-label="Open Keysmith Desktop" data-i18n-title="btnOpenAppTitle" data-i18n-aria="btnOpenAppTitle">↗</button>
+        <button id="refresh-btn" class="icon-btn" title="Refresh Status" aria-label="Refresh Status" data-i18n-title="btnRefreshTitle" data-i18n-aria="btnRefreshTitle">↻</button>
       </div>
     </header>
 
     <nav id="tabs-bar" class="tabs-bar hidden" role="tablist">
-      <button class="tab-btn active" data-tab="current" role="tab">当前网站</button>
-      <button class="tab-btn" data-tab="vault" role="tab">密码库</button>
-      <button class="tab-btn" data-tab="generator" role="tab">生成器</button>
+      <button class="tab-btn active" data-tab="current" role="tab" data-i18n="tabCurrent">Current Site</button>
+      <button class="tab-btn" data-tab="vault" role="tab" data-i18n="tabVault">Vault</button>
+      <button class="tab-btn" data-tab="generator" role="tab" data-i18n="tabGenerator">Generator</button>
     </nav>
 
     <main class="main">
       <!-- Locked / Disconnected State -->
       <section id="locked-panel" class="card notice-card hidden">
-        <div id="locked-title" class="card-title">Keysmith 桌面端已锁定</div>
-        <p id="locked-desc" class="card-desc">
-          请在 Keysmith 桌面应用中解锁保险库（支持 Touch ID / 主密码），然后点击刷新。
+        <div id="locked-title" class="card-title" data-i18n="lockedTitleDesktop">Keysmith Desktop is Locked</div>
+        <p id="locked-desc" class="card-desc" data-i18n="lockedDescDesktop">
+          Unlock your vault in the Keysmith desktop app (Touch ID or Master Password), then click Refresh.
         </p>
         <div class="btn-row">
-          <button id="unlock-open-btn" class="btn btn-primary btn-flex">打开 Keysmith 桌面端</button>
-          <button id="retry-connect-btn" class="btn btn-secondary">重新检测</button>
+          <button id="unlock-open-btn" class="btn btn-primary btn-flex" data-i18n="btnOpenDesktop">Open Keysmith Desktop</button>
+          <button id="retry-connect-btn" class="btn btn-secondary" data-i18n="btnRecheck">Re-check</button>
         </div>
 
         <details id="advanced-nmh" class="advanced-details hidden">
-          <summary>高级排查（扩展通信通道）</summary>
-          <p class="card-desc small-desc">
-            通常只需打开一次 Keysmith 桌面端即可自动完成浏览器集成；若手动加载了自定义路径扩展，可在终端执行：
+          <summary data-i18n="advSummary">Troubleshooting (Native Messaging)</summary>
+          <p class="card-desc small-desc" data-i18n="advDesc">
+            Keysmith auto-configures browser integration on launch. For custom unpacked paths, run:
           </p>
           <div class="code-block">
             <code id="install-cmd">ks install-nmh --chrome ianpdijhflnmmhbmjdhiombdghhpfkmg</code>
-            <button id="copy-cmd-btn" class="btn btn-secondary btn-sm">复制</button>
+            <button id="copy-cmd-btn" class="btn btn-secondary btn-sm" data-i18n="btnCopy">Copy</button>
           </div>
           <div class="ext-id-row">
-            <span class="muted">扩展 ID：</span>
+            <span class="muted" data-i18n="extIdPrefix">Extension ID:</span>
             <code id="ext-id-text" class="ext-id-code"></code>
           </div>
         </details>
@@ -61,39 +61,39 @@
       <!-- Tab 1: Current Site -->
       <section id="tab-current" class="tab-panel hidden">
         <div class="section-row">
-          <span class="section-header">当前网站凭据</span>
-          <button id="toggle-add-btn" class="link-btn">+ 新增登录</button>
+          <span class="section-header" data-i18n="currentSiteCreds">Matching Logins</span>
+          <button id="toggle-add-btn" class="link-btn" data-i18n="btnAddLogin">+ Add Login</button>
         </div>
 
         <form id="quick-add-form" class="card quick-add-card hidden">
           <div class="field-group">
-            <label for="add-title">名称</label>
-            <input id="add-title" type="text" class="text-input" placeholder="例如 GitHub" required />
+            <label for="add-title" data-i18n="labelName">Title</label>
+            <input id="add-title" type="text" class="text-input" placeholder="e.g. GitHub" data-i18n-placeholder="placeholderSiteName" required />
           </div>
           <div class="field-group">
-            <label for="add-username">用户名 / 邮箱</label>
+            <label for="add-username" data-i18n="labelUsernameEmail">Username / Email</label>
             <input id="add-username" type="text" class="text-input" placeholder="user@example.com" />
           </div>
           <div class="field-group">
-            <label for="add-password">密码</label>
+            <label for="add-password" data-i18n="labelPassword">Password</label>
             <div class="inline-input-row">
-              <input id="add-password" type="password" class="text-input" placeholder="输入或右侧随机生成" />
-              <button id="add-gen-pw-btn" type="button" class="btn btn-secondary btn-sm">生成</button>
+              <input id="add-password" type="password" class="text-input" placeholder="Enter or generate password" data-i18n-placeholder="placeholderPwOrGen" />
+              <button id="add-gen-pw-btn" type="button" class="btn btn-secondary btn-sm" data-i18n="btnGenerate">Generate</button>
             </div>
           </div>
           <div class="btn-row">
-            <button type="submit" class="btn btn-primary btn-sm btn-flex">保存到当前网站</button>
-            <button id="cancel-add-btn" type="button" class="btn btn-secondary btn-sm">取消</button>
+            <button type="submit" class="btn btn-primary btn-sm btn-flex" data-i18n="btnSaveToSite">Save to Current Site</button>
+            <button id="cancel-add-btn" type="button" class="btn btn-secondary btn-sm" data-i18n="btnCancel">Cancel</button>
           </div>
         </form>
 
         <div id="current-list" class="items-list"></div>
-        <div id="current-empty" class="empty-state hidden">
-          当前网站暂无匹配条目，可点击右上角「+ 新增登录」或切换到密码库搜索。
+        <div id="current-empty" class="empty-state hidden" data-i18n="currentEmpty">
+          No logins saved for this site yet. Click "+ Add Login" above or search your Vault.
         </div>
 
         <div id="extras-section" class="extras-section hidden">
-          <div class="section-header extras-title">快捷填充银行卡与身份</div>
+          <div class="section-header extras-title" data-i18n="extrasTitle">Quick Fill Cards &amp; Identities</div>
           <div id="extras-list" class="items-list"></div>
         </div>
       </section>
@@ -105,55 +105,56 @@
             id="search-input"
             type="search"
             class="search-input"
-            placeholder="搜索标题、用户名或网址..."
+            placeholder="Search titles, usernames or URLs..."
+            data-i18n-placeholder="searchPlaceholder"
             autocomplete="off"
           />
         </div>
         <div class="filter-pills">
-          <button class="pill-btn active" data-cat="all">全部</button>
-          <button class="pill-btn" data-cat="login">登录</button>
-          <button class="pill-btn" data-cat="passkey">Passkey</button>
-          <button class="pill-btn" data-cat="credit_card">银行卡</button>
-          <button class="pill-btn" data-cat="identity">身份</button>
+          <button class="pill-btn active" data-cat="all" data-i18n="filterAll">All</button>
+          <button class="pill-btn" data-cat="login" data-i18n="filterLogin">Logins</button>
+          <button class="pill-btn" data-cat="passkey" data-i18n="filterPasskey">Passkeys</button>
+          <button class="pill-btn" data-cat="credit_card" data-i18n="filterCard">Cards</button>
+          <button class="pill-btn" data-cat="identity" data-i18n="filterIdentity">Identities</button>
         </div>
         <div id="vault-list" class="items-list"></div>
-        <div id="vault-empty" class="empty-state hidden">未找到匹配的密码库条目</div>
+        <div id="vault-empty" class="empty-state hidden" data-i18n="vaultEmpty">No matching vault items found</div>
       </section>
 
       <!-- Tab 3: Password Generator -->
       <section id="tab-generator" class="tab-panel hidden">
         <div class="card">
           <div class="gen-mode-row">
-            <button class="pill-btn active" data-mode="password">随机密码</button>
-            <button class="pill-btn" data-mode="passphrase">助记词</button>
-            <button class="pill-btn" data-mode="pin">PIN 码</button>
+            <button class="pill-btn active" data-mode="password" data-i18n="modePassword">Password</button>
+            <button class="pill-btn" data-mode="passphrase" data-i18n="modePassphrase">Passphrase</button>
+            <button class="pill-btn" data-mode="pin" data-i18n="modePin">PIN</button>
           </div>
 
           <div class="gen-output-box">
-            <code id="gen-output" class="gen-output">生成中...</code>
-            <span id="gen-strength" class="gen-strength">强</span>
+            <code id="gen-output" class="gen-output" data-i18n="genGenerating">Generating...</code>
+            <span id="gen-strength" class="gen-strength" data-i18n="genStrength3">Strong</span>
           </div>
 
           <div class="gen-controls">
             <div class="control-row">
-              <label for="gen-len-range" id="gen-len-label">长度：<strong id="gen-len-val">20</strong></label>
+              <label for="gen-len-range" id="gen-len-label">Length: <strong id="gen-len-val">20</strong></label>
               <input id="gen-len-range" type="range" min="8" max="48" value="20" />
             </div>
             <label id="opt-digits-wrap" class="check-row">
-              <input id="gen-digits" type="checkbox" checked /> 包含数字 (0-9)
+              <input id="gen-digits" type="checkbox" checked /> <span data-i18n="genIncludeDigits">Include Numbers (0-9)</span>
             </label>
             <label id="opt-symbols-wrap" class="check-row">
-              <input id="gen-symbols" type="checkbox" checked /> 包含特殊符号 (!@#$%)
+              <input id="gen-symbols" type="checkbox" checked /> <span data-i18n="genIncludeSymbols">Include Symbols (!@#$%)</span>
             </label>
             <label id="opt-ambig-wrap" class="check-row">
-              <input id="gen-ambiguous" type="checkbox" checked /> 排除易混淆字符 (0/O/1/l)
+              <input id="gen-ambiguous" type="checkbox" checked /> <span data-i18n="genExcludeAmbiguous">Exclude Ambiguous (0/O/1/l)</span>
             </label>
           </div>
 
           <div class="btn-row">
-            <button id="gen-regen-btn" class="btn btn-secondary btn-sm">重新生成</button>
-            <button id="gen-copy-btn" class="btn btn-secondary btn-sm">复制</button>
-            <button id="gen-fill-btn" class="btn btn-primary btn-sm btn-flex">填充到页面</button>
+            <button id="gen-regen-btn" class="btn btn-secondary btn-sm" data-i18n="btnRegenerate">Regenerate</button>
+            <button id="gen-copy-btn" class="btn btn-secondary btn-sm" data-i18n="btnCopy">Copy</button>
+            <button id="gen-fill-btn" class="btn btn-primary btn-sm btn-flex" data-i18n="btnFillPage">Fill on Page</button>
           </div>
         </div>
       </section>
@@ -161,16 +162,16 @@
       <!-- Drill-Down View: Item Detail -->
       <section id="detail-view" class="detail-view hidden">
         <div class="subview-bar">
-          <button id="detail-back-btn" class="btn btn-secondary btn-sm">← 返回</button>
-          <span id="detail-cat-badge" class="mini-badge">条目</span>
-          <button id="detail-desktop-btn" class="btn btn-secondary btn-sm">桌面端查看</button>
+          <button id="detail-back-btn" class="btn btn-secondary btn-sm" data-i18n="btnBack">← Back</button>
+          <span id="detail-cat-badge" class="mini-badge" data-i18n="itemLabel">Item</span>
+          <button id="detail-desktop-btn" class="btn btn-secondary btn-sm" data-i18n="btnViewDesktop">Open in Desktop</button>
         </div>
 
         <div class="card detail-hero-card">
-          <div id="detail-title" class="detail-title">条目名称</div>
-          <div id="detail-subtitle" class="detail-subtitle">副标题</div>
+          <div id="detail-title" class="detail-title" data-i18n="detailTitleDefault">Item Name</div>
+          <div id="detail-subtitle" class="detail-subtitle" data-i18n="detailSubtitleDefault">Subtitle</div>
           <div class="btn-row detail-hero-actions">
-            <button id="detail-fill-btn" class="btn btn-primary btn-sm btn-flex">自动填充到当前页</button>
+            <button id="detail-fill-btn" class="btn btn-primary btn-sm btn-flex" data-i18n="btnAutofillPage">Autofill Current Page</button>
           </div>
         </div>
 
@@ -180,44 +181,60 @@
       <!-- Drill-Down View: Extension Settings -->
       <section id="settings-view" class="settings-view hidden">
         <div class="subview-bar">
-          <button id="settings-back-btn" class="btn btn-secondary btn-sm">← 返回</button>
-          <span class="subview-title">扩展设置</span>
+          <button id="settings-back-btn" class="btn btn-secondary btn-sm" data-i18n="btnBack">← Back</button>
+          <span class="subview-title" data-i18n="settingsTitle">Extension Settings</span>
           <span class="subview-spacer"></span>
+        </div>
+
+        <div class="card">
+          <div class="card-title" data-i18n="langSectionTitle">Display Language</div>
+          <select id="lang-select" class="select-input" aria-label="Display Language" data-i18n-aria="langSectionTitle">
+            <option value="system" data-i18n="langSystemDefault">System Default</option>
+            <option value="en">English</option>
+            <option value="zh-CN">简体中文</option>
+            <option value="zh-TW">繁體中文</option>
+            <option value="ja">日本語</option>
+            <option value="ko">한국어</option>
+            <option value="de">Deutsch</option>
+            <option value="fr">Français</option>
+            <option value="es">Español</option>
+          </select>
         </div>
 
         <div class="card">
           <div class="setting-row">
             <div class="setting-info">
-              <div class="card-title">设为 Chrome 默认密码管理器</div>
-              <p class="card-desc small-desc">
-                关闭浏览器自带「提示保存密码和通行密钥」，由 Keysmith 统一接管并消除重复弹窗。
+              <div class="card-title" data-i18n="takeoverTitle">Set as Default Chrome Password Manager</div>
+              <p class="card-desc small-desc" data-i18n="takeoverDesc">
+                Turn off Chrome built-in password and passkey prompts so Keysmith handles them cleanly.
               </p>
             </div>
             <input id="takeover-toggle" type="checkbox" class="toggle-check" />
           </div>
-          <div id="takeover-status" class="takeover-status muted">检查接管状态中...</div>
+          <div id="takeover-status" class="takeover-status muted" data-i18n="takeoverChecking">Checking status...</div>
         </div>
 
         <div class="card">
-          <div class="card-title">永不提示保存的网站</div>
+          <div class="card-title" data-i18n="neverSaveTitle">Never Prompt Websites</div>
           <div id="never-save-list" class="never-save-list"></div>
-          <div id="never-save-empty" class="empty-state small-empty">暂无已忽略网站</div>
+          <div id="never-save-empty" class="empty-state small-empty" data-i18n="neverSaveEmpty">No excluded websites yet</div>
         </div>
 
         <div class="card">
-          <div class="card-title">关于扩展</div>
-          <div class="kv-row"><span class="muted">版本</span><span>v0.2.1</span></div>
-          <div class="kv-row"><span class="muted">扩展 ID</span><code id="settings-ext-id" class="ext-id-code"></code></div>
+          <div class="card-title" data-i18n="aboutTitle">About Extension</div>
+          <div class="kv-row"><span class="muted" data-i18n="aboutVersion">Version</span><span>v0.3.0</span></div>
+          <div class="kv-row"><span class="muted" data-i18n="aboutExtId">Extension ID</span><code id="settings-ext-id" class="ext-id-code"></code></div>
         </div>
       </section>
     </main>
 
     <footer class="footer">
-      <span id="shortcut-hint" class="muted">快捷键：⌘⇧L 快速填充</span>
-      <span id="toast" class="toast hidden">已复制</span>
+      <span id="shortcut-hint" class="muted" data-i18n="shortcutHint">Shortcut: ⌘⇧L to autofill</span>
+      <span id="toast" class="toast hidden" data-i18n="toastDefault">Copied</span>
     </footer>
   </div>
 
+  <script src="i18n.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

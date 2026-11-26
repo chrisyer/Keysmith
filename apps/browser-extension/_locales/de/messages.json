@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "Keysmith"
+  },
+  "extDesc": {
+    "message": "Keysmith — Zero-Knowledge-Passwortmanager, Auto-Fill und Passkey-Assistent"
+  },
+  "cmdAutofill": {
+    "message": "Passendsten Login für die aktuelle Website automatisch ausfüllen"
+  }
+}

@@ -94,7 +94,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } catch (err) {
       set({
         initialized: true,
-        initError: err instanceof Error ? err.message : '初始化会话状态失败',
+        initError: err instanceof Error ? err.message : 'Failed to initialize session',
       });
     }
   },
