@@ -33,8 +33,6 @@ const settingsExtIdEl = document.getElementById('settings-ext-id');
 
 const currentListEl = document.getElementById('current-list');
 const currentEmptyEl = document.getElementById('current-empty');
-const extrasSectionEl = document.getElementById('extras-section');
-const extrasListEl = document.getElementById('extras-list');
 
 const quickAddForm = document.getElementById('quick-add-form');
 const addTitleInput = document.getElementById('add-title');
@@ -1052,110 +1050,22 @@ function createItemCard(item, isVaultSummary = false) {
   return card;
 }
 
-function renderCardsAndIdentities(cards, identities) {
-  extrasListEl.textContent = '';
-  const all = [
-    ...cards.map((c) => ({ kind: 'card', data: c })),
-    ...identities.map((i) => ({ kind: 'identity', data: i }))
-  ];
-  if (all.length === 0) {
-    extrasSectionEl.classList.add('hidden');
-    return;
-  }
-  extrasSectionEl.classList.remove('hidden');
-
-  for (const entry of all.slice(0, 4)) {
-    const card = document.createElement('div');
-    card.className = 'item-card';
-    const top = document.createElement('div');
-    top.className = 'item-top';
-    top.title = t('clickViewDetails');
-    top.addEventListener('click', () => {
-      void openDetailView(entry.data.id, null, entry);
-    });
-    const meta = document.createElement('div');
-    meta.className = 'item-meta';
-    const titleNode = document.createElement('div');
-    titleNode.className = 'item-title';
-    titleNode.textContent = entry.data.title || (entry.kind === 'card' ? t('cardLabel') : t('identityLabel'));
-    const subNode = document.createElement('div');
-    subNode.className = 'item-username';
-    subNode.textContent =
-      entry.kind === 'card'
-        ? entry.data.maskedNumber || entry.data.holder || t('creditCardDefault')
-        : entry.data.fullName || entry.data.email || entry.data.phone || t('profileDefault');
-    meta.append(titleNode, subNode);
-    const right = document.createElement('div');
-    right.className = 'item-badges';
-    const pill = document.createElement('span');
-    pill.className = 'mini-badge';
-    pill.textContent = entry.kind === 'card' ? t('cardLabel') : t('identityLabel');
-    const chev = document.createElement('span');
-    chev.className = 'chevron';
-    chev.textContent = '›';
-    right.append(pill, chev);
-    top.append(meta, right);
-    card.appendChild(top);
-
-    const actions = document.createElement('div');
-    actions.className = 'item-actions';
-
-    const btn = document.createElement('button');
-    btn.className = 'btn btn-secondary btn-sm';
-    btn.textContent = t('btnFillCurrentPage');
-    btn.addEventListener('click', async () => {
-      if (!activeTab?.id || !isHttpUrl(activeTab?.url || '')) {
-        showToast(t('toastTabUnsupported'));
-        return;
-      }
-      if (entry.data.reprompt) {
-        showToast(t('toastRepromptDesktop'));
-        return;
-      }
-      const res = await sendBg({
-        type: entry.kind === 'card' ? 'FILL_CARD_ACTIVE_TAB' : 'FILL_IDENTITY_ACTIVE_TAB',
-        tabId: activeTab.id,
-        [entry.kind]: entry.data
-      });
-      if (res.ok) {
-        showToast(t('toastFilledDone'));
-        setTimeout(() => window.close(), 380);
-      } else {
-        showToast(res.error || t('toastNoFormFields'));
-      }
-    });
-    const detailBtn = document.createElement('button');
-    detailBtn.className = 'btn btn-secondary btn-sm';
-    detailBtn.textContent = t('btnDetails');
-    detailBtn.addEventListener('click', () => void openDetailView(entry.data.id, null, entry));
-
-    actions.append(btn, detailBtn);
-    card.appendChild(actions);
-    extrasListEl.appendChild(card);
-  }
-}
-
 async function loadCurrentSite() {
   currentListEl.textContent = '';
   const url = activeTab?.url || '';
   if (!isHttpUrl(url)) {
     currentEmptyEl.classList.remove('hidden');
-  } else {
-    const matched = await sendBg({ type: 'URL_MATCH', url });
-    const items = matched.ok && Array.isArray(matched.result) ? matched.result : [];
-    if (items.length === 0) {
-      currentEmptyEl.classList.remove('hidden');
-    } else {
-      currentEmptyEl.classList.add('hidden');
-      for (const item of items) {
-        currentListEl.appendChild(createItemCard(item, false));
-      }
-    }
+    return;
   }
-
-  const extras = await sendBg({ type: 'CARDS_AND_IDENTITIES' });
-  if (extras.ok && extras.result) {
-    renderCardsAndIdentities(extras.result.cards || [], extras.result.identities || []);
+  const matched = await sendBg({ type: 'URL_MATCH', url });
+  const items = matched.ok && Array.isArray(matched.result) ? matched.result : [];
+  if (items.length === 0) {
+    currentEmptyEl.classList.remove('hidden');
+  } else {
+    currentEmptyEl.classList.add('hidden');
+    for (const item of items) {
+      currentListEl.appendChild(createItemCard(item, false));
+    }
   }
 }
 
