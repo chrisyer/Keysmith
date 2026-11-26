@@ -41,6 +41,8 @@ pub struct AppState {
     pub quick_access_pinned: AtomicBool,
     pub quick_access_last_shown_ms: AtomicU64,
     pub signalr_poke: watch::Sender<u64>,
+    pub saved_main_logical_size: Mutex<Option<(f64, f64)>>,
+    pub main_window_compact: AtomicBool,
 }
 
 fn now_epoch_ms() -> u64 {
@@ -63,7 +65,41 @@ pub struct AccountSummaryDto {
     pub last_sync_at: String,
 }
 
+pub fn set_main_window_compact(app: &AppHandle, compact: bool) {
+    let (Some(win), Some(state)) = (app.get_webview_window("main"), app.try_state::<AppState>()) else {
+        return;
+    };
+    if compact {
+        if !state.main_window_compact.swap(true, Ordering::SeqCst) {
+            if let (Ok(phys), Ok(scale)) = (win.inner_size(), win.scale_factor()) {
+                let scale = if scale > 0.0 { scale } else { 1.0 };
+                let logical_w = (phys.width as f64) / scale;
+                let logical_h = (phys.height as f64) / scale;
+                if logical_w >= 900.0 && logical_h >= 580.0 {
+                    if let Ok(mut guard) = state.saved_main_logical_size.lock() {
+                        *guard = Some((logical_w, logical_h));
+                    }
+                }
+            }
+            let _ = win.set_min_size(Some(tauri::LogicalSize::new(380.0_f64, 460.0_f64)));
+            let _ = win.set_size(tauri::LogicalSize::new(420.0_f64, 520.0_f64));
+            let _ = win.center();
+        }
+    } else if state.main_window_compact.swap(false, Ordering::SeqCst) {
+        let (w, h) = state
+            .saved_main_logical_size
+            .lock()
+            .ok()
+            .and_then(|g| *g)
+            .unwrap_or((1240.0, 800.0));
+        let _ = win.set_min_size(Some(tauri::LogicalSize::new(920.0_f64, 600.0_f64)));
+        let _ = win.set_size(tauri::LogicalSize::new(w, h));
+        let _ = win.center();
+    }
+}
+
 pub fn emit_session_state(app: &AppHandle, state: &SessionState, reason: &str) {
+    set_main_window_compact(app, state.status == AuthStatus::Locked);
     let status = serde_json::to_value(state.status)
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
@@ -160,6 +196,28 @@ pub fn show_quick_access_window(app: &AppHandle) -> Result<(), CoreError> {
     };
     let session = state.core.session_get_state();
     if session.status != AuthStatus::Unlocked {
+        if session.status == AuthStatus::Locked && session.biometric_enabled {
+            let app_c = app.clone();
+            let core = Arc::clone(&state.core);
+            tauri::async_runtime::spawn(async move {
+                match core.session_unlock_biometric().await {
+                    Ok(unlocked) => {
+                        emit_session_state(&app_c, &unlocked, "biometric");
+                        apply_window_preferences(&app_c, &unlocked);
+                        if let Some(st) = app_c.try_state::<AppState>() {
+                            poke_signalr(&st);
+                        }
+                        let _ = show_quick_access_window(&app_c);
+                    }
+                    Err(_) => {
+                        set_main_window_compact(&app_c, true);
+                        show_main_window(&app_c);
+                    }
+                }
+            });
+            return Ok(());
+        }
+        set_main_window_compact(app, session.status == AuthStatus::Locked);
         show_main_window(app);
         return Ok(());
     }
@@ -502,6 +560,7 @@ pub async fn session_lock(
     let core = Arc::clone(&state.core);
     let r_clone = r.clone();
     run_blocking(move || core.session_lock(&r_clone)).await??;
+    set_main_window_compact(&app, true);
     poke_signalr(&state);
     let _ = app.emit(
         EVENT_SESSION_STATE_CHANGED,
@@ -1082,8 +1141,15 @@ pub async fn window_main_ready(
     let core = Arc::clone(&state.core);
     let session = run_blocking(move || core.session_get_state()).await?;
     apply_window_preferences(&app, &session);
+    set_main_window_compact(&app, session.status == AuthStatus::Locked);
     let _ = window.show();
     let _ = window.set_focus();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn window_set_compact_lock(app: AppHandle, compact: bool) -> Result<(), CoreError> {
+    set_main_window_compact(&app, compact);
     Ok(())
 }
 

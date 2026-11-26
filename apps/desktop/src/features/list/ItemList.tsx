@@ -222,39 +222,51 @@ export function ItemList({ searchInputRef }: ItemListProps) {
     >
       {/* Search + Action Bar */}
       <div className="p-3 pb-2.5 border-b border-[var(--border-subtle)] flex flex-col gap-2">
-        <div className="relative flex items-center">
-          <Search size={14} className="absolute left-3 text-[var(--text-muted)] pointer-events-none" />
-          <input
-            ref={searchInputRef}
-            type="search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={`${dict.list.searchPlaceholder} (${formatShortcutMac(shortcuts.search)})`}
-            aria-label={dict.common.search}
-            className="w-full pl-8 pr-14 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-          />
-          <div className="absolute right-1.5 flex items-center gap-0.5">
-            {searchQuery && (
+        <div className="flex items-center gap-1.5">
+          <div className="relative flex-1 min-w-0 flex items-center">
+            <Search size={14} className="absolute left-3 text-[var(--text-muted)] pointer-events-none" />
+            <input
+              ref={searchInputRef}
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={`${dict.list.searchPlaceholder} (${formatShortcutMac(shortcuts.search)})`}
+              aria-label={dict.common.search}
+              className="w-full pl-8 pr-14 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+            />
+            <div className="absolute right-1.5 flex items-center gap-0.5">
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label={dict.common.close}
+                  className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+                >
+                  <X size={12} />
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setSearchQuery('')}
-                aria-label={dict.common.close}
-                className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+                popoverTarget={syntaxPopoverId}
+                style={{ anchorName: syntaxAnchor } as React.CSSProperties}
+                title={dict.list.syntaxTitle}
+                aria-label={dict.list.syntaxTitle}
+                className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--accent-primary)] cursor-pointer"
               >
-                <X size={12} />
+                <HelpCircle size={13} />
               </button>
-            )}
-            <button
-              type="button"
-              popoverTarget={syntaxPopoverId}
-              style={{ anchorName: syntaxAnchor } as React.CSSProperties}
-              title={dict.list.syntaxTitle}
-              aria-label={dict.list.syntaxTitle}
-              className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--accent-primary)] cursor-pointer"
-            >
-              <HelpCircle size={13} />
-            </button>
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setNewItemOpen(true)}
+            title={`${dict.app.newItemBtn} (${formatShortcutMac(shortcuts.newItem)})`}
+            aria-label={dict.app.newItemBtn}
+            className="w-[30px] h-[30px] shrink-0 inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white transition-colors cursor-pointer"
+          >
+            <Plus size={15} />
+          </button>
         </div>
 
         <div
@@ -289,36 +301,25 @@ export function ItemList({ searchInputRef }: ItemListProps) {
         </div>
 
         <div className="flex items-center justify-between gap-1.5">
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setNewItemOpen(true)}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white transition-colors cursor-pointer"
-            >
-              <Plus size={13} />
-              {dict.list.newBtn}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                if (multiSelectMode) {
-                  clearSelection();
-                } else {
-                  setMultiSelectMode(true);
-                }
-              }}
-              aria-label={dict.list.selectBtn}
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
-                multiSelectMode
-                  ? 'bg-[var(--bg-selected)] text-[var(--accent-primary)]'
-                  : 'hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]'
-              }`}
-            >
-              <ListChecks size={13} />
-              <span>{multiSelectMode ? dict.list.doneBtn : dict.list.selectBtn}</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (multiSelectMode) {
+                clearSelection();
+              } else {
+                setMultiSelectMode(true);
+              }
+            }}
+            aria-label={dict.list.selectBtn}
+            className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
+              multiSelectMode
+                ? 'bg-[var(--bg-selected)] text-[var(--accent-primary)]'
+                : 'hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]'
+            }`}
+          >
+            <ListChecks size={13} />
+            <span>{multiSelectMode ? dict.list.doneBtn : dict.list.selectBtn}</span>
+          </button>
 
           <button
             type="button"

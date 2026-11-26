@@ -1178,6 +1178,17 @@ async function init() {
   isVaultUnlocked = Boolean(connected && st.ok && sessionStatus === 'Unlocked');
   hideAllMainViews();
 
+  const unlockBiometricBtn = document.getElementById('unlock-biometric-btn');
+  const unlockOpenBtn = document.getElementById('unlock-open-btn');
+  const showBiometricUnlock = Boolean(connected && sessionStatus === 'Locked' && st.result?.biometricEnabled);
+  if (unlockBiometricBtn && unlockOpenBtn) {
+    unlockBiometricBtn.classList.toggle('hidden', !showBiometricUnlock);
+    unlockBiometricBtn.disabled = false;
+    unlockBiometricBtn.textContent = t('btnUnlockTouchId');
+    unlockOpenBtn.classList.toggle('btn-primary', !showBiometricUnlock);
+    unlockOpenBtn.classList.toggle('btn-secondary', showBiometricUnlock);
+  }
+
   if (!connected) {
     lockedTitle.textContent = t('disconnectedTitle');
     lockedDesc.textContent = t('disconnectedDesc');
@@ -1204,6 +1215,21 @@ document.getElementById('refresh-btn').addEventListener('click', () => void init
 document.getElementById('retry-connect-btn').addEventListener('click', () => void init());
 document.getElementById('open-app-btn').addEventListener('click', () => void sendBg({ type: 'OPEN_DESKTOP' }));
 document.getElementById('unlock-open-btn').addEventListener('click', () => void sendBg({ type: 'OPEN_DESKTOP' }));
+const unlockBioBtnEl = document.getElementById('unlock-biometric-btn');
+if (unlockBioBtnEl) {
+  unlockBioBtnEl.addEventListener('click', async () => {
+    unlockBioBtnEl.disabled = true;
+    unlockBioBtnEl.textContent = t('btnUnlockingTouchId');
+    const res = await sendBg({ type: 'UNLOCK_BIOMETRIC' });
+    if (res && res.ok) {
+      await init();
+      return;
+    }
+    unlockBioBtnEl.disabled = false;
+    unlockBioBtnEl.textContent = t('btnUnlockTouchId');
+    showToast(res?.error || t('toastTouchIdFailed'));
+  });
+}
 document.getElementById('copy-cmd-btn').addEventListener('click', () =>
   void copyText(installCmdEl.textContent, t('labelTroubleshootCmd'))
 );

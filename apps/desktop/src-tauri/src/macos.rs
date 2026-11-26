@@ -238,6 +238,10 @@ pub fn set_launch_at_login(enabled: bool) -> Result<(), CoreError> {
     macos_impl::set_launch_at_login(enabled)
 }
 
+pub fn system_preferred_language() -> Option<String> {
+    macos_impl::system_preferred_language()
+}
+
 #[cfg(target_os = "macos")]
 mod macos_impl {
     use std::path::PathBuf;
@@ -257,8 +261,8 @@ mod macos_impl {
         NSWorkspaceSessionDidResignActiveNotification, NSWorkspaceWillSleepNotification,
     };
     use objc2_foundation::{
-        NSArray, NSData, NSDictionary, NSDistributedNotificationCenter, NSError, NSNotification,
-        NSString,
+        NSArray, NSData, NSDictionary, NSDistributedNotificationCenter, NSError, NSLocale,
+        NSNotification, NSString,
     };
     use objc2_local_authentication::{LAContext, LAPolicy};
     use security_framework::passwords::{
@@ -620,6 +624,12 @@ mod macos_impl {
             }
         }
     }
+
+    pub fn system_preferred_language() -> Option<String> {
+        NSLocale::preferredLanguages()
+            .firstObject()
+            .map(|s| s.to_string())
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -812,5 +822,9 @@ mod macos_impl {
             let _ = account_id;
             Ok(())
         }
+    }
+
+    pub fn system_preferred_language() -> Option<String> {
+        None
     }
 }

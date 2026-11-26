@@ -98,6 +98,11 @@ export type TauriEventMap = {
   'large-type:updated': LargeTypePayload;
   'ui:focus_item': { itemId: string } | string;
   'ui:settings_changed': AppSettings;
+  'ui:open_about': { checkUpdates?: boolean } | null;
+  'ui:open_settings': unknown;
+  'ui:new_item': unknown;
+  'ui:focus_search': unknown;
+  'ui:sync_vault': unknown;
 };
 
 type EventListener<K extends keyof TauriEventMap> = (payload: TauriEventMap[K]) => void;
@@ -222,6 +227,7 @@ export interface KeysmithClient {
   clipboardReadImageBase64(): Promise<string | null>;
 
   windowMainReady(): Promise<void>;
+  windowSetCompactLock(compact: boolean): Promise<void>;
   windowOpenLargeType(label: string, value: string): Promise<void>;
   windowCloseLargeType(): Promise<void>;
   windowSetLargeTypePin(pinned: boolean): Promise<void>;
@@ -628,6 +634,10 @@ class KeysmithTauriClient implements KeysmithClient {
 
   windowMainReady(): Promise<void> {
     return invokeCore<void>('window_main_ready');
+  }
+
+  windowSetCompactLock(compact: boolean): Promise<void> {
+    return invokeCore<void>('window_set_compact_lock', { compact });
   }
 
   windowOpenLargeType(label: string, value: string): Promise<void> {
@@ -1833,6 +1843,8 @@ class KeysmithPrototypeClient implements KeysmithClient {
   // --- Window / System Helpers ---
 
   async windowMainReady(): Promise<void> {}
+
+  async windowSetCompactLock(_compact: boolean): Promise<void> {}
 
   async windowOpenLargeType(label: string, value: string): Promise<void> {
     this.largeTypePayload = { label, value };

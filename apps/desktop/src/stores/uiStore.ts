@@ -71,6 +71,8 @@ interface UiStore {
   largeType: LargeTypeState | null;
   newItemOpen: boolean;
   settingsOpen: boolean;
+  aboutOpen: boolean;
+  aboutAutoCheck: boolean;
   quickAccessOpen: boolean;
   generatorOpen: boolean;
   vaultModal: VaultModalState | null;
@@ -111,6 +113,7 @@ interface UiStore {
   closeLargeType: () => void;
   setNewItemOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  setAboutOpen: (open: boolean, autoCheck?: boolean) => void;
   setQuickAccessOpen: (open: boolean) => void;
   setGeneratorOpen: (open: boolean) => void;
   setVaultModal: (modal: VaultModalState | null) => void;
@@ -181,6 +184,8 @@ export const useUiStore = create<UiStore>((set, get) => ({
   largeType: null,
   newItemOpen: false,
   settingsOpen: false,
+  aboutOpen: false,
+  aboutAutoCheck: false,
   quickAccessOpen: false,
   generatorOpen: false,
   vaultModal: null,
@@ -396,6 +401,8 @@ export const useUiStore = create<UiStore>((set, get) => ({
   closeLargeType: () => set({ largeType: null }),
   setNewItemOpen: (newItemOpen) => set({ newItemOpen }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setAboutOpen: (aboutOpen, autoCheck = false) =>
+    set({ aboutOpen, aboutAutoCheck: aboutOpen ? Boolean(autoCheck) : false }),
   setQuickAccessOpen: (quickAccessOpen) => set({ quickAccessOpen }),
   setGeneratorOpen: (generatorOpen) => set({ generatorOpen }),
   setVaultModal: (vaultModal) => set({ vaultModal }),

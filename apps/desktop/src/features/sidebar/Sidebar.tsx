@@ -5,8 +5,6 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
-  Command,
-  Dices,
   Fingerprint,
   FolderLock,
   Hash,
@@ -24,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useI18n } from '../../i18n';
-import { isTauriRuntime, tauriClient } from '../../services/tauriClient';
+import { isTauriRuntime } from '../../services/tauriClient';
 import { PHASE1_TEMPLATES, PHASE2_TEMPLATES } from '../../services/templates';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -64,8 +62,6 @@ export function Sidebar() {
   const setViewTag = useUiStore((s) => s.setViewTag);
   const setViewTrash = useUiStore((s) => s.setViewTrash);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
-  const setQuickAccessOpen = useUiStore((s) => s.setQuickAccessOpen);
-  const setGeneratorOpen = useUiStore((s) => s.setGeneratorOpen);
   const setVaultModal = useUiStore((s) => s.setVaultModal);
   const getFilter = useUiStore((s) => s.getFilter);
   const showToast = useUiStore((s) => s.showToast);
@@ -552,36 +548,6 @@ export function Sidebar() {
         </button>
 
         <div className="flex items-center gap-0.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              if (inTauri) {
-                void tauriClient.windowToggleGenerator();
-              } else {
-                setGeneratorOpen(true);
-              }
-            }}
-            title={`${dict.sidebar.generatorTooltip} (${formatShortcutMac(shortcuts.openGenerator)})`}
-            aria-label={dict.sidebar.generatorTooltip}
-            className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
-          >
-            <Dices size={13} />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (inTauri) {
-                void tauriClient.windowToggleQuickAccess();
-              } else {
-                setQuickAccessOpen(true);
-              }
-            }}
-            title={`${dict.sidebar.quickAccessTooltip} (${formatShortcutMac(shortcuts.quickAccessInApp)})`}
-            aria-label={dict.sidebar.quickAccessTooltip}
-            className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
-          >
-            <Command size={13} />
-          </button>
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}

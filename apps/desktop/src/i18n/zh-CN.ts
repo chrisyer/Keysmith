@@ -352,6 +352,7 @@ export const zhCN = {
       sync: '账户与同步',
       shortcuts: '快捷键',
       browser: '浏览器扩展',
+      about: '关于',
     },
     languageLabel: '界面语言',
     languageSystem: '跟随系统',
@@ -690,6 +691,20 @@ export const zhCN = {
     membership: '会员卡',
     medical_record: '医疗记录',
     document: '文档',
+  },
+  about: {
+    title: '关于 Keysmith',
+    tagline: '本地优先、零知识加密的密码与通行密钥管理器',
+    authorLabel: '作者',
+    repositoryLabel: '代码仓库',
+    stackLabel: '技术栈',
+    protocolLabel: '兼容协议',
+    copyrightLabel: '版权所有',
+    openRepo: 'GitHub 仓库',
+    releases: '版本发布',
+    reportIssue: '反馈问题',
+    upToDate: '已是最新版本',
+    versionLabel: '版本与更新',
   },
 } as const;
 export type TranslationSchema = typeof zhCN;

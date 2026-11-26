@@ -9,6 +9,7 @@ import { ItemDetailPane } from './features/detail/ItemDetailPane';
 import { ItemEditorPane } from './features/detail/ItemEditorPane';
 import { ItemList } from './features/list/ItemList';
 import { GeneratorModal } from './features/modals/GeneratorModal';
+import { AboutModal } from './features/modals/AboutModal';
 import { NewItemModal } from './features/modals/NewItemModal';
 import { QuickAccessModal } from './features/modals/QuickAccessModal';
 import { VaultModal } from './features/modals/VaultModal';
@@ -85,6 +86,8 @@ function MainWorkspaceApp() {
   const setLanguageMode = useUiStore((s) => s.setLanguageMode);
   const setShortcutsFromStorage = useUiStore((s) => s.setShortcutsFromStorage);
   const setNewItemOpen = useUiStore((s) => s.setNewItemOpen);
+  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const setAboutOpen = useUiStore((s) => s.setAboutOpen);
   const setViewAll = useUiStore((s) => s.setViewAll);
   const stopEditing = useUiStore((s) => s.stopEditing);
   const showToast = useUiStore((s) => s.showToast);
@@ -162,6 +165,37 @@ function MainWorkspaceApp() {
       if (settings.customShortcuts) setShortcutsFromStorage(settings.customShortcuts);
     });
 
+    const unsubOpenAbout = tauriClient.onEvent('ui:open_about', (payload) => {
+      setAboutOpen(true, Boolean(payload?.checkUpdates));
+    });
+
+    const unsubOpenSettings = tauriClient.onEvent('ui:open_settings', () => {
+      if (useSessionStore.getState().status !== 'Unlocked') return;
+      setSettingsOpen(true);
+    });
+
+    const unsubNewItem = tauriClient.onEvent('ui:new_item', () => {
+      if (useSessionStore.getState().status !== 'Unlocked') return;
+      setNewItemOpen(true);
+    });
+
+    const unsubFocusSearch = tauriClient.onEvent('ui:focus_search', () => {
+      if (useSessionStore.getState().status !== 'Unlocked') return;
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+
+    const unsubSyncVault = tauriClient.onEvent('ui:sync_vault', () => {
+      if (useSessionStore.getState().status !== 'Unlocked') return;
+      const currentDict = getDictionary(resolveLocale(useUiStore.getState().languageMode));
+      void useVaultStore.getState().syncNow(useUiStore.getState().getFilter());
+      showToast({
+        label: currentDict.sidebar.syncing,
+        text: currentDict.sidebar.syncing,
+        kind: 'info',
+      });
+    });
+
     return () => {
       unsubTheme();
       unsubState();
@@ -172,6 +206,11 @@ function MainWorkspaceApp() {
       unsubFocusItem();
       unsubDataChanged();
       unsubSettings();
+      unsubOpenAbout();
+      unsubOpenSettings();
+      unsubNewItem();
+      unsubFocusSearch();
+      unsubSyncVault();
     };
   }, [
     clearOnLock,
@@ -179,9 +218,12 @@ function MainWorkspaceApp() {
     refreshAll,
     resetSensitiveUiOnLock,
     selectItem,
+    setAboutOpen,
     setAuthStatus,
     setClipboardCountdown,
     setLanguageMode,
+    setNewItemOpen,
+    setSettingsOpen,
     setShortcutsFromStorage,
     setSyncStatus,
     setSystemPrefersDark,
@@ -190,6 +232,11 @@ function MainWorkspaceApp() {
     showToast,
     stopEditing,
   ]);
+
+  useEffect(() => {
+    if (!initialized || !isTauriRuntime()) return;
+    void tauriClient.windowSetCompactLock(authStatus === 'Locked' && !addingAccount);
+  }, [initialized, authStatus, addingAccount]);
 
   useEffect(() => {
     if (!initialized || authStatus !== 'Unlocked') return;
@@ -278,6 +325,7 @@ function MainWorkspaceApp() {
     return (
       <>
         <AuthScreen />
+        <AboutModal />
         <ToastRegion />
       </>
     );
@@ -287,6 +335,7 @@ function MainWorkspaceApp() {
     return (
       <>
         <LockScreen />
+        <AboutModal />
         <ToastRegion />
       </>
     );
@@ -368,6 +417,7 @@ function MainWorkspaceApp() {
         <SettingsModal />
       </Suspense>
       <VaultModal />
+      <AboutModal />
       <ToastRegion />
     </div>
   );

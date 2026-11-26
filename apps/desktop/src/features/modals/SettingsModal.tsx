@@ -6,6 +6,7 @@ import {
   Fingerprint,
   FolderOpen,
   Globe,
+  Info,
   Keyboard,
   LogOut,
   Monitor,
@@ -24,6 +25,7 @@ import {
 import { useEffect, useState } from 'react';
 import { ModalDialog } from '../../components/ModalDialog';
 import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
+import { AboutContent } from './AboutModal';
 import {
   detectPasskeyCapabilities,
   resolveAaguidProvider,
@@ -102,7 +104,7 @@ export function SettingsModal() {
   const refreshAll = useVaultStore((s) => s.refreshAll);
 
   const [tab, setTab] = useState<
-    'appearance' | 'security' | 'passkeys' | 'browser' | 'import_export' | 'sync' | 'shortcuts'
+    'appearance' | 'security' | 'passkeys' | 'browser' | 'import_export' | 'sync' | 'shortcuts' | 'about'
   >('appearance');
   const [browserStatus, setBrowserStatus] = useState<BrowserIntegrationStatus | null>(null);
   const [browserBusy, setBrowserBusy] = useState(false);
@@ -430,6 +432,7 @@ export function SettingsModal() {
                 { id: 'import_export', label: dict.settings.tabs.import_export, icon: ArrowDownToLine },
                 { id: 'sync', label: dict.settings.tabs.sync, icon: RefreshCw },
                 { id: 'shortcuts', label: dict.settings.tabs.shortcuts, icon: Keyboard },
+                { id: 'about', label: dict.settings.tabs.about, icon: Info },
               ] as const
             ).map((item) => {
               const Icon = item.icon;
@@ -1391,6 +1394,8 @@ export function SettingsModal() {
                 </div>
               </div>
             )}
+
+            {tab === 'about' && <AboutContent />}
           </div>
         </div>
       </div>

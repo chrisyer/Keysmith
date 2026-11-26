@@ -24,7 +24,10 @@ use tokio::net::UnixListener;
 use tokio::net::windows::named_pipe::ServerOptions;
 use url::Url;
 
-use crate::commands::{emit_data_changed, show_main_window};
+use crate::commands::{
+    apply_window_preferences, emit_data_changed, emit_session_state, poke_signalr,
+    show_main_window, AppState,
+};
 use crate::events::{UiFocusItemPayload, EVENT_SYNC_STATUS, EVENT_UI_FOCUS_ITEM};
 
 pub const APP_SUPPORT_DIR_NAME: &str = "dev.keysmith.desktop";
@@ -270,6 +273,28 @@ async fn dispatch_rpc(
         "open_desktop" => {
             show_main_window(app);
             Ok(json!({ "opened": true }))
+        }
+        "unlock_biometric" => {
+            let st = core.session_get_state();
+            if st.status == AuthStatus::Unlocked {
+                return Ok(json!({ "unlocked": true, "status": "Unlocked" }));
+            }
+            if st.status != AuthStatus::Locked {
+                return Err("请先登录 Keysmith 账号".to_string());
+            }
+            if !st.biometric_enabled {
+                return Err("未启用 Touch ID / 生物识别解锁".to_string());
+            }
+            let session = core
+                .session_unlock_biometric()
+                .await
+                .map_err(|e| e.to_string())?;
+            emit_session_state(app, &session, "biometric");
+            apply_window_preferences(app, &session);
+            if let Some(state) = app.try_state::<AppState>() {
+                poke_signalr(&state);
+            }
+            Ok(json!({ "unlocked": true, "status": "Unlocked" }))
         }
         "focus_item" => {
             let item_id = params

@@ -9,6 +9,11 @@ pub const EVENT_UI_TOGGLE_QUICK_ACCESS: &str = "ui:toggle_quick_access";
 pub const EVENT_LARGE_TYPE_UPDATED: &str = "large-type:updated";
 pub const EVENT_UI_FOCUS_ITEM: &str = "ui:focus_item";
 pub const EVENT_UI_SETTINGS_CHANGED: &str = "ui:settings_changed";
+pub const EVENT_UI_OPEN_ABOUT: &str = "ui:open_about";
+pub const EVENT_UI_OPEN_SETTINGS: &str = "ui:open_settings";
+pub const EVENT_UI_NEW_ITEM: &str = "ui:new_item";
+pub const EVENT_UI_FOCUS_SEARCH: &str = "ui:focus_search";
+pub const EVENT_UI_SYNC_VAULT: &str = "ui:sync_vault";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,4 +56,10 @@ pub struct LargeTypePayload {
 #[serde(rename_all = "camelCase")]
 pub struct UiFocusItemPayload {
     pub item_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiOpenAboutPayload {
+    pub check_updates: bool,
 }

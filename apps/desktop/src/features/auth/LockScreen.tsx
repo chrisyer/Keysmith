@@ -132,9 +132,9 @@ export function LockScreen() {
   const hasQuickUnlock = biometricEnabled || hasAccountPasskeys;
 
   return (
-    <div className="h-dvh w-full flex flex-col items-center justify-center bg-[var(--bg-sidebar)] p-6">
+    <div className="h-dvh w-full flex flex-col items-center justify-center bg-[var(--bg-sidebar)] p-4 pt-9 overflow-y-auto">
       {inTauri && <div data-tauri-drag-region className="fixed top-0 left-0 right-0 h-9" />}
-      <div className="relative w-full max-w-[360px] rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-xl p-7 flex flex-col items-center text-center">
+      <div className="relative w-full max-w-[360px] rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-xl p-6 flex flex-col items-center text-center">
         <label className="absolute top-3.5 right-3.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-md hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[10.5px] font-medium text-[var(--text-secondary)] cursor-pointer">
           <Globe size={11} />
           <select

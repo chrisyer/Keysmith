@@ -633,6 +633,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse(await rpcRaw('open_desktop', {}));
         break;
       }
+      case 'UNLOCK_BIOMETRIC': {
+        sendResponse(await rpcRaw('unlock_biometric', {}));
+        break;
+      }
       case 'FOCUS_DESKTOP_ITEM': {
         sendResponse(await rpcRaw('focus_item', { itemId: message.itemId || '' }));
         break;

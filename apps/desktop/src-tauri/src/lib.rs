@@ -21,11 +21,13 @@ use tokio::sync::{mpsc, watch};
 
 use crate::commands::{
     apply_window_preferences, destroy_floating_windows_and_wipe, emit_data_changed,
-    show_generator_window, show_main_window, show_quick_access_window,
+    set_main_window_compact, show_generator_window, show_main_window, show_quick_access_window,
     toggle_quick_access_window, update_global_shortcut, AppState,
 };
 use crate::events::{
-    SessionStateChangedPayload, EVENT_SESSION_STATE_CHANGED, EVENT_SYNC_STATUS,
+    SessionStateChangedPayload, UiOpenAboutPayload, EVENT_SESSION_STATE_CHANGED,
+    EVENT_SYNC_STATUS, EVENT_UI_FOCUS_SEARCH, EVENT_UI_NEW_ITEM, EVENT_UI_OPEN_ABOUT,
+    EVENT_UI_OPEN_SETTINGS, EVENT_UI_SYNC_VAULT,
 };
 use crate::ipc_socket::spawn_ipc_socket_server;
 use crate::macos::{
@@ -37,58 +39,61 @@ const DOCK_ICON_PNG: &[u8] = include_bytes!("../icons/128x128@2x.png");
 const TRAY_ICON_PNG: &[u8] = include_bytes!("../icons/tray-icon@2x.png");
 const TRAY_ID: &str = "main-tray";
 
-fn resolve_menu_locale(lang: &str) -> &'static str {
-    let raw = match lang.trim() {
-        "" | "system" => {
-            let env_lang = std::env::var("LANG")
-                .or_else(|_| std::env::var("LC_ALL"))
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if env_lang.starts_with("zh_tw") || env_lang.starts_with("zh_hk") || env_lang.starts_with("zh-hant") {
-                return "zh-TW";
-            }
-            if env_lang.starts_with("zh") {
-                return "zh-CN";
-            }
-            if env_lang.starts_with("ja") {
-                return "ja";
-            }
-            if env_lang.starts_with("ko") {
-                return "ko";
-            }
-            if env_lang.starts_with("de") {
-                return "de";
-            }
-            if env_lang.starts_with("fr") {
-                return "fr";
-            }
-            if env_lang.starts_with("es") {
-                return "es";
-            }
-            return "en";
-        }
-        other => other,
-    };
-    match raw {
-        "zh-CN" | "zh" => "zh-CN",
-        "zh-TW" | "zh-HK" => "zh-TW",
-        "ja" => "ja",
-        "ko" => "ko",
-        "de" => "de",
-        "fr" => "fr",
-        "es" => "es",
-        _ => "en",
+fn normalize_locale_code(raw: &str) -> &'static str {
+    let low = raw.trim().to_ascii_lowercase().replace('_', "-");
+    if low.starts_with("zh-tw")
+        || low.starts_with("zh-hk")
+        || low.starts_with("zh-mo")
+        || low.starts_with("zh-hant")
+    {
+        return "zh-TW";
     }
+    if low.starts_with("zh") {
+        return "zh-CN";
+    }
+    if low.starts_with("ja") {
+        return "ja";
+    }
+    if low.starts_with("ko") {
+        return "ko";
+    }
+    if low.starts_with("de") {
+        return "de";
+    }
+    if low.starts_with("fr") {
+        return "fr";
+    }
+    if low.starts_with("es") {
+        return "es";
+    }
+    "en"
+}
+
+fn resolve_menu_locale(lang: &str) -> &'static str {
+    let trimmed = lang.trim();
+    if trimmed.is_empty() || trimmed == "system" {
+        if let Some(sys) = crate::macos::system_preferred_language() {
+            return normalize_locale_code(&sys);
+        }
+        let env_lang = std::env::var("LANG")
+            .or_else(|_| std::env::var("LC_ALL"))
+            .unwrap_or_default();
+        return normalize_locale_code(&env_lang);
+    }
+    normalize_locale_code(trimmed)
 }
 
 struct MenuLabels {
     show: &'static str,
+    main_window: &'static str,
     quick_access: &'static str,
     generator: &'static str,
     copy_pw: &'static str,
     lock: &'static str,
     quit: &'static str,
     about: &'static str,
+    check_updates: &'static str,
+    settings: &'static str,
     hide: &'static str,
     hide_others: &'static str,
     show_all: &'static str,
@@ -99,9 +104,13 @@ struct MenuLabels {
     copy: &'static str,
     paste: &'static str,
     select_all: &'static str,
+    new_item: &'static str,
+    search_vault: &'static str,
+    sync_vault: &'static str,
     window: &'static str,
     minimize: &'static str,
     zoom: &'static str,
+    fullscreen: &'static str,
     close_window: &'static str,
 }
 
@@ -109,12 +118,15 @@ fn menu_labels(lang: &str) -> MenuLabels {
     match resolve_menu_locale(lang) {
         "zh-CN" => MenuLabels {
             show: "显示 Keysmith",
+            main_window: "Keysmith 主窗口",
             quick_access: "Quick Access",
             generator: "密码生成器",
             copy_pw: "快速复制新密码",
             lock: "锁定保险库",
             quit: "退出 Keysmith",
             about: "关于 Keysmith",
+            check_updates: "检查更新...",
+            settings: "设置...",
             hide: "隐藏 Keysmith",
             hide_others: "隐藏其他",
             show_all: "全部显示",
@@ -125,19 +137,26 @@ fn menu_labels(lang: &str) -> MenuLabels {
             copy: "拷贝",
             paste: "粘贴",
             select_all: "全选",
+            new_item: "新建项目",
+            search_vault: "搜索密码库",
+            sync_vault: "立即同步",
             window: "窗口",
             minimize: "最小化",
             zoom: "缩放",
+            fullscreen: "进入全屏幕",
             close_window: "关闭窗口",
         },
         "zh-TW" => MenuLabels {
             show: "顯示 Keysmith",
+            main_window: "Keysmith 主視窗",
             quick_access: "Quick Access",
             generator: "密碼產生器",
             copy_pw: "快速複製新密碼",
             lock: "鎖定保險庫",
             quit: "結束 Keysmith",
             about: "關於 Keysmith",
+            check_updates: "檢查更新...",
+            settings: "設定...",
             hide: "隱藏 Keysmith",
             hide_others: "隱藏其他",
             show_all: "顯示全部",
@@ -148,19 +167,26 @@ fn menu_labels(lang: &str) -> MenuLabels {
             copy: "複製",
             paste: "貼上",
             select_all: "全選",
+            new_item: "新增項目",
+            search_vault: "搜尋密碼庫",
+            sync_vault: "立即同步",
             window: "視窗",
             minimize: "最小化",
             zoom: "縮放",
+            fullscreen: "進入全螢幕",
             close_window: "關閉視窗",
         },
         "ja" => MenuLabels {
             show: "Keysmith を表示",
+            main_window: "Keysmith メインウィンドウ",
             quick_access: "Quick Access",
             generator: "パスワード生成",
             copy_pw: "新しいパスワードをコピー",
             lock: "保管庫をロック",
             quit: "Keysmith を終了",
             about: "Keysmith について",
+            check_updates: "アップデートを確認...",
+            settings: "設定...",
             hide: "Keysmith を隠す",
             hide_others: "ほかを隠す",
             show_all: "すべて表示",
@@ -171,19 +197,26 @@ fn menu_labels(lang: &str) -> MenuLabels {
             copy: "コピー",
             paste: "ペースト",
             select_all: "すべてを選択",
+            new_item: "新規項目",
+            search_vault: "保管庫を検索",
+            sync_vault: "今すぐ同期",
             window: "ウィンドウ",
             minimize: "最小化",
             zoom: "拡大/縮小",
+            fullscreen: "フルスクリーンにする",
             close_window: "ウィンドウを閉じる",
         },
         "ko" => MenuLabels {
             show: "Keysmith 보기",
+            main_window: "Keysmith 기본 윈도우",
             quick_access: "Quick Access",
             generator: "비밀번호 생성기",
             copy_pw: "새 비밀번호 복사",
             lock: "금고 잠그기",
             quit: "Keysmith 종료",
             about: "Keysmith 정보",
+            check_updates: "업데이트 확인...",
+            settings: "설정...",
             hide: "Keysmith 가리기",
             hide_others: "기타 가리기",
             show_all: "모두 보기",
@@ -194,19 +227,26 @@ fn menu_labels(lang: &str) -> MenuLabels {
             copy: "복사하기",
             paste: "붙여넣기",
             select_all: "모두 선택",
+            new_item: "새 항목",
+            search_vault: "금고 검색",
+            sync_vault: "지금 동기화",
             window: "윈도우",
             minimize: "최소화",
             zoom: "확대/축소",
+            fullscreen: "전체 화면 시작",
             close_window: "윈도우 닫기",
         },
         "de" => MenuLabels {
             show: "Keysmith anzeigen",
+            main_window: "Keysmith-Hauptfenster",
             quick_access: "Quick Access",
             generator: "Passwortgenerator",
             copy_pw: "Neues Passwort kopieren",
             lock: "Tresor sperren",
             quit: "Keysmith beenden",
             about: "Über Keysmith",
+            check_updates: "Nach Updates suchen...",
+            settings: "Einstellungen...",
             hide: "Keysmith ausblenden",
             hide_others: "Andere ausblenden",
             show_all: "Alle einblenden",
@@ -217,19 +257,26 @@ fn menu_labels(lang: &str) -> MenuLabels {
             copy: "Kopieren",
             paste: "Einsetzen",
             select_all: "Alles auswählen",
+            new_item: "Neuer Eintrag",
+            search_vault: "Tresor durchsuchen",
+            sync_vault: "Jetzt synchronisieren",
             window: "Fenster",
             minimize: "Minimieren",
             zoom: "Zoomen",
+            fullscreen: "Vollbild ein",
             close_window: "Fenster schließen",
         },
         "fr" => MenuLabels {
             show: "Afficher Keysmith",
+            main_window: "Fenêtre principale Keysmith",
             quick_access: "Quick Access",
             generator: "Générateur de mots de passe",
             copy_pw: "Copier un nouveau mot de passe",
             lock: "Verrouiller le coffre",
             quit: "Quitter Keysmith",
             about: "À propos de Keysmith",
+            check_updates: "Rechercher des mises à jour...",
+            settings: "Réglages...",
             hide: "Masquer Keysmith",
             hide_others: "Masquer les autres",
             show_all: "Tout afficher",
@@ -240,19 +287,26 @@ fn menu_labels(lang: &str) -> MenuLabels {
             copy: "Copier",
             paste: "Coller",
             select_all: "Tout sélectionner",
+            new_item: "Nouvel élément",
+            search_vault: "Rechercher dans le coffre",
+            sync_vault: "Synchroniser maintenant",
             window: "Fenêtre",
             minimize: "Réduire",
             zoom: "Agrandir",
+            fullscreen: "Activer le mode plein écran",
             close_window: "Fermer la fenêtre",
         },
         "es" => MenuLabels {
             show: "Mostrar Keysmith",
+            main_window: "Ventana principal de Keysmith",
             quick_access: "Quick Access",
             generator: "Generador de contraseñas",
             copy_pw: "Copiar nueva contraseña",
             lock: "Bloquear bóveda",
             quit: "Salir de Keysmith",
             about: "Acerca de Keysmith",
+            check_updates: "Buscar actualizaciones...",
+            settings: "Ajustes...",
             hide: "Ocultar Keysmith",
             hide_others: "Ocultar otros",
             show_all: "Mostrar todo",
@@ -263,19 +317,26 @@ fn menu_labels(lang: &str) -> MenuLabels {
             copy: "Copiar",
             paste: "Pegar",
             select_all: "Seleccionar todo",
+            new_item: "Nuevo elemento",
+            search_vault: "Buscar en la bóveda",
+            sync_vault: "Sincronizar ahora",
             window: "Ventana",
             minimize: "Minimizar",
             zoom: "Zoom",
+            fullscreen: "Usar pantalla completa",
             close_window: "Cerrar ventana",
         },
         _ => MenuLabels {
             show: "Show Keysmith",
+            main_window: "Main Window",
             quick_access: "Quick Access",
             generator: "Password Generator",
             copy_pw: "Copy New Password",
             lock: "Lock Vault",
             quit: "Quit Keysmith",
             about: "About Keysmith",
+            check_updates: "Check for Updates...",
+            settings: "Settings...",
             hide: "Hide Keysmith",
             hide_others: "Hide Others",
             show_all: "Show All",
@@ -286,9 +347,13 @@ fn menu_labels(lang: &str) -> MenuLabels {
             copy: "Copy",
             paste: "Paste",
             select_all: "Select All",
+            new_item: "New Item",
+            search_vault: "Search Vault",
+            sync_vault: "Sync Now",
             window: "Window",
             minimize: "Minimize",
             zoom: "Zoom",
+            fullscreen: "Enter Full Screen",
             close_window: "Close Window",
         },
     }
@@ -304,6 +369,42 @@ fn handle_menu_action(app: &AppHandle, raw_id: &str) {
     match action {
         "show" => {
             show_main_window(app);
+        }
+        "about" => {
+            show_main_window(app);
+            let _ = app.emit_to(
+                "main",
+                EVENT_UI_OPEN_ABOUT,
+                UiOpenAboutPayload {
+                    check_updates: false,
+                },
+            );
+        }
+        "check_updates" => {
+            show_main_window(app);
+            let _ = app.emit_to(
+                "main",
+                EVENT_UI_OPEN_ABOUT,
+                UiOpenAboutPayload {
+                    check_updates: true,
+                },
+            );
+        }
+        "settings" => {
+            show_main_window(app);
+            let _ = app.emit_to("main", EVENT_UI_OPEN_SETTINGS, ());
+        }
+        "new_item" => {
+            show_main_window(app);
+            let _ = app.emit_to("main", EVENT_UI_NEW_ITEM, ());
+        }
+        "search" => {
+            show_main_window(app);
+            let _ = app.emit_to("main", EVENT_UI_FOCUS_SEARCH, ());
+        }
+        "sync" => {
+            show_main_window(app);
+            let _ = app.emit_to("main", EVENT_UI_SYNC_VAULT, ());
         }
         "quick_access" => {
             if from_tray {
@@ -331,6 +432,7 @@ fn handle_menu_action(app: &AppHandle, raw_id: &str) {
             destroy_floating_windows_and_wipe(app);
             if let Some(state) = app.try_state::<AppState>() {
                 if state.core.session_lock("menu").is_ok() {
+                    set_main_window_compact(app, true);
                     let next = state.signalr_poke.borrow().wrapping_add(1);
                     let _ = state.signalr_poke.send(next);
                     let _ = app.emit(
@@ -355,15 +457,11 @@ fn handle_menu_action(app: &AppHandle, raw_id: &str) {
 
 fn build_app_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>> {
     let l = menu_labels(lang);
-    let show_item = MenuItem::with_id(app, "app:show", l.show, true, None::<&str>)?;
-    let quick_item = MenuItem::with_id(app, "app:quick_access", l.quick_access, true, None::<&str>)?;
-    let generator_item = MenuItem::with_id(
-        app,
-        "app:generator",
-        l.generator,
-        true,
-        Some("CommandOrControl+Shift+G"),
-    )?;
+    let about_item = MenuItem::with_id(app, "app:about", l.about, true, None::<&str>)?;
+    let updates_item =
+        MenuItem::with_id(app, "app:check_updates", l.check_updates, true, None::<&str>)?;
+    let settings_item =
+        MenuItem::with_id(app, "app:settings", l.settings, true, Some("CommandOrControl+,"))?;
     let lock_item = MenuItem::with_id(
         app,
         "app:lock",
@@ -384,11 +482,11 @@ fn build_app_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>
         "Keysmith",
         true,
         &[
-            &PredefinedMenuItem::about(app, Some(l.about), None)?,
+            &about_item,
+            &updates_item,
             &PredefinedMenuItem::separator(app)?,
-            &show_item,
-            &quick_item,
-            &generator_item,
+            &settings_item,
+            &PredefinedMenuItem::separator(app)?,
             &lock_item,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::hide(app, Some(l.hide))?,
@@ -397,6 +495,28 @@ fn build_app_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>
             &PredefinedMenuItem::separator(app)?,
             &quit_item,
         ],
+    )?;
+
+    let new_item = MenuItem::with_id(
+        app,
+        "app:new_item",
+        l.new_item,
+        true,
+        Some("CommandOrControl+N"),
+    )?;
+    let search_item = MenuItem::with_id(
+        app,
+        "app:search",
+        l.search_vault,
+        true,
+        Some("CommandOrControl+F"),
+    )?;
+    let sync_item = MenuItem::with_id(
+        app,
+        "app:sync",
+        l.sync_vault,
+        true,
+        Some("CommandOrControl+R"),
     )?;
 
     let edit_submenu = Submenu::with_items(
@@ -411,7 +531,21 @@ fn build_app_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>
             &PredefinedMenuItem::copy(app, Some(l.copy))?,
             &PredefinedMenuItem::paste(app, Some(l.paste))?,
             &PredefinedMenuItem::select_all(app, Some(l.select_all))?,
+            &PredefinedMenuItem::separator(app)?,
+            &new_item,
+            &search_item,
+            &sync_item,
         ],
+    )?;
+
+    let main_window_item = MenuItem::with_id(app, "app:show", l.main_window, true, None::<&str>)?;
+    let quick_item = MenuItem::with_id(app, "app:quick_access", l.quick_access, true, None::<&str>)?;
+    let generator_item = MenuItem::with_id(
+        app,
+        "app:generator",
+        l.generator,
+        true,
+        Some("CommandOrControl+Shift+G"),
     )?;
 
     let window_submenu = Submenu::with_items(
@@ -421,6 +555,12 @@ fn build_app_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>
         &[
             &PredefinedMenuItem::minimize(app, Some(l.minimize))?,
             &PredefinedMenuItem::maximize(app, Some(l.zoom))?,
+            &PredefinedMenuItem::fullscreen(app, Some(l.fullscreen))?,
+            &PredefinedMenuItem::separator(app)?,
+            &main_window_item,
+            &quick_item,
+            &generator_item,
+            &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::close_window(app, Some(l.close_window))?,
         ],
     )?;
@@ -642,6 +782,8 @@ pub fn run() {
                 quick_access_pinned: AtomicBool::new(false),
                 quick_access_last_shown_ms: AtomicU64::new(0),
                 signalr_poke: signalr_poke.clone(),
+                saved_main_logical_size: Mutex::new(None),
+                main_window_compact: AtomicBool::new(false),
             });
 
             if let Err(err) = setup_app_menu(&handle, &initial_lang) {
@@ -678,6 +820,12 @@ pub fn run() {
                 tokio::time::sleep(Duration::from_millis(1200)).await;
                 if let Some(w) = fallback_handle.get_webview_window("main") {
                     if !w.is_visible().unwrap_or(false) {
+                        if let Some(st) = fallback_handle.try_state::<AppState>() {
+                            set_main_window_compact(
+                                &fallback_handle,
+                                st.core.session_get_state().status == AuthStatus::Locked,
+                            );
+                        }
                         let _ = w.show();
                     }
                 }
@@ -692,6 +840,7 @@ pub fn run() {
                 if st.lock_on_sleep && st.status == AuthStatus::Unlocked {
                     destroy_floating_windows_and_wipe(&sleep_handle);
                     if sleep_core.session_lock(reason).is_ok() {
+                        set_main_window_compact(&sleep_handle, true);
                         let next = sleep_poke.borrow().wrapping_add(1);
                         let _ = sleep_poke.send(next);
                         let _ = sleep_handle.emit(
@@ -714,6 +863,7 @@ pub fn run() {
                     tokio::time::sleep(Duration::from_secs(10)).await;
                     if let Ok(true) = bg_core.check_auto_lock() {
                         destroy_floating_windows_and_wipe(&bg_handle);
+                        set_main_window_compact(&bg_handle, true);
                         let next = bg_poke.borrow().wrapping_add(1);
                         let _ = bg_poke.send(next);
                         let _ = bg_handle.emit(
@@ -817,6 +967,7 @@ pub fn run() {
             commands::account_passkey_delete,
             commands::account_update_profile,
             commands::window_main_ready,
+            commands::window_set_compact_lock,
             commands::window_open_large_type,
             commands::window_close_large_type,
             commands::window_set_large_type_pin,
