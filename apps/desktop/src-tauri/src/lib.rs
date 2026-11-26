@@ -258,8 +258,11 @@ fn build_tray_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry
 }
 
 pub fn refresh_localized_menus(app: &AppHandle, lang: &str) -> tauri::Result<()> {
-    let app_menu = build_app_menu(app, lang)?;
-    app.set_menu(app_menu)?;
+    #[cfg(target_os = "macos")]
+    {
+        let app_menu = build_app_menu(app, lang)?;
+        app.set_menu(app_menu)?;
+    }
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let tray_menu = build_tray_menu(app, lang)?;
         tray.set_menu(Some(tray_menu))?;
@@ -268,8 +271,15 @@ pub fn refresh_localized_menus(app: &AppHandle, lang: &str) -> tauri::Result<()>
 }
 
 fn setup_app_menu(app: &AppHandle, lang: &str) -> tauri::Result<()> {
-    let menu = build_app_menu(app, lang)?;
-    app.set_menu(menu)?;
+    #[cfg(target_os = "macos")]
+    {
+        let menu = build_app_menu(app, lang)?;
+        app.set_menu(menu)?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, lang);
+    }
     Ok(())
 }
 
@@ -281,10 +291,21 @@ fn setup_tray(app: &AppHandle, lang: &str) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .tooltip("Keysmith");
 
-    if let Ok(tray_img) = tauri::image::Image::from_bytes(TRAY_ICON_PNG) {
-        builder = builder.icon(tray_img).icon_as_template(true);
-    } else if let Some(icon) = app.default_window_icon().cloned() {
-        builder = builder.icon(icon);
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(tray_img) = tauri::image::Image::from_bytes(TRAY_ICON_PNG) {
+            builder = builder.icon(tray_img).icon_as_template(true);
+        } else if let Some(icon) = app.default_window_icon().cloned() {
+            builder = builder.icon(icon);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Ok(tray_img) = tauri::image::Image::from_bytes(DOCK_ICON_PNG) {
+            builder = builder.icon(tray_img);
+        } else if let Some(icon) = app.default_window_icon().cloned() {
+            builder = builder.icon(icon);
+        }
     }
 
     builder
@@ -619,6 +640,7 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         match event {
+            #[cfg(target_os = "macos")]
             RunEvent::Reopen {
                 has_visible_windows: false,
                 ..

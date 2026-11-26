@@ -1303,10 +1303,26 @@ pub async fn browser_open_extension_folder(app: AppHandle) -> Result<String, Cor
         .await?
         .ok_or_else(|| CoreError::NotFound("未找到浏览器扩展目录".to_string()))?;
     let path_str = dir.to_string_lossy().to_string();
-    std::process::Command::new("open")
-        .arg(&path_str)
-        .spawn()
-        .map_err(|e| CoreError::Internal(format!("无法在 Finder 打开扩展目录: {e}")))?;
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&path_str);
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("explorer");
+        c.arg(&path_str);
+        c
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(&path_str);
+        c
+    };
+    cmd.spawn()
+        .map_err(|e| CoreError::Internal(format!("无法打开扩展目录: {e}")))?;
     Ok(path_str)
 }
 

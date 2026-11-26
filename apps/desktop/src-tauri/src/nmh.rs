@@ -1,12 +1,13 @@
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::ipc_socket::{resolve_socket_path, APP_SUPPORT_DIR_NAME};
+use crate::ipc_socket::{resolve_app_data_dir, resolve_socket_path, APP_SUPPORT_DIR_NAME};
 
 pub const NMH_HOST_NAME: &str = APP_SUPPORT_DIR_NAME;
 pub const KEYSMITH_EXTENSION_ID: &str = "ianpdijhflnmmhbmjdhiombdghhpfkmg";
@@ -190,12 +191,38 @@ fn forward_nmh_request(sock_path: &Path, raw_bytes: &[u8]) -> Vec<u8> {
     };
     line_bytes.push(b'\n');
 
+    #[cfg(unix)]
     let mut stream = match UnixStream::connect(sock_path) {
         Ok(s) => s,
         Err(_) => {
             return err_response(
                 "Keysmith desktop app is not running. Please open Keysmith first.".to_string(),
             );
+        }
+    };
+
+    #[cfg(windows)]
+    let mut stream = {
+        let mut connected = None;
+        for attempt in 0..10 {
+            match std::fs::OpenOptions::new().read(true).write(true).open(sock_path) {
+                Ok(f) => {
+                    connected = Some(f);
+                    break;
+                }
+                Err(err) if err.raw_os_error() == Some(231) && attempt < 9 => {
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                }
+                Err(_) => break,
+            }
+        }
+        match connected {
+            Some(s) => s,
+            None => {
+                return err_response(
+                    "Keysmith desktop app is not running. Please open Keysmith first.".to_string(),
+                );
+            }
         }
     };
 
@@ -319,10 +346,9 @@ fn locate_source_extension_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
 }
 
 /// Copies the bundled `browser-extension` directory to a stable non-bundle path under
-/// Application Support so Chromium's "Load unpacked" picker can always select it cleanly.
+/// the OS application data directory so Chromium's "Load unpacked" picker can always select it cleanly.
 pub fn sync_bundled_extension_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    let dst = resolve_extension_install_dir(&home);
+    let dst = resolve_app_data_dir()?.join("browser-extension");
     if let Some(src) = locate_source_extension_dir(resource_dir) {
         if copy_dir_recursive(&src, &dst).is_ok() {
             return Some(dst);
@@ -399,18 +425,137 @@ pub fn auto_install_nmh_in_home(
     }
 }
 
+#[cfg(windows)]
+fn normalize_win_exe_path(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    raw.strip_prefix(r"\\?\").unwrap_or(&raw).to_string()
+}
+
+#[cfg(windows)]
+fn auto_install_windows_browsers(
+    host_path: &Path,
+    extension_dir: Option<&Path>,
+    extra_extension_ids: &[String],
+) -> BrowserIntegrationStatus {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    struct WinBrowserDef {
+        id: &'static str,
+        label: &'static str,
+        user_data_rel: &'static [&'static str],
+        reg_path: &'static str,
+    }
+
+    const WIN_BROWSERS: &[WinBrowserDef] = &[
+        WinBrowserDef {
+            id: "chrome",
+            label: "Google Chrome",
+            user_data_rel: &["Google", "Chrome", "User Data"],
+            reg_path: r"HKCU\Software\Google\Chrome\NativeMessagingHosts\dev.keysmith.desktop",
+        },
+        WinBrowserDef {
+            id: "edge",
+            label: "Microsoft Edge",
+            user_data_rel: &["Microsoft", "Edge", "User Data"],
+            reg_path: r"HKCU\Software\Microsoft\Edge\NativeMessagingHosts\dev.keysmith.desktop",
+        },
+        WinBrowserDef {
+            id: "brave",
+            label: "Brave",
+            user_data_rel: &["BraveSoftware", "Brave-Browser", "User Data"],
+            reg_path: r"HKCU\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\dev.keysmith.desktop",
+        },
+        WinBrowserDef {
+            id: "chromium",
+            label: "Chromium",
+            user_data_rel: &["Chromium", "User Data"],
+            reg_path: r"HKCU\Software\Chromium\NativeMessagingHosts\dev.keysmith.desktop",
+        },
+        WinBrowserDef {
+            id: "vivaldi",
+            label: "Vivaldi",
+            user_data_rel: &["Vivaldi", "User Data"],
+            reg_path: r"HKCU\Software\Vivaldi\NativeMessagingHosts\dev.keysmith.desktop",
+        },
+    ];
+
+    let host_str = normalize_win_exe_path(host_path);
+    let local_app_data = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let app_data_dir = resolve_app_data_dir().unwrap_or_else(std::env::temp_dir);
+    let nmh_dir = app_data_dir.join("nmh");
+    let manifest_path = nmh_dir.join(format!("{NMH_HOST_NAME}.json"));
+    let origins = collect_origins(&manifest_path, extra_extension_ids);
+    let manifest_bytes = serde_json::to_vec_pretty(&json!({
+        "name": NMH_HOST_NAME,
+        "description": "Keysmith Desktop Native Messaging Host",
+        "path": host_str,
+        "type": "stdio",
+        "allowed_origins": origins,
+    }))
+    .unwrap_or_default();
+
+    let manifest_ready = std::fs::create_dir_all(&nmh_dir).is_ok()
+        && std::fs::write(&manifest_path, &manifest_bytes).is_ok();
+    let manifest_str = manifest_path.to_string_lossy().to_string();
+
+    let mut browsers = Vec::with_capacity(WIN_BROWSERS.len());
+    for def in WIN_BROWSERS {
+        let mut user_data = local_app_data.clone();
+        for seg in def.user_data_rel {
+            user_data.push(seg);
+        }
+        let detected = !local_app_data.as_os_str().is_empty() && user_data.is_dir();
+        let configured = if detected && manifest_ready {
+            std::process::Command::new("reg")
+                .args(["add", def.reg_path, "/ve", "/t", "REG_SZ", "/d", &manifest_str, "/f"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        browsers.push(BrowserInstallInfo {
+            id: def.id.to_string(),
+            label: def.label.to_string(),
+            detected,
+            configured,
+            manifest_path: manifest_str.clone(),
+        });
+    }
+
+    BrowserIntegrationStatus {
+        extension_id: KEYSMITH_EXTENSION_ID.to_string(),
+        host_path: host_str,
+        extension_dir: extension_dir.map(|p| p.to_string_lossy().to_string()),
+        browsers,
+    }
+}
+
 pub fn auto_install_nmh_for_detected_browsers(
     resource_dir: Option<&Path>,
     extra_extension_ids: &[String],
 ) -> BrowserIntegrationStatus {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
     let host_path = std::env::current_exe()
         .and_then(|p| p.canonicalize())
         .unwrap_or_else(|_| PathBuf::from("keysmith-desktop"));
     let ext_dir = sync_bundled_extension_dir(resource_dir);
-    auto_install_nmh_in_home(&home, &host_path, ext_dir.as_deref(), extra_extension_ids)
+
+    #[cfg(windows)]
+    {
+        return auto_install_windows_browsers(&host_path, ext_dir.as_deref(), extra_extension_ids);
+    }
+
+    #[cfg(not(windows))]
+    {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/tmp"));
+        auto_install_nmh_in_home(&home, &host_path, ext_dir.as_deref(), extra_extension_ids)
+    }
 }
 
 #[cfg(test)]

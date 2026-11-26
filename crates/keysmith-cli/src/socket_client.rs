@@ -5,12 +5,17 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(unix)]
 use tokio::net::UnixStream;
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::ClientOptions;
 
 pub const APP_SUPPORT_DIR_NAME: &str = "dev.keysmith.desktop";
 pub const SOCKET_FILE_NAME: &str = "keysmith.sock";
+#[cfg(windows)]
+pub const WINDOWS_PIPE_NAME: &str = r"\\.\pipe\dev.keysmith.desktop";
 
-/// Returns the default Unix domain socket path for the Keysmith desktop daemon.
+/// Returns the default IPC endpoint path (Unix domain socket on Unix, Named Pipe on Windows).
 /// Respects `KEYSMITH_SOCKET` if set.
 pub fn default_socket_path() -> Result<PathBuf> {
     if let Some(override_path) = std::env::var_os("KEYSMITH_SOCKET") {
@@ -18,12 +23,29 @@ pub fn default_socket_path() -> Result<PathBuf> {
             return Ok(PathBuf::from(override_path));
         }
     }
-    let home = std::env::var_os("HOME").context("HOME environment variable is not set")?;
-    Ok(PathBuf::from(home)
-        .join("Library")
-        .join("Application Support")
-        .join(APP_SUPPORT_DIR_NAME)
-        .join(SOCKET_FILE_NAME))
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME").context("HOME environment variable is not set")?;
+        return Ok(PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join(APP_SUPPORT_DIR_NAME)
+            .join(SOCKET_FILE_NAME));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return Ok(PathBuf::from(WINDOWS_PIPE_NAME));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let base = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share"))
+            })
+            .context("Neither XDG_DATA_HOME nor HOME environment variable is set")?;
+        Ok(base.join(APP_SUPPORT_DIR_NAME).join(SOCKET_FILE_NAME))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +117,7 @@ impl SocketClient {
 
     /// Forwards a pre-built `RpcRequest` (preserving caller's `id`) and returns the raw `RpcResponse`.
     pub async fn send_raw_request(&self, req: &RpcRequest) -> Result<RpcResponse> {
+        #[cfg(unix)]
         let stream = UnixStream::connect(&self.socket_path).await.with_context(|| {
             format!(
                 "Failed to connect to Keysmith socket at {} (is Keysmith running?)",
@@ -102,7 +125,27 @@ impl SocketClient {
             )
         })?;
 
-        let (reader, mut writer) = stream.into_split();
+        #[cfg(windows)]
+        let stream = {
+            let mut attempt = 0u8;
+            loop {
+                match ClientOptions::new().open(&self.socket_path) {
+                    Ok(client) => break client,
+                    Err(e) if e.raw_os_error() == Some(231) && attempt < 15 => {
+                        attempt += 1;
+                        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                    }
+                    Err(e) => {
+                        return Err(anyhow!(
+                            "Failed to connect to Keysmith pipe at {} (is Keysmith running?): {e}",
+                            self.socket_path.display()
+                        ));
+                    }
+                }
+            }
+        };
+
+        let (reader, mut writer) = tokio::io::split(stream);
         let mut payload = serde_json::to_vec(req).context("Failed to serialize RPC request")?;
         payload.push(b'\n');
         writer
@@ -187,7 +230,7 @@ impl SocketClient {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use tokio::net::UnixListener;

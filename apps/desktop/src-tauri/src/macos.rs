@@ -623,18 +623,36 @@ mod macos_impl {
     use std::sync::Arc;
 
     use keysmith_core::error::CoreError;
-    use tauri::{AppHandle, WebviewWindow};
+    use sha2::{Digest, Sha256};
+    use tauri::{AppHandle, Manager, WebviewWindow};
     use zeroize::Zeroizing;
 
-    pub fn pasteboard_write(_text: &str, _is_sensitive: bool) -> Result<(), CoreError> {
-        Ok(())
+    pub fn pasteboard_write(text: &str, _is_sensitive: bool) -> Result<(), CoreError> {
+        let mut clipboard = arboard::Clipboard::new()
+            .map_err(|e| CoreError::Clipboard(format!("访问系统剪贴板失败: {e}")))?;
+        clipboard
+            .set_text(text.to_string())
+            .map_err(|e| CoreError::Clipboard(format!("写入剪贴板失败: {e}")))
     }
 
-    pub fn pasteboard_clear_if_matches(_expected_digest: &[u8; 32]) -> Result<(), CoreError> {
+    pub fn pasteboard_clear_if_matches(expected_digest: &[u8; 32]) -> Result<(), CoreError> {
+        let mut clipboard = match arboard::Clipboard::new() {
+            Ok(cb) => cb,
+            Err(_) => return Ok(()),
+        };
+        if let Ok(current) = clipboard.get_text() {
+            let cur_digest: [u8; 32] = Sha256::digest(current.as_bytes()).into();
+            if &cur_digest == expected_digest {
+                let _ = clipboard.clear();
+            }
+        }
         Ok(())
     }
 
     pub fn pasteboard_clear_unconditional() -> Result<(), CoreError> {
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+            let _ = clipboard.clear();
+        }
         Ok(())
     }
 
@@ -644,11 +662,19 @@ mod macos_impl {
 
     pub fn set_app_dock_icon(_png_bytes: &[u8]) {}
 
-    pub fn activate_app_foreground(_app: &AppHandle) {}
+    pub fn activate_app_foreground(app: &AppHandle) {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }
 
     pub fn configure_floating_rounded_window(_window: &WebviewWindow) {}
 
-    pub fn set_window_screen_capture_protection(_window: &WebviewWindow, _protected: bool) {}
+    pub fn set_window_screen_capture_protection(window: &WebviewWindow, protected: bool) {
+        let _ = window.set_content_protected(protected);
+    }
 
     pub fn apply_window_vibrancy(_window: &WebviewWindow, _enabled: bool) {}
 
@@ -657,8 +683,38 @@ mod macos_impl {
     ) {
     }
 
-    pub fn set_launch_at_login(_enabled: bool) -> Result<(), CoreError> {
-        Ok(())
+    pub fn set_launch_at_login(enabled: bool) -> Result<(), CoreError> {
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+            if enabled {
+                let exe = std::env::current_exe().map_err(|e| {
+                    CoreError::Internal(format!("无法获取可执行文件路径: {e}"))
+                })?;
+                let quoted = format!("\"{}\"", exe.to_string_lossy());
+                let status = std::process::Command::new("reg")
+                    .args(["add", RUN_KEY, "/v", "Keysmith", "/t", "REG_SZ", "/d", &quoted, "/f"])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .status()
+                    .map_err(|e| CoreError::Internal(format!("设置开机自启失败: {e}")))?;
+                if !status.success() {
+                    return Err(CoreError::Internal("写入 Windows 注册表开机启动项失败".to_string()));
+                }
+            } else {
+                let _ = std::process::Command::new("reg")
+                    .args(["delete", RUN_KEY, "/v", "Keysmith", "/f"])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .status();
+            }
+            return Ok(());
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = enabled;
+            Ok(())
+        }
     }
 
     pub fn biometry_is_available() -> bool {

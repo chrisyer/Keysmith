@@ -1,6 +1,6 @@
 [package]
 name = "keysmith-desktop"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Keysmith macOS desktop shell powered by Tauri v2"
 
@@ -32,3 +32,6 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 objc2-local-authentication = { version = "0.3", default-features = false, features = ["std", "LABase", "LABiometryType", "LAContext", "LAError", "block2"] }
 security-framework = "3.7"
 window-vibrancy = "0.8"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+arboard = "3"

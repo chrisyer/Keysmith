@@ -5,6 +5,7 @@ use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+#[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 
 use crate::socket_client::{SocketClient, APP_SUPPORT_DIR_NAME};
@@ -239,6 +240,7 @@ pub async fn handle_agent_message(
     }
 }
 
+#[cfg(unix)]
 async fn serve_connection(mut stream: UnixStream, client: Arc<SocketClient>) {
     let (mut reader, mut writer) = stream.split();
     while let Ok(Some((msg_type, payload))) = read_agent_frame(&mut reader).await {
@@ -253,6 +255,7 @@ async fn serve_connection(mut stream: UnixStream, client: Arc<SocketClient>) {
 }
 
 /// Runs the OpenSSH-compatible Unix domain socket agent loop.
+#[cfg(unix)]
 pub async fn run_ssh_agent(socket_path: Option<PathBuf>) -> Result<()> {
     let bind_path = match socket_path {
         Some(p) => p,
@@ -269,7 +272,6 @@ pub async fn run_ssh_agent(socket_path: Option<PathBuf>) -> Result<()> {
     let listener = UnixListener::bind(&bind_path)
         .with_context(|| format!("Failed to bind SSH agent socket at {}", bind_path.display()))?;
 
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&bind_path, std::fs::Permissions::from_mode(0o600));
@@ -306,6 +308,13 @@ pub async fn run_ssh_agent(socket_path: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(unix))]
+pub async fn run_ssh_agent(_socket_path: Option<PathBuf>) -> Result<()> {
+    Err(anyhow!(
+        "ks ssh-agent currently uses Unix domain sockets and is only supported on macOS/Linux"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +341,7 @@ mod tests {
         assert!(slice.is_empty());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn async_frame_io_and_identities_sign_over_mock_rpc() {
         // Test async frame read/write over duplex stream

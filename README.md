@@ -30,9 +30,15 @@
 
 ---
 
-## 安装方式（macOS 13+ Apple Silicon / Intel）
+## 安装方式（macOS 13+ / Windows 10+）
 
-### 方式一：一键脚本安装（免 Gatekeeper 弹窗，推荐）
+### Windows
+
+从 [GitHub Releases](https://github.com/chrisyer/Keysmith/releases) 下载 `Keysmith_<version>_x64-setup.exe`（NSIS）或 `.msi` 安装包双击安装即可。桌面端启动时会自动将浏览器扩展释放到 `%APPDATA%\dev.keysmith.desktop\browser-extension`，并为 Chrome / Edge / Brave / Chromium / Vivaldi 自动注册 Native Messaging 通信配置。
+
+### macOS（Apple Silicon / Intel）
+
+#### 方式一：一键脚本安装（免 Gatekeeper 弹窗，推荐）
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/main/install.sh | sh

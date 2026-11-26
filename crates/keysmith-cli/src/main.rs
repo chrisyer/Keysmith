@@ -186,7 +186,9 @@ async fn main() -> Result<()> {
             extension_id,
         } => {
             let home = PathBuf::from(
-                std::env::var_os("HOME").context("HOME environment variable is not set")?,
+                std::env::var_os("HOME")
+                    .or_else(|| std::env::var_os("USERPROFILE"))
+                    .context("HOME/USERPROFILE environment variable is not set")?,
             );
             let exe = std::env::current_exe()
                 .and_then(|p| p.canonicalize())

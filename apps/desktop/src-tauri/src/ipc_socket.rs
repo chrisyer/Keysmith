@@ -17,8 +17,11 @@ use keysmith_core::AppCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+#[cfg(unix)]
+use tokio::net::UnixListener;
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::ServerOptions;
 use url::Url;
 
 use crate::commands::{emit_data_changed, show_main_window};
@@ -26,6 +29,8 @@ use crate::events::EVENT_SYNC_STATUS;
 
 pub const APP_SUPPORT_DIR_NAME: &str = "dev.keysmith.desktop";
 const SOCKET_FILE_NAME: &str = "keysmith.sock";
+#[cfg(windows)]
+const WINDOWS_PIPE_NAME: &str = r"\\.\pipe\dev.keysmith.desktop";
 
 #[derive(Debug, Deserialize)]
 struct RpcRequest {
@@ -45,28 +50,58 @@ struct RpcResponse {
     error: Option<String>,
 }
 
+pub fn resolve_app_data_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME")?;
+        return Some(
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join(APP_SUPPORT_DIR_NAME),
+        );
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("USERPROFILE").map(|u| PathBuf::from(u).join("AppData").join("Roaming"))
+            })?;
+        return Some(appdata.join(APP_SUPPORT_DIR_NAME));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let base = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")))?;
+        Some(base.join(APP_SUPPORT_DIR_NAME))
+    }
+}
+
 pub fn resolve_socket_path() -> Option<PathBuf> {
     if let Some(override_path) = std::env::var_os("KEYSMITH_SOCKET") {
         if !override_path.is_empty() {
             return Some(PathBuf::from(override_path));
         }
     }
-    let home = std::env::var_os("HOME")?;
-    Some(
-        PathBuf::from(home)
-            .join("Library")
-            .join("Application Support")
-            .join(APP_SUPPORT_DIR_NAME)
-            .join(SOCKET_FILE_NAME),
-    )
+    #[cfg(windows)]
+    {
+        return Some(PathBuf::from(WINDOWS_PIPE_NAME));
+    }
+    #[cfg(not(windows))]
+    {
+        Some(resolve_app_data_dir()?.join(SOCKET_FILE_NAME))
+    }
 }
 
 pub fn spawn_ipc_socket_server(app: AppHandle, core: Arc<AppCore>) {
     let Some(sock_path) = resolve_socket_path() else {
-        eprintln!("[keysmith] cannot resolve HOME for IPC socket");
+        eprintln!("[keysmith] cannot resolve IPC endpoint path");
         return;
     };
 
+    #[cfg(unix)]
     tauri::async_runtime::spawn(async move {
         if let Some(parent) = sock_path.parent() {
             if let Err(err) = std::fs::create_dir_all(parent) {
@@ -89,7 +124,6 @@ pub fn spawn_ipc_socket_server(app: AppHandle, core: Arc<AppCore>) {
             }
         };
 
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600));
@@ -101,10 +135,48 @@ pub fn spawn_ipc_socket_server(app: AppHandle, core: Arc<AppCore>) {
             tokio::spawn(handle_connection(stream, a, c));
         }
     });
+
+    #[cfg(windows)]
+    tauri::async_runtime::spawn(async move {
+        let pipe_name = sock_path.to_string_lossy().to_string();
+        let mut server = match ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&pipe_name)
+        {
+            Ok(s) => s,
+            Err(err) => {
+                eprintln!("[keysmith] failed to create Windows named pipe {pipe_name}: {err}");
+                return;
+            }
+        };
+
+        loop {
+            if let Err(err) = server.connect().await {
+                eprintln!("[keysmith] named pipe accept error: {err}");
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                continue;
+            }
+            let connected = server;
+            let a = app.clone();
+            let c = Arc::clone(&core);
+            tokio::spawn(handle_connection(connected, a, c));
+
+            server = match ServerOptions::new().create(&pipe_name) {
+                Ok(s) => s,
+                Err(err) => {
+                    eprintln!("[keysmith] failed to create next pipe instance: {err}");
+                    break;
+                }
+            };
+        }
+    });
 }
 
-async fn handle_connection(stream: UnixStream, app: AppHandle, core: Arc<AppCore>) {
-    let (reader, mut writer) = stream.into_split();
+async fn handle_connection<S>(stream: S, app: AppHandle, core: Arc<AppCore>)
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let (reader, mut writer) = tokio::io::split(stream);
     let mut lines = BufReader::new(reader).lines();
 
     while let Ok(Some(line)) = lines.next_line().await {

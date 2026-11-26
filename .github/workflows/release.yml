@@ -105,6 +105,72 @@ jobs:
           path: dist-release/*
           if-no-files-found: error
 
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: meta
+        run: |
+          RAW_TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            RAW_TAG="${{ inputs.tag }}"
+          fi
+          VERSION="${RAW_TAG#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "main" ]; then
+            VERSION="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-pc-windows-msvc
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build Windows NSIS & MSI installers
+        run: |
+          cd apps/desktop
+          npx tauri build --bundles nsis,msi
+
+      - name: Collect Windows installers
+        run: |
+          mkdir -p dist-release
+          cp target/release/bundle/nsis/*.exe dist-release/
+          cp target/release/bundle/msi/*.msi dist-release/
+          ls -la dist-release/
+
+      - name: Build & package Keysmith Windows CLI
+        run: |
+          mkdir -p dist-release
+          cargo build --release --manifest-path crates/keysmith-cli/Cargo.toml
+          pwsh -NoLogo -NoProfile -Command "Compress-Archive -Path 'target/release/ks.exe','target/release/keysmith-ssh-agent.exe' -DestinationPath 'dist-release/keysmith-cli-${{ steps.meta.outputs.version }}-x86_64-pc-windows-msvc.zip' -Force"
+
+      - name: Upload Windows build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: keysmith-windows-x64
+          path: dist-release/*
+          if-no-files-found: error
+
   build-extension:
     name: Package Browser Extension
     runs-on: ubuntu-latest
@@ -162,7 +228,7 @@ jobs:
 
   publish-release:
     name: Publish GitHub Release
-    needs: [build-macos, build-extension]
+    needs: [build-macos, build-windows, build-extension]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
@@ -184,6 +250,10 @@ jobs:
         with:
           generate_release_notes: true
           body: |
+            ### Windows 安装说明
+            - 直接下载 `Keysmith_<version>_x64-setup.exe`（NSIS）或 `Keysmith_<version>_x64_en-US.msi` 安装即可。
+            - 桌面应用启动后会自动将浏览器扩展释放到 `%APPDATA%\dev.keysmith.desktop\browser-extension`，并为 Chrome / Edge / Brave / Chromium / Vivaldi 自动写入 `NativeMessagingHosts` 注册表配置。
+
             ### macOS 推荐安装方式（无 Gatekeeper 拦截弹窗）
 
             1. **一键脚本安装（自动校验 SHA-256 并安装到 `/Applications`）：**

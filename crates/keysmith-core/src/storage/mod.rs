@@ -198,12 +198,39 @@ fn map_account_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredAccount> {
 
 impl Storage {
     pub fn default_db_path() -> Result<PathBuf, CoreError> {
-        let home = std::env::var_os("HOME")
-            .ok_or_else(|| CoreError::Storage("无法获取用户 HOME 目录".to_string()))?;
-        let dir = PathBuf::from(home)
-            .join("Library")
-            .join("Application Support")
-            .join("dev.keysmith.desktop");
+        let dir = {
+            #[cfg(target_os = "macos")]
+            {
+                let home = std::env::var_os("HOME")
+                    .ok_or_else(|| CoreError::Storage("无法获取用户 HOME 目录".to_string()))?;
+                PathBuf::from(home)
+                    .join("Library")
+                    .join("Application Support")
+                    .join("dev.keysmith.desktop")
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let appdata = std::env::var_os("APPDATA")
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        std::env::var_os("USERPROFILE")
+                            .map(|u| PathBuf::from(u).join("AppData").join("Roaming"))
+                    })
+                    .ok_or_else(|| CoreError::Storage("无法获取 APPDATA 目录".to_string()))?;
+                appdata.join("dev.keysmith.desktop")
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            {
+                let base = std::env::var_os("XDG_DATA_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        std::env::var_os("HOME")
+                            .map(|h| PathBuf::from(h).join(".local").join("share"))
+                    })
+                    .ok_or_else(|| CoreError::Storage("无法获取用户数据目录".to_string()))?;
+                base.join("dev.keysmith.desktop")
+            }
+        };
         std::fs::create_dir_all(&dir)
             .map_err(|e| CoreError::Storage(format!("创建数据目录失败: {e}")))?;
         Ok(dir.join("keysmith.db"))
