@@ -42,7 +42,7 @@ export function PaneResizer({ onResize, ariaLabel }: PaneResizerProps) {
         if (e.key === 'ArrowLeft') onResize(-10);
         if (e.key === 'ArrowRight') onResize(10);
       }}
-      className="w-[5px] -mx-[2px] z-10 cursor-col-resize relative group shrink-0 focus-visible:outline-none"
+      className="w-[6px] -mx-[3px] z-10 cursor-col-resize relative group shrink-0 focus-visible:outline-none"
     >
       <div className="w-[1px] h-full mx-auto bg-[var(--border-subtle)] group-hover:w-[2px] group-hover:bg-[var(--accent-primary)] group-focus-visible:bg-[var(--accent-primary)] transition-colors" />
     </div>
