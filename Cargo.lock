@@ -2678,7 +2678,7 @@ dependencies = [
 
 [[package]]
 name = "keysmith-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2691,7 +2691,7 @@ dependencies = [
 
 [[package]]
 name = "keysmith-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes",
  "argon2",
@@ -2730,7 +2730,7 @@ dependencies = [
 
 [[package]]
 name = "keysmith-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "block2",

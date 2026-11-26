@@ -30,20 +30,40 @@
 
 ---
 
+## 安装方式（macOS 13+ Apple Silicon / Intel）
+
+### 方式一：一键脚本安装（免 Gatekeeper 弹窗，推荐）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/main/install.sh | sh
+```
+
+### 方式二：Homebrew Cask 安装（免弹窗 + 支持 `brew upgrade`）
+
+```bash
+brew tap chrisyer/keysmith https://github.com/chrisyer/Keysmith.git
+brew install --cask keysmith
+```
+
+### 方式三：手动下载 `.dmg`
+
+从 [GitHub Releases](https://github.com/chrisyer/Keysmith/releases) 下载对应架构（`aarch64` 或 `x64`）的 `.dmg`，将 `Keysmith.app` 拖入 `/Applications`。由于暂未使用付费 Apple Developer 证书公证，首次打开若被拦截，可在 **系统设置 → 隐私与安全性 →「仍要打开」** 放行，或运行一次：
+
+```bash
+xattr -cr /Applications/Keysmith.app
+```
+
+---
+
 ## 快速启动与编译
 
-### 1. 直接运行编译后的 macOS 桌面应用（推荐通过 `.app` 启动）
+### 1. 本地源码构建后运行
 
 ```bash
 open target/release/bundle/macos/Keysmith.app
 ```
 
 > 提示：请通过 `Keysmith.app`（或安装后的 DMG）启动完整 Cocoa 应用包以启用 `Info.plist` 图标与标准输入法会话，避免在终端直跑裸 Mach-O 二进制。
->
-> 从 GitHub Releases 下载 `.dmg` 拖入 `/Applications` 后，因未经过 Apple Developer 公证，首次打开若提示「已损坏，无法打开」，请运行一次以下命令移除下载隔离标记：
-> ```bash
-> xattr -cr /Applications/Keysmith.app
-> ```
 
 ### 2. 开发调试与打包
 

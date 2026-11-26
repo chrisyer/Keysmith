@@ -184,9 +184,57 @@ jobs:
         with:
           generate_release_notes: true
           body: |
-            ### macOS 安装说明（首次运行）
-            当前安装包采用本地 Ad-hoc 签名（暂未购买 Apple Developer 公证证书），从浏览器下载 `.dmg` 拖入 `/Applications` 后若提示「**已损坏，无法打开**」，在终端执行一次以下命令移除下载隔离标记即可正常打开：
-            ```bash
-            xattr -cr /Applications/Keysmith.app
-            ```
+            ### macOS 推荐安装方式（无 Gatekeeper 拦截弹窗）
+
+            1. **一键脚本安装（自动校验 SHA-256 并安装到 `/Applications`）：**
+               ```bash
+               curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/main/install.sh | sh
+               ```
+            2. **Homebrew Cask 安装（支持 `brew upgrade` 自动升级）：**
+               ```bash
+               brew tap chrisyer/keysmith https://github.com/chrisyer/Keysmith.git
+               brew install --cask keysmith
+               ```
+            3. **手动下载 `.dmg` 安装：** 拖入 `/Applications` 后首次打开如被 Gatekeeper 提示，可在 **系统设置 → 隐私与安全性 →「仍要打开」** 放行，或运行一次 `xattr -cr /Applications/Keysmith.app`。
           files: release-assets/*
+
+      - name: Checkout main to update Homebrew Cask
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: repo-main
+          persist-credentials: true
+
+      - name: Update Casks/keysmith.rb with version & SHA256
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARM_SHA="$(awk -v f="Keysmith_${VERSION}_aarch64.dmg" '$2 == f { print $1 }' release-assets/SHA256SUMS.txt)"
+          INTEL_SHA="$(awk -v f="Keysmith_${VERSION}_x64.dmg" '$2 == f { print $1 }' release-assets/SHA256SUMS.txt)"
+          if [ -z "$ARM_SHA" ] || [ -z "$INTEL_SHA" ]; then
+            echo "Missing DMG SHA-256 in SHA256SUMS.txt" >&2
+            exit 1
+          fi
+          python3 - "$VERSION" "$ARM_SHA" "$INTEL_SHA" <<'PY'
+          import re, sys
+          version, arm_sha, intel_sha = sys.argv[1:4]
+          path = "repo-main/Casks/keysmith.rb"
+          with open(path, "r", encoding="utf-8") as fh:
+              text = fh.read()
+          text = re.sub(r'version\s+"[^"]+"', f'version "{version}"', text, count=1)
+          text = re.sub(r'arm:\s+"[^"]+"', f'arm:   "{arm_sha}"', text, count=1)
+          text = re.sub(r'intel:\s+"[^"]+"', f'intel: "{intel_sha}"', text, count=1)
+          with open(path, "w", encoding="utf-8") as fh:
+              fh.write(text)
+          PY
+          if command -v ruby >/dev/null 2>&1; then
+            ruby -c repo-main/Casks/keysmith.rb
+          fi
+          cd repo-main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet Casks/keysmith.rb; then
+            git add Casks/keysmith.rb
+            git commit -m "chore(cask): update keysmith cask to v${VERSION} [skip ci]"
+            git pull --rebase origin main
+            git push origin main
+          fi
