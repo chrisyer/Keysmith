@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release version tag (e.g. v0.1.0)"
+        required: false
+        default: "v0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: aarch64
+          - target: x86_64-apple-darwin
+            arch: x64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: meta
+        run: |
+          RAW_TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            RAW_TAG="${{ inputs.tag }}"
+          fi
+          VERSION="${RAW_TAG#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "main" ]; then
+            VERSION="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build Keysmith.app bundle
+        run: |
+          cd apps/desktop
+          npx tauri build --target "${{ matrix.target }}" --bundles app
+
+      - name: Verify bundled browser extension assets
+        run: |
+          test -f "target/${{ matrix.target }}/release/bundle/macos/Keysmith.app/Contents/Resources/browser-extension/manifest.json"
+          test -f "target/${{ matrix.target }}/release/bundle/macos/Keysmith.app/Contents/Resources/browser-extension/icons/128.png"
+
+      - name: Package & verify DMG installer
+        run: |
+          mkdir -p dist-release
+          APP_PATH="target/${{ matrix.target }}/release/bundle/macos/Keysmith.app"
+          DMG_PATH="dist-release/Keysmith_${{ steps.meta.outputs.version }}_${{ matrix.arch }}.dmg"
+          STAGE_DIR="$(mktemp -d)"
+          cp -R "$APP_PATH" "$STAGE_DIR/"
+          ln -s /Applications "$STAGE_DIR/Applications"
+          hdiutil create -volname "Keysmith" -srcfolder "$STAGE_DIR" -ov -format UDZO "$DMG_PATH"
+          rm -rf "$STAGE_DIR"
+          hdiutil verify "$DMG_PATH"
+
+      - name: Build & package Keysmith CLI
+        run: |
+          mkdir -p dist-release
+          cargo build --release --target "${{ matrix.target }}" --manifest-path crates/keysmith-cli/Cargo.toml
+          TAR_PATH="dist-release/keysmith-cli-${{ steps.meta.outputs.version }}-${{ matrix.target }}.tar.gz"
+          tar -czf "$TAR_PATH" -C "target/${{ matrix.target }}/release" ks keysmith-ssh-agent
+
+      - name: Upload macOS build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: keysmith-macos-${{ matrix.arch }}
+          path: dist-release/*
+          if-no-files-found: error
+
+  build-extension:
+    name: Package Browser Extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve release version
+        id: meta
+        run: |
+          RAW_TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            RAW_TAG="${{ inputs.tag }}"
+          fi
+          VERSION="${RAW_TAG#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "main" ]; then
+            VERSION="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate & package browser extension
+        run: |
+          for f in apps/browser-extension/*.js; do
+            node --check "$f"
+          done
+          node -e '
+            const fs = require("fs");
+            const crypto = require("crypto");
+            const manifest = JSON.parse(fs.readFileSync("apps/browser-extension/manifest.json", "utf8"));
+            const digest = crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest();
+            const map = "abcdefghijklmnop";
+            let id = "";
+            for (let i = 0; i < 16; i++) {
+              id += map[digest[i] >> 4] + map[digest[i] & 15];
+            }
+            if (id !== "ianpdijhflnmmhbmjdhiombdghhpfkmg") {
+              throw new Error("Extension ID mismatch: " + id);
+            }
+          '
+          mkdir -p dist-release
+          (cd apps/browser-extension && zip -r "../../dist-release/keysmith-browser-extension-${{ steps.meta.outputs.version }}.zip" .)
+
+      - name: Upload browser extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keysmith-browser-extension
+          path: dist-release/*
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-macos, build-extension]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/*
