@@ -18,6 +18,7 @@
       </div>
       <div class="header-actions">
         <span id="status-badge" class="status-badge status-disconnected">检查中...</span>
+        <button id="settings-btn" class="icon-btn" title="扩展设置" aria-label="扩展设置">⚙</button>
         <button id="open-app-btn" class="icon-btn" title="打开 Keysmith 桌面端" aria-label="打开 Keysmith 桌面端">↗</button>
         <button id="refresh-btn" class="icon-btn" title="刷新状态" aria-label="刷新状态">↻</button>
       </div>
@@ -154,6 +155,59 @@
             <button id="gen-copy-btn" class="btn btn-secondary btn-sm">复制</button>
             <button id="gen-fill-btn" class="btn btn-primary btn-sm btn-flex">填充到页面</button>
           </div>
+        </div>
+      </section>
+
+      <!-- Drill-Down View: Item Detail -->
+      <section id="detail-view" class="detail-view hidden">
+        <div class="subview-bar">
+          <button id="detail-back-btn" class="btn btn-secondary btn-sm">← 返回</button>
+          <span id="detail-cat-badge" class="mini-badge">条目</span>
+          <button id="detail-desktop-btn" class="btn btn-secondary btn-sm">桌面端查看</button>
+        </div>
+
+        <div class="card detail-hero-card">
+          <div id="detail-title" class="detail-title">条目名称</div>
+          <div id="detail-subtitle" class="detail-subtitle">副标题</div>
+          <div class="btn-row detail-hero-actions">
+            <button id="detail-fill-btn" class="btn btn-primary btn-sm btn-flex">自动填充到当前页</button>
+          </div>
+        </div>
+
+        <div id="detail-body" class="detail-body"></div>
+      </section>
+
+      <!-- Drill-Down View: Extension Settings -->
+      <section id="settings-view" class="settings-view hidden">
+        <div class="subview-bar">
+          <button id="settings-back-btn" class="btn btn-secondary btn-sm">← 返回</button>
+          <span class="subview-title">扩展设置</span>
+          <span class="subview-spacer"></span>
+        </div>
+
+        <div class="card">
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="card-title">设为 Chrome 默认密码管理器</div>
+              <p class="card-desc small-desc">
+                关闭浏览器自带「提示保存密码和通行密钥」，由 Keysmith 统一接管并消除重复弹窗。
+              </p>
+            </div>
+            <input id="takeover-toggle" type="checkbox" class="toggle-check" />
+          </div>
+          <div id="takeover-status" class="takeover-status muted">检查接管状态中...</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">永不提示保存的网站</div>
+          <div id="never-save-list" class="never-save-list"></div>
+          <div id="never-save-empty" class="empty-state small-empty">暂无已忽略网站</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">关于扩展</div>
+          <div class="kv-row"><span class="muted">版本</span><span>v0.2.1</span></div>
+          <div class="kv-row"><span class="muted">扩展 ID</span><code id="settings-ext-id" class="ext-id-code"></code></div>
         </div>
       </section>
     </main>

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Keysmith",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0P7bKCPi7QcDlF6XA31yoVgjp77vS5E2PtwM4AzcTeV1ent4K7LiJOAjXrkR8XkRwWi138vus4l+hER/RG3GPuvSKwrNjBsdYmNL6dmLqGrY4ub1G0WGjX3458B9f4FFdD2kqN3tud0oYLpUhqDBw/ApRIAlOQ94XCEs2mSoo+4lNakdgpkpAbo9Sa6qtnrXq+1hB+ldS+8dhs5UtnO3DDQIi2+OhkqiR2iTIRNxTVoVoz+pkZwgalwtZSAhjWiRO3CZ4hqDtMyQk2b+g1ndJ9wXV4dvHdQrm8rKoBD8JPZOKfTM7ymp4DnIXpDg6hmccjl06NscruZaK0VL1MFQ0QIDAQAB",
   "description": "Keysmith — 零知识密码管理、网页自动填充与 Passkey 认证助手",
   "permissions": [
@@ -10,7 +10,8 @@
     "storage",
     "nativeMessaging",
     "tabs",
-    "contextMenus"
+    "contextMenus",
+    "privacy"
   ],
   "host_permissions": [
     "<all_urls>"

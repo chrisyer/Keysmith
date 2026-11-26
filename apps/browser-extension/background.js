@@ -1,6 +1,7 @@
 const NMH_HOST = 'dev.keysmith.desktop';
 const RPC_TIMEOUT_MS = 18000;
 const NEVER_SAVE_KEY = 'neverSaveOrigins';
+const TAKEOVER_BROWSER_PM_KEY = 'takeoverBrowserPasswordManager';
 
 let nextRpcId = 1;
 
@@ -175,6 +176,117 @@ async function addNeverSaveOrigin(origin) {
   }
 }
 
+async function removeNeverSaveOrigin(origin) {
+  if (!origin) return;
+  const current = await getNeverSaveOrigins();
+  const next = current.filter((item) => item !== origin);
+  await chrome.storage.local.set({ [NEVER_SAVE_KEY]: next });
+}
+
+async function getSavedTakeoverPreference() {
+  try {
+    const data = await chrome.storage.local.get(TAKEOVER_BROWSER_PM_KEY);
+    return data[TAKEOVER_BROWSER_PM_KEY] !== false;
+  } catch {
+    return true;
+  }
+}
+
+function privacyGet(setting) {
+  return new Promise((resolve) => {
+    if (!setting) {
+      resolve(null);
+      return;
+    }
+    try {
+      setting.get({}, (details) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
+        resolve(details || null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+function privacySet(setting, value) {
+  return new Promise((resolve) => {
+    if (!setting) {
+      resolve(false);
+      return;
+    }
+    try {
+      setting.set({ value }, () => {
+        resolve(!chrome.runtime.lastError);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+function privacyClear(setting) {
+  return new Promise((resolve) => {
+    if (!setting) {
+      resolve(false);
+      return;
+    }
+    try {
+      setting.clear({}, () => {
+        resolve(!chrome.runtime.lastError);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function applyBrowserPasswordManagerControl(enabled) {
+  const pwSetting = chrome.privacy?.services?.passwordSavingEnabled;
+  const cardSetting = chrome.privacy?.services?.autofillCreditCardEnabled;
+  if (!pwSetting) return;
+
+  if (enabled) {
+    await privacySet(pwSetting, false);
+    if (cardSetting) {
+      await privacySet(cardSetting, false);
+    }
+  } else {
+    await privacyClear(pwSetting);
+    if (cardSetting) {
+      await privacyClear(cardSetting);
+    }
+  }
+}
+
+async function getBrowserPasswordManagerControlStatus() {
+  const prefEnabled = await getSavedTakeoverPreference();
+  const pwSetting = chrome.privacy?.services?.passwordSavingEnabled;
+  if (!pwSetting) {
+    return {
+      supported: false,
+      enabled: prefEnabled,
+      value: null,
+      levelOfControl: 'not_controllable'
+    };
+  }
+  const details = await privacyGet(pwSetting);
+  return {
+    supported: true,
+    enabled: prefEnabled,
+    value: details?.value ?? null,
+    levelOfControl: details?.levelOfControl || 'controllable_by_this_extension'
+  };
+}
+
+async function syncSavedPrivacyControl() {
+  const enabled = await getSavedTakeoverPreference();
+  await applyBrowserPasswordManagerControl(enabled);
+}
+
 async function sendToTab(tabId, payload) {
   try {
     return await chrome.tabs.sendMessage(tabId, payload);
@@ -325,11 +437,13 @@ function registerContextMenus() {
 
 chrome.runtime.onInstalled.addListener(() => {
   registerContextMenus();
+  syncSavedPrivacyControl();
   refreshActiveTabBadge();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   registerContextMenus();
+  syncSavedPrivacyControl();
   refreshActiveTabBadge();
 });
 
@@ -445,6 +559,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'OPEN_DESKTOP': {
         sendResponse(await rpcRaw('open_desktop', {}));
+        break;
+      }
+      case 'FOCUS_DESKTOP_ITEM': {
+        sendResponse(await rpcRaw('focus_item', { itemId: message.itemId || '' }));
+        break;
+      }
+      case 'GET_PRIVACY_CONTROL': {
+        sendResponse({ ok: true, ...(await getBrowserPasswordManagerControlStatus()) });
+        break;
+      }
+      case 'SET_PRIVACY_CONTROL': {
+        const enabled = Boolean(message.enabled);
+        await chrome.storage.local.set({ [TAKEOVER_BROWSER_PM_KEY]: enabled });
+        await applyBrowserPasswordManagerControl(enabled);
+        sendResponse({ ok: true, ...(await getBrowserPasswordManagerControlStatus()) });
+        break;
+      }
+      case 'NEVER_SAVE_LIST': {
+        sendResponse({ ok: true, origins: await getNeverSaveOrigins() });
+        break;
+      }
+      case 'NEVER_SAVE_REMOVE': {
+        await removeNeverSaveOrigin(message.origin || '');
+        sendResponse({ ok: true, origins: await getNeverSaveOrigins() });
         break;
       }
       case 'CHECK_LOGIN_SAVE': {

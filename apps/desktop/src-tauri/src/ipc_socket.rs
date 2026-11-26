@@ -16,7 +16,7 @@ use keysmith_core::passkey::{
 use keysmith_core::AppCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -25,7 +25,7 @@ use tokio::net::windows::named_pipe::ServerOptions;
 use url::Url;
 
 use crate::commands::{emit_data_changed, show_main_window};
-use crate::events::EVENT_SYNC_STATUS;
+use crate::events::{UiFocusItemPayload, EVENT_SYNC_STATUS, EVENT_UI_FOCUS_ITEM};
 
 pub const APP_SUPPORT_DIR_NAME: &str = "dev.keysmith.desktop";
 const SOCKET_FILE_NAME: &str = "keysmith.sock";
@@ -260,6 +260,25 @@ async fn dispatch_rpc(
         "open_desktop" => {
             show_main_window(app);
             Ok(json!({ "opened": true }))
+        }
+        "focus_item" => {
+            let item_id = params
+                .get("itemId")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "缺少 itemId 参数".to_string())?
+                .to_string();
+            if let Some(win) = app.get_webview_window("quick-access") {
+                let _ = win.hide();
+            }
+            show_main_window(app);
+            let _ = app.emit_to(
+                "main",
+                EVENT_UI_FOCUS_ITEM,
+                UiFocusItemPayload { item_id },
+            );
+            Ok(json!({ "focused": true }))
         }
         "ssh_list_keys" => {
             let identities = core.ssh_list_identities().map_err(|e| e.to_string())?;
