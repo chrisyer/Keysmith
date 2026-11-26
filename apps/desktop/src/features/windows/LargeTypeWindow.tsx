@@ -68,17 +68,17 @@ export function LargeTypeWindow() {
   };
 
   return (
-    <div className="h-dvh w-screen rounded-[14px] bg-[#161618] text-[#f5f5f7] flex flex-col overflow-hidden select-none border border-white/12 shadow-2xl">
+    <div className="h-dvh w-screen rounded-[14px] bg-[var(--bg-elevated)] text-[var(--text-primary)] flex flex-col overflow-hidden select-none border border-[var(--border-strong)] shadow-2xl">
       {/* Draggable Header */}
       <header
         data-tauri-drag-region
-        className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between gap-4 shrink-0"
+        className="px-5 py-3.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-4 shrink-0"
       >
         <div data-tauri-drag-region className="min-w-0">
-          <h1 data-tauri-drag-region className="text-sm font-medium text-white/90 truncate">
+          <h1 data-tauri-drag-region className="text-sm font-medium text-[var(--text-primary)] truncate">
             {dict.largeType.title}{payload ? ` · ${payload.label}` : ''}
           </h1>
-          <p data-tauri-drag-region className="text-[11px] text-white/45 mt-0.5">
+          <p data-tauri-drag-region className="text-[11px] text-[var(--text-secondary)] mt-0.5">
             {payload
               ? fmt(dict.largeType.charCount, { count: chars.length })
               : dict.largeType.loading}
@@ -91,8 +91,8 @@ export function LargeTypeWindow() {
             onClick={() => void handleTogglePin()}
             className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
               pinned
-                ? 'bg-[#0a84ff]/25 text-[#60a5fa] border border-[#0a84ff]/40'
-                : 'bg-white/10 hover:bg-white/15 text-white/75'
+                ? 'bg-[var(--accent-primary)]/15 text-[var(--accent-primary)] border border-[var(--accent-primary)]/35'
+                : 'bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--border-subtle)]'
             }`}
           >
             {pinned ? <Pin size={13} /> : <PinOff size={13} />}
@@ -103,9 +103,9 @@ export function LargeTypeWindow() {
             <button
               type="button"
               onClick={() => void handleCopy()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-medium text-white transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-primary)] transition-colors cursor-pointer"
             >
-              {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+              {copied ? <Check size={14} className="text-[var(--status-success)]" /> : <Copy size={14} />}
               {copied ? dict.common.copied : dict.common.copy}
             </button>
           )}
@@ -114,7 +114,7 @@ export function LargeTypeWindow() {
             type="button"
             onClick={() => void tauriClient.windowCloseLargeType()}
             aria-label={dict.common.close}
-            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
           >
             <X size={16} />
           </button>
@@ -125,14 +125,14 @@ export function LargeTypeWindow() {
       <div className="flex-1 min-h-0 p-5 flex flex-col justify-between gap-3 overflow-hidden">
         {payload ? (
           <div
-            className="grid gap-2.5 p-4 rounded-xl bg-black/35 border border-white/10 flex-1 min-h-0 overflow-y-auto ks-scroll content-start"
+            className="grid gap-2.5 p-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex-1 min-h-0 overflow-y-auto ks-scroll content-start"
             style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(40px, 1fr))' }}
             data-selectable="true"
           >
             {chars.map((ch, idx) => (
               <div
                 key={idx}
-                className="flex flex-col items-center justify-center py-2 px-1 rounded-lg bg-white/[0.04] border border-white/[0.06]"
+                className="flex flex-col items-center justify-center py-2 px-1 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)]"
               >
                 <span
                   className="font-mono-tabular text-2xl sm:text-3xl font-semibold leading-none"
@@ -140,19 +140,19 @@ export function LargeTypeWindow() {
                 >
                   {ch === ' ' ? '␣' : ch}
                 </span>
-                <span className="font-mono-tabular text-[10px] text-white/40 mt-1.5">
+                <span className="font-mono-tabular text-[10px] text-[var(--text-secondary)] mt-1.5">
                   {idx + 1}
                 </span>
               </div>
             ))}
           </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-xs text-white/50">
+          <div className="flex-1 flex items-center justify-center text-xs text-[var(--text-secondary)]">
             {dict.largeType.empty}
           </div>
         )}
 
-        <div className="flex items-center justify-end text-[11px] text-white/45 shrink-0">
+        <div className="flex items-center justify-end text-[11px] text-[var(--text-secondary)] shrink-0">
           <span>{dict.largeType.escHint}</span>
         </div>
       </div>

@@ -22,7 +22,7 @@ import { useSessionStore } from './stores/sessionStore';
 import { useUiStore } from './stores/uiStore';
 import { useVaultStore } from './stores/vaultStore';
 import { formatShortcutMac } from './utils/shortcuts';
-import { subscribeThemeChanges } from './utils/theme';
+import { applyThemeMode, subscribeThemeChanges } from './utils/theme';
 import { ensurePopoverPolyfill } from './utils/topLayer';
 
 const SettingsModal = lazy(() =>
@@ -383,6 +383,12 @@ export function App() {
     if (typeof document === 'undefined') return;
     if (windowKind === 'quick-access' || windowKind === 'large-type' || windowKind === 'generator') {
       document.documentElement.classList.add('ks-floating-window');
+      const initialUi = useUiStore.getState();
+      applyThemeMode(initialUi.themeMode);
+      const unsubTheme = subscribeThemeChanges(
+        (dark) => useUiStore.getState().setSystemPrefersDark(dark),
+        (mode) => useUiStore.getState().setThemeMode(mode, false),
+      );
       void tauriClient
         .appSettingsGet()
         .then((s) => {
@@ -398,6 +404,7 @@ export function App() {
       });
       return () => {
         document.documentElement.classList.remove('ks-floating-window');
+        unsubTheme();
         unsub();
       };
     }

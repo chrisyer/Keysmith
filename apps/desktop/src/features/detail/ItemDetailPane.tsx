@@ -54,14 +54,14 @@ function renderNotesLines(notes: string) {
     }
     if (trimmed.startsWith('- ') || /^\d+\.\s/.test(trimmed)) {
       return (
-        <p key={i} className="text-[13px] leading-relaxed text-[var(--text-secondary)] pl-2">
+        <p key={i} className="text-[13px] leading-relaxed text-[var(--text-primary)] pl-2">
           {line}
         </p>
       );
     }
     if (!trimmed) return <div key={i} className="h-2" />;
     return (
-      <p key={i} className="text-[13px] leading-relaxed text-[var(--text-secondary)]">
+      <p key={i} className="text-[13px] leading-relaxed text-[var(--text-primary)]">
         {line}
       </p>
     );
@@ -98,7 +98,7 @@ function FieldRow({
           className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg hover:bg-[var(--bg-hover)] cursor-pointer"
         >
           <div>
-            <div className="text-[11px] font-medium text-[var(--text-secondary)]">{field.label}</div>
+            <div className="text-[11.5px] font-medium text-[var(--text-secondary)]">{field.label}</div>
             <div className="mt-1 font-mono-tabular tracking-[0.18em] text-[13.5px] text-[var(--text-muted)]">
               ••••••
             </div>
@@ -154,7 +154,7 @@ function FieldRow({
       }`}
     >
       <div className="min-w-0 flex-1">
-        <div className="text-[11px] font-medium text-[var(--text-secondary)]">{field.label}</div>
+        <div className="text-[11.5px] font-medium text-[var(--text-secondary)]">{field.label}</div>
         <div className="mt-1 text-[13.5px] leading-relaxed" data-selectable="true">
           {field.sensitive && field.purpose !== 'card_number' ? (
             (isMultiline && !revealed) || repromptLocked ? (
@@ -999,7 +999,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                           {pk.rpId && pk.rpName && pk.rpName !== pk.rpId && (
                             <span
                               title={pk.rpId}
-                              className="text-[11px] text-[var(--text-muted)] truncate min-w-0"
+                              className="text-[11px] text-[var(--text-secondary)] truncate min-w-0"
                             >
                               ({pk.rpId})
                             </span>
@@ -1015,7 +1015,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                           {pk.userName || pk.userDisplayName}
                         </div>
                         {pk.createdAt && (
-                          <div className="text-[11px] text-[var(--text-muted)] mt-0.5 truncate">
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5 truncate">
                             {formatDateTime(pk.createdAt)}
                           </div>
                         )}
@@ -1106,7 +1106,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                     <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[11px] min-w-0">
                       <span
                         title={pk.credentialId}
-                        className="font-mono-tabular text-[var(--text-muted)] truncate min-w-0 flex-1"
+                        className="font-mono-tabular text-[var(--text-secondary)] truncate min-w-0 flex-1"
                       >
                         Credential ID: {pk.credentialId}
                       </span>
@@ -1138,7 +1138,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                     <span className="text-[11px] font-medium text-[var(--text-secondary)]">
                       {u.label || dict.detail.urlDefaultLabel}
                     </span>
-                    <span className="px-1.5 py-0.2 rounded text-[10px] bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-muted)]">
+                    <span className="px-1.5 py-0.2 rounded text-[10px] bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
                       {dict.detail.matchRules[u.matchRule] ?? u.matchRule}
                     </span>
                   </div>
@@ -1210,7 +1210,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
             </div>
 
             {(item.attachments?.length ?? 0) === 0 ? (
-              <div className="px-4 py-3 text-[11px] text-[var(--text-muted)]">
+              <div className="px-4 py-3 text-[11px] text-[var(--text-secondary)]">
                 {dict.detail.attachmentsEmpty}
               </div>
             ) : (
@@ -1224,7 +1224,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                     >
                       <div className="min-w-0">
                         <div className="font-medium text-[var(--text-primary)] truncate">{att.fileName}</div>
-                        <div className="text-[10px] text-[var(--text-muted)]">
+                        <div className="text-[10.5px] text-[var(--text-secondary)]">
                           {att.sizeName} · {att.hasLocalData ? dict.detail.attachmentCachedLocal : dict.detail.attachmentCloudOnly}
                         </div>
                       </div>
@@ -1369,7 +1369,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
         )}
 
         {/* Footer Timestamps */}
-        <div className="pt-2 pb-4 flex items-center justify-between text-[11px] text-[var(--text-muted)]">
+        <div className="pt-2 pb-4 flex items-center justify-between text-[11px] text-[var(--text-secondary)]">
           <span>{fmt(dict.detail.updatedAt, { time: formatDateTime(item.updatedAt) })}</span>
           <span>{fmt(dict.detail.createdAt, { time: formatDateTime(item.createdAt) })}</span>
         </div>

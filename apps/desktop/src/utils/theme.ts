@@ -2,6 +2,18 @@ export type ThemeMode = 'system' | 'light' | 'dark';
 
 const STORAGE_KEY = 'color-scheme';
 
+function syncDomTheme(mode: ThemeMode): void {
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]');
+  const content = mode === 'system' ? 'light dark' : mode;
+  if (meta) {
+    meta.content = content;
+  }
+  if (typeof document !== 'undefined' && document.documentElement) {
+    document.documentElement.dataset.theme = mode;
+    document.documentElement.style.colorScheme = content;
+  }
+}
+
 export function readStoredThemeMode(): ThemeMode {
   try {
     const val = localStorage.getItem(STORAGE_KEY);
@@ -13,11 +25,7 @@ export function readStoredThemeMode(): ThemeMode {
 }
 
 export function applyThemeMode(mode: ThemeMode): void {
-  const meta = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]');
-  const content = mode === 'system' ? 'light dark' : mode;
-  if (meta) {
-    meta.content = content;
-  }
+  syncDomTheme(mode);
   try {
     if (mode === 'system') {
       localStorage.removeItem(STORAGE_KEY);
@@ -45,10 +53,7 @@ export function subscribeThemeChanges(
   const handleStorage = (e: StorageEvent) => {
     if (e.key === STORAGE_KEY) {
       const mode = e.newValue === 'light' || e.newValue === 'dark' ? e.newValue : 'system';
-      const meta = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]');
-      if (meta) {
-        meta.content = mode === 'system' ? 'light dark' : mode;
-      }
+      syncDomTheme(mode);
       onStorageChange(mode);
     }
   };

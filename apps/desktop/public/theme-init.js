@@ -3,16 +3,20 @@ try {
   var winKind = params.get('window');
   var m = document.querySelector('meta[name="color-scheme"]');
   var s = localStorage.getItem('color-scheme');
-  if (m && (s === 'light' || s === 'dark')) {
-    m.content = s;
+  var mode = s === 'light' || s === 'dark' ? s : 'system';
+  var content = mode === 'system' ? 'light dark' : mode;
+  if (m) {
+    m.content = content;
   }
+  document.documentElement.dataset.theme = mode;
+  document.documentElement.style.colorScheme = content;
   var isDark =
-    s === 'dark' ||
-    (s !== 'light' &&
+    mode === 'dark' ||
+    (mode !== 'light' &&
       window.matchMedia &&
       window.matchMedia('(prefers-color-scheme: dark)').matches);
   var bootBg =
-    winKind === 'quick-access' || winKind === 'large-type'
+    winKind === 'quick-access' || winKind === 'large-type' || winKind === 'generator'
       ? 'transparent'
       : isDark
         ? '#1c1c1e'

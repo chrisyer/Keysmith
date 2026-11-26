@@ -3,11 +3,13 @@
 :root {
   color-scheme: light dark;
 
-  &:has(> head > meta[name="color-scheme"][content="dark"]) {
+  &:has(> head > meta[name="color-scheme"][content="dark"]),
+  &[data-theme="dark"] {
     color-scheme: dark;
   }
 
-  &:has(> head > meta[name="color-scheme"][content="light"]) {
+  &:has(> head > meta[name="color-scheme"][content="light"]),
+  &[data-theme="light"] {
     color-scheme: light;
   }
 
@@ -20,22 +22,22 @@
   --bg-input-light: #ffffff;
   --bg-hover-light: rgba(0, 0, 0, 0.04);
   --bg-selected-light: rgba(0, 122, 255, 0.11);
-  --border-subtle-light: rgba(0, 0, 0, 0.075);
-  --border-strong-light: rgba(0, 0, 0, 0.13);
-  --text-primary-light: #1d1d1f;
-  --text-secondary-light: #636366;
-  --text-muted-light: #8e8e93;
+  --border-subtle-light: rgba(0, 0, 0, 0.085);
+  --border-strong-light: rgba(0, 0, 0, 0.15);
+  --text-primary-light: #111113;
+  --text-secondary-light: #434347;
+  --text-muted-light: #636369;
   --accent-primary-light: #007aff;
   --accent-hover-light: #0066d6;
-  --pw-letter-light: #1d1d1f;
-  --pw-digit-light: #007aff;
-  --pw-symbol-light: #d9480f;
-  --status-danger-light: #ff3b30;
-  --status-warning-light: #d97706;
-  --status-caution-light: #ca8a04;
-  --status-success-light: #28a745;
-  --status-info-light: #007aff;
-  --scrollbar-thumb-light: rgba(0, 0, 0, 0.22);
+  --pw-letter-light: #111113;
+  --pw-digit-light: #0066d6;
+  --pw-symbol-light: #c2410c;
+  --status-danger-light: #d92d20;
+  --status-warning-light: #b45309;
+  --status-caution-light: #a16207;
+  --status-success-light: #15803d;
+  --status-info-light: #0066d6;
+  --scrollbar-thumb-light: rgba(0, 0, 0, 0.24);
 
   /* Dark Tokens (Neutral macOS Graphite) */
   --bg-sidebar-dark: #1c1c1e;
@@ -44,16 +46,16 @@
   --bg-card-dark: #27272a;
   --bg-elevated-dark: #28282b;
   --bg-input-dark: #1b1b1d;
-  --bg-hover-dark: rgba(255, 255, 255, 0.055);
-  --bg-selected-dark: rgba(10, 132, 255, 0.19);
-  --border-subtle-dark: rgba(255, 255, 255, 0.08);
-  --border-strong-dark: rgba(255, 255, 255, 0.14);
-  --text-primary-dark: #f5f5f7;
-  --text-secondary-dark: #a1a1a6;
-  --text-muted-dark: #78787d;
+  --bg-hover-dark: rgba(255, 255, 255, 0.06);
+  --bg-selected-dark: rgba(10, 132, 255, 0.2);
+  --border-subtle-dark: rgba(255, 255, 255, 0.09);
+  --border-strong-dark: rgba(255, 255, 255, 0.16);
+  --text-primary-dark: #f7f7f9;
+  --text-secondary-dark: #c4c4ca;
+  --text-muted-dark: #9898a0;
   --accent-primary-dark: #0a84ff;
   --accent-hover-dark: #409cff;
-  --pw-letter-dark: #f5f5f7;
+  --pw-letter-dark: #f7f7f9;
   --pw-digit-dark: #60a5fa;
   --pw-symbol-dark: #ff8a65;
   --status-danger-dark: #ff453a;
@@ -61,7 +63,7 @@
   --status-caution-dark: #ffd60a;
   --status-success-dark: #32d74b;
   --status-info-dark: #0a84ff;
-  --scrollbar-thumb-dark: rgba(255, 255, 255, 0.22);
+  --scrollbar-thumb-dark: rgba(255, 255, 255, 0.24);
 
   /* Default (Light) fallback before @supports(light-dark) */
   --bg-sidebar: var(--bg-sidebar-light);
@@ -145,61 +147,61 @@
   }
 }
 
-/* Fallback for manual override when light-dark() is unsupported */
-@supports not (color: light-dark(white, black)) {
-  :root:has(> head > meta[name="color-scheme"][content="dark"]) {
-    --bg-sidebar: var(--bg-sidebar-dark);
-    --bg-list: var(--bg-list-dark);
-    --bg-detail: var(--bg-detail-dark);
-    --bg-card: var(--bg-card-dark);
-    --bg-elevated: var(--bg-elevated-dark);
-    --bg-input: var(--bg-input-dark);
-    --bg-hover: var(--bg-hover-dark);
-    --bg-selected: var(--bg-selected-dark);
-    --border-subtle: var(--border-subtle-dark);
-    --border-strong: var(--border-strong-dark);
-    --text-primary: var(--text-primary-dark);
-    --text-secondary: var(--text-secondary-dark);
-    --text-muted: var(--text-muted-dark);
-    --accent-primary: var(--accent-primary-dark);
-    --accent-hover: var(--accent-hover-dark);
-    --pw-letter: var(--pw-letter-dark);
-    --pw-digit: var(--pw-digit-dark);
-    --pw-symbol: var(--pw-symbol-dark);
-    --status-danger: var(--status-danger-dark);
-    --status-warning: var(--status-warning-dark);
-    --status-caution: var(--status-caution-dark);
-    --status-success: var(--status-success-dark);
-    --status-info: var(--status-info-dark);
-    --scrollbar-thumb: var(--scrollbar-thumb-dark);
-  }
+/* Explicit manual theme overrides (work reliably across all WebViews & floating windows) */
+:root[data-theme="dark"],
+:root:has(> head > meta[name="color-scheme"][content="dark"]) {
+  --bg-sidebar: var(--bg-sidebar-dark);
+  --bg-list: var(--bg-list-dark);
+  --bg-detail: var(--bg-detail-dark);
+  --bg-card: var(--bg-card-dark);
+  --bg-elevated: var(--bg-elevated-dark);
+  --bg-input: var(--bg-input-dark);
+  --bg-hover: var(--bg-hover-dark);
+  --bg-selected: var(--bg-selected-dark);
+  --border-subtle: var(--border-subtle-dark);
+  --border-strong: var(--border-strong-dark);
+  --text-primary: var(--text-primary-dark);
+  --text-secondary: var(--text-secondary-dark);
+  --text-muted: var(--text-muted-dark);
+  --accent-primary: var(--accent-primary-dark);
+  --accent-hover: var(--accent-hover-dark);
+  --pw-letter: var(--pw-letter-dark);
+  --pw-digit: var(--pw-digit-dark);
+  --pw-symbol: var(--pw-symbol-dark);
+  --status-danger: var(--status-danger-dark);
+  --status-warning: var(--status-warning-dark);
+  --status-caution: var(--status-caution-dark);
+  --status-success: var(--status-success-dark);
+  --status-info: var(--status-info-dark);
+  --scrollbar-thumb: var(--scrollbar-thumb-dark);
+}
 
-  :root:has(> head > meta[name="color-scheme"][content="light"]) {
-    --bg-sidebar: var(--bg-sidebar-light);
-    --bg-list: var(--bg-list-light);
-    --bg-detail: var(--bg-detail-light);
-    --bg-card: var(--bg-card-light);
-    --bg-elevated: var(--bg-elevated-light);
-    --bg-input: var(--bg-input-light);
-    --bg-hover: var(--bg-hover-light);
-    --bg-selected: var(--bg-selected-light);
-    --border-subtle: var(--border-subtle-light);
-    --border-strong: var(--border-strong-light);
-    --text-primary: var(--text-primary-light);
-    --text-secondary: var(--text-secondary-light);
-    --text-muted: var(--text-muted-light);
-    --accent-primary: var(--accent-primary-light);
-    --accent-hover: var(--accent-hover-light);
-    --pw-letter: var(--pw-letter-light);
-    --pw-digit: var(--pw-digit-light);
-    --pw-symbol: var(--pw-symbol-light);
-    --status-danger: var(--status-danger-light);
-    --status-warning: var(--status-warning-light);
-    --status-caution: var(--status-caution-light);
-    --status-success: var(--status-success-light);
-    --status-info: var(--status-info-light);
-    --scrollbar-thumb: var(--scrollbar-thumb-light);
-  }
+:root[data-theme="light"],
+:root:has(> head > meta[name="color-scheme"][content="light"]) {
+  --bg-sidebar: var(--bg-sidebar-light);
+  --bg-list: var(--bg-list-light);
+  --bg-detail: var(--bg-detail-light);
+  --bg-card: var(--bg-card-light);
+  --bg-elevated: var(--bg-elevated-light);
+  --bg-input: var(--bg-input-light);
+  --bg-hover: var(--bg-hover-light);
+  --bg-selected: var(--bg-selected-light);
+  --border-subtle: var(--border-subtle-light);
+  --border-strong: var(--border-strong-light);
+  --text-primary: var(--text-primary-light);
+  --text-secondary: var(--text-secondary-light);
+  --text-muted: var(--text-muted-light);
+  --accent-primary: var(--accent-primary-light);
+  --accent-hover: var(--accent-hover-light);
+  --pw-letter: var(--pw-letter-light);
+  --pw-digit: var(--pw-digit-light);
+  --pw-symbol: var(--pw-symbol-light);
+  --status-danger: var(--status-danger-light);
+  --status-warning: var(--status-warning-light);
+  --status-caution: var(--status-caution-light);
+  --status-success: var(--status-success-light);
+  --status-info: var(--status-info-light);
+  --scrollbar-thumb: var(--scrollbar-thumb-light);
 }
 
 html {
