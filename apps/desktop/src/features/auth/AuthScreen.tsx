@@ -165,7 +165,7 @@ export function AuthScreen() {
   return (
     <div className="h-dvh w-full flex items-center justify-center bg-[var(--bg-sidebar)] p-6">
       {inTauri && <div data-tauri-drag-region className="fixed top-0 left-0 right-0 h-9" />}
-      <div className="w-full max-w-[420px] rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-xl overflow-hidden">
+      <div className="w-full max-w-[440px] rounded-xl bg-[var(--bg-elevated)] backdrop-blur-2xl border border-[var(--border-strong)] shadow-xl overflow-hidden">
         <div className="px-6 pt-5 pb-4 border-b border-[var(--border-subtle)] bg-[var(--bg-card)]/50">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-3 min-w-0">
@@ -186,19 +186,19 @@ export function AuthScreen() {
                 />
               )}
               <div className="min-w-0">
-                <h1 id="auth-signin-heading" className="text-[16px] font-semibold text-[var(--text-primary)] tracking-tight truncate">
+                <h1 id="auth-signin-heading" className="text-[17px] font-semibold text-[var(--text-primary)] tracking-tight truncate">
                   {addingAccount ? dict.auth.addAccountTitle : dict.auth.title}
                 </h1>
               </div>
             </div>
 
-            <label className="inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[11px] font-medium text-[var(--text-secondary)] cursor-pointer shrink-0">
+            <label className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] cursor-pointer shrink-0">
               <Globe size={12} />
               <select
                 aria-label={dict.settings.languageLabel}
                 value={languageMode}
                 onChange={(e) => setLanguageMode(e.target.value as LanguageMode)}
-                className="bg-transparent focus:outline-none cursor-pointer text-[11px] font-medium text-[var(--text-secondary)]"
+                className="bg-transparent focus:outline-none cursor-pointer text-xs font-medium text-[var(--text-secondary)]"
               >
                 <option value="system">{dict.settings.languageSystem}</option>
                 {SUPPORTED_LOCALES.map((loc) => (
@@ -212,13 +212,13 @@ export function AuthScreen() {
 
           {!addingAccount && savedAccounts.length > 0 && (
             <div className="mt-3.5 flex items-center gap-1.5 flex-wrap">
-              <span className="text-[11px] text-[var(--text-muted)]">{dict.auth.savedAccountsQuickSwitch}:</span>
+              <span className="text-xs text-[var(--text-muted)]">{dict.auth.savedAccountsQuickSwitch}:</span>
               {savedAccounts.map((acc) => (
                 <button
                   key={acc.id}
                   type="button"
                   onClick={() => void switchAccount(acc.id)}
-                  className="px-2 py-0.5 rounded-md bg-[var(--bg-sidebar)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] text-[11px] font-medium text-[var(--accent-primary)] cursor-pointer truncate max-w-[190px]"
+                  className="px-2.5 py-1 rounded-md bg-[var(--bg-sidebar)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--accent-primary)] cursor-pointer truncate max-w-[190px]"
                 >
                   {acc.email}
                 </button>
@@ -227,9 +227,9 @@ export function AuthScreen() {
           )}
 
           {registrationDisabled ? (
-            <div className="mt-4 px-3 py-2 rounded-lg bg-[var(--bg-sidebar)] border border-[var(--border-subtle)] flex items-center justify-between text-xs">
+            <div className="mt-4 px-3 py-2 rounded-lg bg-[var(--bg-sidebar)] border border-[var(--border-subtle)] flex items-center justify-between text-[13px]">
               <span className="font-medium text-[var(--text-primary)]">{dict.auth.loginTab}</span>
-              <span className="text-[11px] text-[var(--text-muted)]">{dict.auth.regDisabledNotice}</span>
+              <span className="text-xs text-[var(--text-muted)]">{dict.auth.regDisabledNotice}</span>
             </div>
           ) : (
             <div className="mt-4 grid grid-cols-2 p-0.5 rounded-lg bg-[var(--bg-sidebar)] border border-[var(--border-subtle)]">
@@ -239,7 +239,7 @@ export function AuthScreen() {
                   setTab('login');
                   setError(null);
                 }}
-                className={`py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                className={`py-2 rounded-md text-[13px] font-medium transition-colors cursor-pointer ${
                   tab === 'login'
                     ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-2xs'
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -253,7 +253,7 @@ export function AuthScreen() {
                   setTab('register');
                   setError(null);
                 }}
-                className={`py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                className={`py-2 rounded-md text-[13px] font-medium transition-colors cursor-pointer ${
                   tab === 'register'
                     ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-2xs'
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -268,13 +268,13 @@ export function AuthScreen() {
         <form onSubmit={(e) => void handleSubmit(e)} className="p-6 flex flex-col gap-3.5">
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label htmlFor="auth-server" className="text-xs font-medium text-[var(--text-secondary)]">
+              <label htmlFor="auth-server" className="text-[13px] font-medium text-[var(--text-secondary)]">
                 {dict.auth.serverUrl}
               </label>
               <button
                 type="button"
                 onClick={() => void checkServer()}
-                className="inline-flex items-center gap-1 text-[11px] text-[var(--accent-primary)] hover:underline cursor-pointer"
+                className="inline-flex items-center gap-1 text-xs text-[var(--accent-primary)] hover:underline cursor-pointer"
               >
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
@@ -295,7 +295,7 @@ export function AuthScreen() {
               </button>
             </div>
             <div className="relative flex items-center">
-              <Server size={13} className="absolute left-3 text-[var(--text-muted)]" />
+              <Server size={14} className="absolute left-3 text-[var(--text-muted)]" />
               <input
                 id="auth-server"
                 type="url"
@@ -307,12 +307,12 @@ export function AuthScreen() {
                 }}
                 onBlur={() => void checkServer()}
                 placeholder="https://vault.example.com"
-                className="w-full pl-8 pr-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-xs font-mono-tabular text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-[13px] font-mono-tabular text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
             </div>
             {serverOk === 'ok' && serverVersion && (
-              <p className="mt-1 text-[11px] text-[var(--text-muted)] flex items-center gap-1">
-                <CheckCircle2 size={11} className="text-[var(--status-success)]" />
+              <p className="mt-1 text-xs text-[var(--text-muted)] flex items-center gap-1">
+                <CheckCircle2 size={12} className="text-[var(--status-success)]" />
                 {serverVersion}
               </p>
             )}
@@ -320,7 +320,7 @@ export function AuthScreen() {
 
           {tab === 'register' && (
             <div>
-              <label htmlFor="auth-name" className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+              <label htmlFor="auth-name" className="block text-[13px] font-medium text-[var(--text-secondary)] mb-1">
                 {dict.auth.displayName}
               </label>
               <input
@@ -329,13 +329,13 @@ export function AuthScreen() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Cherry"
-                className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-[13px] text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
             </div>
           )}
 
           <div>
-            <label htmlFor="auth-email" className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+            <label htmlFor="auth-email" className="block text-[13px] font-medium text-[var(--text-secondary)] mb-1">
               {dict.auth.email}
             </label>
             <input
@@ -348,20 +348,20 @@ export function AuthScreen() {
               onChange={(e) => setEmail(e.target.value)}
               onBlur={() => void probePrelogin()}
               placeholder="name@example.com"
-              className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+              className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-[13px] text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
             />
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label htmlFor="auth-pw" className="text-xs font-medium text-[var(--text-secondary)]">
+              <label htmlFor="auth-pw" className="text-[13px] font-medium text-[var(--text-secondary)]">
                 {dict.auth.masterPassword}
               </label>
               {tab === 'login' && !twoFactorVisible && (
                 <button
                   type="button"
                   onClick={() => setTwoFactorVisible(true)}
-                  className="text-[11px] text-[var(--text-muted)] hover:text-[var(--accent-primary)] cursor-pointer"
+                  className="text-xs text-[var(--text-muted)] hover:text-[var(--accent-primary)] cursor-pointer"
                 >
                   {dict.auth.use2fa}
                 </button>
@@ -379,7 +379,7 @@ export function AuthScreen() {
                 autoCapitalize="off"
                 spellCheck={false}
                 placeholder="••••••••"
-                className="w-full pl-3 pr-9 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-xs font-mono-tabular text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                className="w-full pl-3 pr-10 py-2.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-[13px] font-mono-tabular text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
               <button
                 type="button"
@@ -387,7 +387,7 @@ export function AuthScreen() {
                 aria-label={showPw ? dict.common.hide : dict.common.show}
                 className="absolute right-2.5 p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
               >
-                {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
             {tab === 'register' && (
@@ -406,7 +406,7 @@ export function AuthScreen() {
                     }}
                   />
                 </div>
-                <span className="text-[11px] text-[var(--text-secondary)]">
+                <span className="text-xs text-[var(--text-secondary)]">
                   {dict.auth.passwordStrength}:{' '}
                   {(
                     [
@@ -424,11 +424,11 @@ export function AuthScreen() {
 
           {tab === 'login' && twoFactorVisible && (
             <div>
-              <label htmlFor="auth-2fa" className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+              <label htmlFor="auth-2fa" className="block text-[13px] font-medium text-[var(--text-secondary)] mb-1">
                 {dict.auth.twoFactorCode}
               </label>
               <div className="relative flex items-center">
-                <KeyRound size={13} className="absolute left-3 text-[var(--text-muted)]" />
+                <KeyRound size={14} className="absolute left-3 text-[var(--text-muted)]" />
                 <input
                   id="auth-2fa"
                   type="text"
@@ -437,7 +437,7 @@ export function AuthScreen() {
                   onChange={(e) => setTwoFactorCode(e.target.value)}
                   autoComplete="one-time-code"
                   placeholder="123456"
-                  className="w-full pl-8 pr-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-xs font-mono-tabular text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                  className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-[13px] font-mono-tabular text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
                 />
               </div>
             </div>
@@ -445,7 +445,7 @@ export function AuthScreen() {
 
           {tab === 'register' && (
             <div>
-              <label htmlFor="auth-pw2" className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+              <label htmlFor="auth-pw2" className="block text-[13px] font-medium text-[var(--text-secondary)] mb-1">
                 {dict.auth.confirmMasterPassword}
               </label>
               <input
@@ -459,13 +459,13 @@ export function AuthScreen() {
                 autoCapitalize="off"
                 spellCheck={false}
                 placeholder="••••••••"
-                className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-xs font-mono-tabular text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-strong)] text-[13px] font-mono-tabular text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
             </div>
           )}
 
           {error && (
-            <div className="px-3 py-2 rounded-lg bg-[var(--status-danger)]/10 border border-[var(--status-danger)]/25 text-xs text-[var(--status-danger)]">
+            <div className="px-3 py-2 rounded-lg bg-[var(--status-danger)]/10 border border-[var(--status-danger)]/25 text-[13px] text-[var(--status-danger)]">
               {error}
             </div>
           )}
@@ -475,7 +475,7 @@ export function AuthScreen() {
               <button
                 type="button"
                 onClick={cancelAddingAccount}
-                className="px-4 py-2.5 rounded-lg border border-[var(--border-strong)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-primary)] cursor-pointer shrink-0"
+                className="px-4 py-2.5 rounded-lg border border-[var(--border-strong)] hover:bg-[var(--bg-hover)] text-[13px] font-medium text-[var(--text-primary)] cursor-pointer shrink-0"
               >
                 {dict.common.cancel}
               </button>
@@ -483,16 +483,16 @@ export function AuthScreen() {
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 py-2.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-60 text-xs font-semibold text-white flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              className="flex-1 py-2.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-60 text-[13.5px] font-semibold text-white flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
-              {loading && <Loader2 size={14} className="animate-spin" />}
+              {loading && <Loader2 size={15} className="animate-spin" />}
               {tab === 'login' ? dict.auth.signInBtn : dict.auth.registerBtn}
             </button>
           </div>
 
           {!addingAccount && tab === 'login' && accountPasskeys.length > 0 && (
             <div className="pt-2.5 border-t border-[var(--border-subtle)] flex flex-col gap-2">
-              <div className="flex items-center justify-between text-[11px] text-[var(--text-secondary)]">
+              <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
                 <span>{dict.auth.orPasskey}</span>
                 <select
                   value={selectedPasskeyId}
@@ -511,12 +511,12 @@ export function AuthScreen() {
                 type="button"
                 disabled={passkeyLoading}
                 onClick={() => void handlePasskeyLogin()}
-                className="w-full py-2 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                className="w-full py-2.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[13px] font-medium text-[var(--text-primary)] flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
                 {passkeyLoading ? (
-                  <Loader2 size={14} className="animate-spin text-[var(--accent-primary)]" />
+                  <Loader2 size={15} className="animate-spin text-[var(--accent-primary)]" />
                 ) : (
-                  <Fingerprint size={15} className="text-[var(--accent-primary)]" />
+                  <Fingerprint size={16} className="text-[var(--accent-primary)]" />
                 )}
                 {passkeyLoading ? dict.auth.verifyingPasskey : dict.auth.usePasskeyBtn}
               </button>
@@ -524,7 +524,7 @@ export function AuthScreen() {
           )}
 
           {!inTauri && (
-            <p className="text-[11px] text-center text-[var(--text-muted)]">
+            <p className="text-xs text-center text-[var(--text-muted)]">
               {fmt(dict.auth.demoHint, { pw: 'keysmith' })}
             </p>
           )}

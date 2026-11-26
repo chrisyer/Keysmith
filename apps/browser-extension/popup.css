@@ -46,11 +46,11 @@
 }
 
 body {
-  width: 368px;
+  width: 382px;
   min-height: 280px;
-  max-height: 560px;
+  max-height: 580px;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.45;
   color: var(--text-primary);
   background: var(--bg-page);
@@ -60,14 +60,14 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 280px;
-  max-height: 560px;
+  max-height: 580px;
 }
 
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: 11px 14px;
   background: var(--bg-header);
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -92,30 +92,30 @@ body {
 }
 
 .brand-name {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 .domain-label {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 120px;
+  max-width: 126px;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
 
 .status-badge {
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 500;
-  padding: 2px 8px;
+  padding: 3px 9px;
   border-radius: 999px;
   border: 1px solid transparent;
   white-space: nowrap;
@@ -138,9 +138,9 @@ body {
 }
 
 .icon-btn {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-card);
   color: var(--text-secondary);
@@ -148,7 +148,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 .icon-btn:hover {
@@ -169,9 +169,9 @@ body {
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
-  padding: 5px 8px;
+  padding: 6px 8px;
   border-radius: 7px;
   cursor: pointer;
 }
@@ -272,7 +272,7 @@ body {
 }
 
 .section-header {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -292,14 +292,14 @@ body {
 }
 
 .field-group {
-  margin-bottom: 8px;
+  margin-bottom: 9px;
 }
 
 .field-group label {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
 
 .inline-input-row {
@@ -315,12 +315,12 @@ body {
 .text-input,
 .search-input {
   width: 100%;
-  padding: 7px 10px;
+  padding: 8px 11px;
   border-radius: 8px;
   border: 1px solid var(--border-strong);
   background: var(--bg-card);
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: 13px;
   outline: none;
 }
 
@@ -331,7 +331,7 @@ body {
 }
 
 .search-wrap {
-  margin-bottom: 8px;
+  margin-bottom: 9px;
 }
 
 .filter-pills,
@@ -346,9 +346,9 @@ body {
   border: 1px solid var(--border-subtle);
   background: var(--bg-subtle);
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
-  padding: 4px 9px;
+  padding: 5px 10px;
   border-radius: 999px;
   cursor: pointer;
 }
@@ -370,7 +370,7 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  padding: 10px 11px;
+  padding: 11px 12px;
   transition: border-color 0.15s ease;
 }
 
@@ -401,14 +401,14 @@ body {
 
 .item-title {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 13.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .item-username {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -430,7 +430,7 @@ body {
 }
 
 .mini-badge {
-  font-size: 10px;
+  font-size: 10.5px;
   padding: 1px 6px;
   border-radius: 5px;
   background: var(--accent-soft);
@@ -442,7 +442,7 @@ body {
 .btn-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 7px;
 }
 
 .btn-flex {
@@ -451,9 +451,9 @@ body {
 
 .btn {
   border: none;
-  border-radius: 7px;
-  padding: 6px 10px;
-  font-size: 12px;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
@@ -493,12 +493,12 @@ body {
 .textarea-input {
   width: 100%;
   min-height: 68px;
-  padding: 7px 10px;
+  padding: 8px 11px;
   border-radius: 8px;
   border: 1px solid var(--border-strong);
   background: var(--bg-card);
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: 13px;
   font-family: inherit;
   resize: vertical;
   outline: none;
@@ -510,15 +510,15 @@ body {
 }
 
 .btn-sm {
-  padding: 4px 8px;
-  font-size: 11.5px;
+  padding: 5px 10px;
+  font-size: 12.5px;
 }
 
 .link-btn {
   background: none;
   border: none;
   color: var(--accent);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
   padding: 0;
@@ -538,7 +538,7 @@ body {
 }
 
 .subview-title {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
 }
 
@@ -551,21 +551,21 @@ body {
 }
 
 .detail-title {
-  font-size: 15px;
+  font-size: 15.5px;
   font-weight: 600;
   margin-bottom: 2px;
   word-break: break-word;
 }
 
 .detail-subtitle {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--text-secondary);
   margin-bottom: 10px;
   word-break: break-all;
 }
 
 .detail-section-title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -577,7 +577,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 7px 0;
+  padding: 8px 0;
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -598,7 +598,7 @@ body {
 }
 
 .detail-field-label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
@@ -608,7 +608,7 @@ body {
 }
 
 .detail-field-value {
-  font-size: 12.5px;
+  font-size: 13px;
   word-break: break-all;
   white-space: pre-wrap;
 }
@@ -662,10 +662,10 @@ body {
 
 .takeover-status {
   margin-top: 6px;
-  padding: 7px 9px;
+  padding: 8px 10px;
   border-radius: 7px;
   background: var(--bg-subtle);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .takeover-status.ok {
@@ -690,7 +690,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 12px;
+  font-size: 12.5px;
   padding: 4px 0;
 }
 
@@ -712,13 +712,13 @@ body {
 
 .gen-output {
   font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   word-break: break-all;
   flex: 1;
 }
 
 .gen-strength {
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
   padding: 2px 7px;
   border-radius: 5px;
@@ -749,7 +749,7 @@ body {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12.5px;
+  font-size: 13px;
   cursor: pointer;
 }
 
@@ -757,21 +757,21 @@ body {
   text-align: center;
   padding: 18px 10px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 14px;
+  padding: 9px 14px;
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-header);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .toast {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--status-success);
   font-weight: 600;
 }
@@ -786,12 +786,12 @@ body {
 
 .select-input {
   width: 100%;
-  padding: 7px 10px;
-  border-radius: 7px;
+  padding: 8px 11px;
+  border-radius: 8px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-subtle);
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
 }

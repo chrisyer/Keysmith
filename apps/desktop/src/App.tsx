@@ -53,9 +53,15 @@ function MainWorkspaceApp() {
   const addingAccount = useSessionStore((s) => s.addingAccount);
   const initialized = useSessionStore((s) => s.initialized);
   const initError = useSessionStore((s) => s.initError);
+  const vibrancyEnabled = useSessionStore((s) => s.vibrancyEnabled);
   const initSession = useSessionStore((s) => s.init);
   const retryInit = useSessionStore((s) => s.retryInit);
   const setAuthStatus = useSessionStore((s) => s.setAuthStatus);
+
+  const isMacDesktop =
+    isTauriRuntime() &&
+    typeof navigator !== 'undefined' &&
+    /Mac/i.test(navigator.platform || navigator.userAgent);
 
   const vaults = useVaultStore((s) => s.vaults);
   const activeItem = useVaultStore((s) => s.activeItem);
@@ -239,6 +245,15 @@ function MainWorkspaceApp() {
   }, [initialized, authStatus, addingAccount]);
 
   useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const enabled = Boolean(vibrancyEnabled && isMacDesktop);
+    document.documentElement.classList.toggle('ks-glass-enabled', enabled);
+    return () => {
+      document.documentElement.classList.remove('ks-glass-enabled');
+    };
+  }, [vibrancyEnabled, isMacDesktop]);
+
+  useEffect(() => {
     if (!initialized || authStatus !== 'Unlocked') return;
     void refreshItems(getFilter());
   }, [
@@ -345,7 +360,11 @@ function MainWorkspaceApp() {
     activeView === 'watchtower' && !activeWatchtowerFilter && !isEditing;
 
   return (
-    <div className="h-dvh w-screen overflow-y-hidden overflow-x-auto flex bg-[var(--bg-detail)] text-[var(--text-primary)]">
+    <div
+      className={`h-dvh w-screen overflow-y-hidden overflow-x-auto flex text-[var(--text-primary)] ${
+        vibrancyEnabled && isMacDesktop ? 'bg-transparent' : 'bg-[var(--bg-detail)]'
+      }`}
+    >
       {/* Pane 1: Sidebar */}
       <Sidebar />
 
@@ -383,21 +402,21 @@ function MainWorkspaceApp() {
                 <div className="w-12 h-12 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--accent-primary)] mb-3.5">
                   <KeyRound size={22} />
                 </div>
-                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">
                   {dict.app.emptyTitle}
                 </h2>
-                <p className="text-xs text-[var(--text-secondary)] mt-1 max-w-xs leading-relaxed">
+                <p className="text-[13px] text-[var(--text-secondary)] mt-1 max-w-xs leading-relaxed">
                   {dict.app.emptyHint}
                 </p>
                 <div className="mt-4">
                   <button
                     type="button"
                     onClick={() => setNewItemOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-[13.5px] font-medium text-white cursor-pointer"
                   >
-                    <Plus size={14} />
+                    <Plus size={15} />
                     {dict.app.newItemBtn}
-                    <span className="opacity-75 font-mono-tabular text-[11px] ml-0.5">
+                    <span className="opacity-75 font-mono-tabular text-xs ml-0.5">
                       {formatShortcutMac(shortcuts.newItem)}
                     </span>
                   </button>

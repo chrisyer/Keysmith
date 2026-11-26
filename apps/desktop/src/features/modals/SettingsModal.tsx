@@ -404,25 +404,25 @@ export function SettingsModal() {
       onClose={() => setSettingsOpen(false)}
       ariaLabelledBy="settings-title"
       closedBy="any"
-      className="rounded-xl w-[min(700px,94vw)] shadow-2xl"
+      className="rounded-xl w-[min(740px,94vw)] shadow-2xl"
     >
-      <div className="flex flex-col max-h-[84dvh]">
+      <div className="flex flex-col max-h-[85dvh]">
         <div className="px-5 py-3.5 border-b border-[var(--border-subtle)] flex items-center justify-between">
-          <h1 id="settings-title" className="text-[15px] font-semibold text-[var(--text-primary)]">
+          <h1 id="settings-title" className="text-base font-semibold text-[var(--text-primary)]">
             {dict.settings.title}
           </h1>
           <button
             type="button"
             onClick={() => setSettingsOpen(false)}
             aria-label={dict.common.close}
-            className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+            className="p-2 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
           >
-            <X size={16} />
+            <X size={17} />
           </button>
         </div>
 
-        <div className="flex flex-1 min-h-[400px] overflow-hidden">
-          <nav className="w-44 shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] p-2.5 flex flex-col gap-0.5">
+        <div className="flex flex-1 min-h-[420px] overflow-hidden">
+          <nav className="w-48 shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] p-2.5 flex flex-col gap-0.5">
             {(
               [
                 { id: 'appearance', label: dict.settings.tabs.appearance, icon: Palette },
@@ -441,13 +441,13 @@ export function SettingsModal() {
                   key={item.id}
                   type="button"
                   onClick={() => setTab(item.id)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-left cursor-pointer ${
+                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13px] font-medium text-left cursor-pointer ${
                     tab === item.id
                       ? 'bg-[var(--bg-selected)] text-[var(--accent-primary)]'
                       : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                   }`}
                 >
-                  <Icon size={14} />
+                  <Icon size={15} />
                   {item.label}
                 </button>
               );
@@ -456,18 +456,18 @@ export function SettingsModal() {
 
           <div className="flex-1 overflow-y-auto ks-scroll p-5">
             {tab === 'appearance' && (
-              <div className="flex flex-col gap-5 text-xs">
+              <div className="flex flex-col gap-5 text-[13px]">
                 <div>
-                  <h2 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">
+                  <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-2">
                     {dict.settings.languageLabel}
                   </h2>
                   <div className="relative flex items-center">
-                    <Globe size={14} className="absolute left-3 text-[var(--text-muted)] pointer-events-none" />
+                    <Globe size={15} className="absolute left-3 text-[var(--text-muted)] pointer-events-none" />
                     <select
                       aria-label={dict.settings.languageLabel}
                       value={languageMode}
                       onChange={(e) => setLanguageMode(e.target.value as LanguageMode)}
-                      className="w-full pl-9 pr-3 py-2 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--border-strong)] focus:border-[var(--accent-primary)] focus:outline-none text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+                      className="w-full pl-9 pr-3 py-2 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--border-strong)] focus:border-[var(--accent-primary)] focus:outline-none text-[13px] font-medium text-[var(--text-primary)] cursor-pointer"
                     >
                       {langOptions.map((opt) => (
                         <option key={opt.id} value={opt.id}>
@@ -479,7 +479,7 @@ export function SettingsModal() {
                 </div>
 
                 <div>
-                  <h2 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">
+                  <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-2">
                     {dict.settings.themeTitle}
                   </h2>
                   <div className="grid grid-cols-3 gap-2">
@@ -497,8 +497,8 @@ export function SettingsModal() {
                               : 'bg-[var(--bg-card)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
                           }`}
                         >
-                          <Icon size={16} />
-                          <span className="text-xs font-medium text-[var(--text-primary)] truncate max-w-full">
+                          <Icon size={17} />
+                          <span className="text-[13px] font-medium text-[var(--text-primary)] truncate max-w-full">
                             {opt.label}
                           </span>
                         </button>
@@ -507,11 +507,11 @@ export function SettingsModal() {
                   </div>
                 </div>
 
-                <div className="pt-3 border-t border-[var(--border-subtle)] flex flex-col gap-2">
-                  <label className="flex items-center justify-between gap-4 p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
+                <div className="pt-3 border-t border-[var(--border-subtle)] flex flex-col gap-2.5">
+                  <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
                     <div>
                       <div className="font-medium text-[var(--text-primary)]">{dict.settings.vibrancy}</div>
-                      <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{dict.settings.vibrancyDesc}</div>
+                      <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.vibrancyDesc}</div>
                     </div>
                     <input
                       type="checkbox"
@@ -521,10 +521,10 @@ export function SettingsModal() {
                     />
                   </label>
 
-                  <label className="flex items-center justify-between gap-4 p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
+                  <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
                     <div>
                       <div className="font-medium text-[var(--text-primary)]">{dict.settings.favicon}</div>
-                      <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{dict.settings.faviconDesc}</div>
+                      <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.faviconDesc}</div>
                     </div>
                     <input
                       type="checkbox"
@@ -538,11 +538,11 @@ export function SettingsModal() {
             )}
 
             {tab === 'security' && (
-              <div className="flex flex-col gap-2.5 text-xs">
-                <label className="flex items-center justify-between gap-4 p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
+              <div className="flex flex-col gap-2.5 text-[13px]">
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
                   <div>
                     <div className="font-medium text-[var(--text-primary)]">{dict.settings.touchId}</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{dict.settings.touchIdDesc}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.touchIdDesc}</div>
                   </div>
                   <input
                     type="checkbox"
@@ -553,15 +553,15 @@ export function SettingsModal() {
                   />
                 </label>
 
-                <label className="flex items-center justify-between gap-4 p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
                   <div>
                     <div className="font-medium text-[var(--text-primary)]">{dict.settings.biometricMaxDays}</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{dict.settings.biometricMaxDaysDesc}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.biometricMaxDaysDesc}</div>
                   </div>
                   <select
                     value={biometricMaxDays}
                     onChange={(e) => void updatePreferences({ biometricMaxDays: Number(e.target.value) })}
-                    className="ks-select min-w-[120px] shrink-0"
+                    className="ks-select min-w-[128px] shrink-0"
                   >
                     <option value={0}>{dict.settings.daysNever}</option>
                     <option value={1}>{dict.settings.days1}</option>
@@ -570,15 +570,15 @@ export function SettingsModal() {
                   </select>
                 </label>
 
-                <label className="flex items-center justify-between gap-4 p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
                   <div>
                     <div className="font-medium text-[var(--text-primary)]">{dict.settings.autoLock}</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{dict.settings.autoLockDesc}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.autoLockDesc}</div>
                   </div>
                   <select
                     value={autoLockMinutes}
                     onChange={(e) => void updatePreferences({ autoLockMinutes: Number(e.target.value) })}
-                    className="ks-select min-w-[120px] shrink-0"
+                    className="ks-select min-w-[128px] shrink-0"
                   >
                     <option value={1}>{dict.settings.mins1}</option>
                     <option value={5}>{dict.settings.mins5}</option>
@@ -589,15 +589,15 @@ export function SettingsModal() {
                   </select>
                 </label>
 
-                <label className="flex items-center justify-between gap-4 p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
                   <div>
                     <div className="font-medium text-[var(--text-primary)]">{dict.settings.clipboardClear}</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{dict.settings.clipboardClearDesc}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.clipboardClearDesc}</div>
                   </div>
                   <select
                     value={clipboardClearSeconds}
                     onChange={(e) => void updatePreferences({ clipboardClearSeconds: Number(e.target.value) })}
-                    className="ks-select min-w-[120px] shrink-0"
+                    className="ks-select min-w-[128px] shrink-0"
                   >
                     <option value={10}>{dict.settings.secs10}</option>
                     <option value={20}>{dict.settings.secs20}</option>
@@ -607,10 +607,10 @@ export function SettingsModal() {
                   </select>
                 </label>
 
-                <label className="flex items-center justify-between gap-4 p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
                   <div>
                     <div className="font-medium text-[var(--text-primary)]">{dict.settings.lockOnSleep}</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{dict.settings.lockOnSleepDesc}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.lockOnSleepDesc}</div>
                   </div>
                   <input
                     type="checkbox"
@@ -620,10 +620,10 @@ export function SettingsModal() {
                   />
                 </label>
 
-                <label className="flex items-center justify-between gap-4 p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
                   <div>
                     <div className="font-medium text-[var(--text-primary)]">{dict.settings.closeToTray}</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{dict.settings.closeToTrayDesc}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.closeToTrayDesc}</div>
                   </div>
                   <input
                     type="checkbox"
@@ -633,10 +633,10 @@ export function SettingsModal() {
                   />
                 </label>
 
-                <label className="flex items-center justify-between gap-4 p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
                   <div>
                     <div className="font-medium text-[var(--text-primary)]">{dict.settings.captureProtect}</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{dict.settings.captureProtectDesc}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.captureProtectDesc}</div>
                   </div>
                   <input
                     type="checkbox"
@@ -646,10 +646,10 @@ export function SettingsModal() {
                   />
                 </label>
 
-                <label className="flex items-center justify-between gap-4 p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
                   <div>
                     <div className="font-medium text-[var(--text-primary)]">{dict.settings.launchAtLogin}</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{dict.settings.launchAtLoginDesc}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.launchAtLoginDesc}</div>
                   </div>
                   <input
                     type="checkbox"
@@ -800,14 +800,14 @@ export function SettingsModal() {
             )}
 
             {tab === 'browser' && (
-              <div className="flex flex-col gap-4 text-xs">
+              <div className="flex flex-col gap-4 text-[13px]">
                 <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                      <h2 className="text-sm font-semibold text-[var(--text-primary)]">
                         {dict.settings.browserSection.title}
                       </h2>
-                      <p className="text-[11px] text-[var(--text-secondary)] mt-1 leading-relaxed">
+                      <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">
                         {dict.settings.browserSection.desc}
                       </p>
                     </div>
@@ -832,9 +832,9 @@ export function SettingsModal() {
                           });
                         }
                       }}
-                      className="min-h-[34px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white text-xs font-medium cursor-pointer"
+                      className="min-h-[36px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white text-[13px] font-medium cursor-pointer"
                     >
-                      <FolderOpen size={13} />
+                      <FolderOpen size={14} />
                       {dict.settings.browserSection.openFolderBtn}
                     </button>
                     <button
@@ -854,9 +854,9 @@ export function SettingsModal() {
                           setBrowserBusy(false);
                         }
                       }}
-                      className="min-h-[34px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+                      className="min-h-[36px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[13px] font-medium text-[var(--text-primary)] cursor-pointer"
                     >
-                      <RefreshCw size={12} className={browserBusy ? 'animate-spin' : ''} />
+                      <RefreshCw size={13} className={browserBusy ? 'animate-spin' : ''} />
                       {dict.settings.browserSection.reconfigureBtn}
                     </button>
                   </div>
@@ -997,11 +997,11 @@ export function SettingsModal() {
             )}
 
             {tab === 'import_export' && (
-              <div className="flex flex-col gap-4 text-xs">
+              <div className="flex flex-col gap-4 text-[13px]">
                 <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-3">
                   <div className="flex items-center gap-2">
                     <ArrowDownToLine size={15} className="text-[var(--accent-primary)]" />
-                    <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">{dict.settings.importTitle}</h2>
+                    <h2 className="text-sm font-semibold text-[var(--text-primary)]">{dict.settings.importTitle}</h2>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <select
@@ -1032,8 +1032,8 @@ export function SettingsModal() {
                   </div>
 
                   <div className="flex justify-end">
-                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white text-xs font-medium cursor-pointer shrink-0">
-                      <ArrowDownToLine size={13} />
+                    <label className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white text-[13px] font-medium cursor-pointer shrink-0">
+                      <ArrowDownToLine size={14} />
                       <span>{importing ? dict.settings.importing : dict.settings.selectFile}</span>
                       <input
                         type="file"
@@ -1046,7 +1046,7 @@ export function SettingsModal() {
                   </div>
 
                   {importResult && (
-                    <div className="p-2.5 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[11px]">
+                    <div className="p-2.5 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-xs">
                       {fmt(dict.settings.importSummary, {
                         vaults: importResult.importedVaults,
                         items: importResult.importedItems,
@@ -1062,7 +1062,7 @@ export function SettingsModal() {
                 >
                   <div className="flex items-center gap-2">
                     <ArrowUpFromLine size={15} className="text-[var(--accent-primary)]" />
-                    <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">{dict.settings.exportTitle}</h2>
+                    <h2 className="text-sm font-semibold text-[var(--text-primary)]">{dict.settings.exportTitle}</h2>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -1100,9 +1100,9 @@ export function SettingsModal() {
                     <button
                       type="submit"
                       disabled={exporting || !exportMasterPw}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] disabled:opacity-50 border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer shrink-0"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] disabled:opacity-50 border border-[var(--border-strong)] text-[13px] font-medium text-[var(--text-primary)] cursor-pointer shrink-0"
                     >
-                      <ArrowUpFromLine size={13} />
+                      <ArrowUpFromLine size={14} />
                       {exporting ? dict.settings.exporting : dict.settings.exportBtn}
                     </button>
                   </div>
@@ -1111,7 +1111,7 @@ export function SettingsModal() {
             )}
 
             {tab === 'sync' && (
-              <div className="flex flex-col gap-3.5 text-xs">
+              <div className="flex flex-col gap-3.5 text-[13px]">
                 <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[var(--text-secondary)]">{dict.settings.currentAccount}</span>
@@ -1160,9 +1160,9 @@ export function SettingsModal() {
                           setSettingsOpen(false);
                           startAddingAccount();
                         }}
-                        className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--accent-primary)] hover:underline cursor-pointer"
+                        className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-primary)] hover:underline cursor-pointer"
                       >
-                        <UserPlus size={12} />
+                        <UserPlus size={13} />
                         {dict.settings.addAccountBtn}
                       </button>
                     </div>
@@ -1174,10 +1174,10 @@ export function SettingsModal() {
                         >
                           <div className="min-w-0">
                             <div className="font-medium text-[var(--text-primary)] truncate">{acct.email}</div>
-                            <div className="text-[10.5px] text-[var(--text-muted)] truncate">{acct.serverUrl}</div>
+                            <div className="text-xs text-[var(--text-muted)] truncate">{acct.serverUrl}</div>
                           </div>
                           {acct.isActive ? (
-                            <span className="px-2 py-0.5 rounded-full bg-[var(--bg-selected)] text-[var(--accent-primary)] text-[10.5px] font-medium shrink-0">
+                            <span className="px-2.5 py-0.5 rounded-full bg-[var(--bg-selected)] text-[var(--accent-primary)] text-xs font-medium shrink-0">
                               {dict.settings.currentActive}
                             </span>
                           ) : (
@@ -1187,7 +1187,7 @@ export function SettingsModal() {
                                 setSettingsOpen(false);
                                 void switchAccount(acct.id);
                               }}
-                              className="px-2.5 py-1 rounded-md border border-[var(--border-strong)] hover:bg-[var(--bg-hover)] text-[11px] font-medium text-[var(--text-primary)] cursor-pointer shrink-0"
+                              className="px-3 py-1.5 rounded-md border border-[var(--border-strong)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-primary)] cursor-pointer shrink-0"
                             >
                               {dict.settings.switchBtn}
                             </button>
@@ -1201,16 +1201,16 @@ export function SettingsModal() {
                 <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="font-semibold text-[var(--text-primary)]">{dict.settings.appVersion}</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] mt-0.5 flex flex-wrap items-center gap-2">
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5 flex flex-wrap items-center gap-2">
                       <span>{updateInfo ? `v${updateInfo.currentVersion}` : 'v0.1.3'}</span>
                       {updateInfo?.updateAvailable && updateInfo.latestVersion && (
-                        <span className="px-1.5 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-primary)] font-medium">
+                        <span className="px-2 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-primary)] font-medium">
                           {fmt(dict.settings.newVersionAvailable, { version: updateInfo.latestVersion })}
                         </span>
                       )}
                     </div>
                     {updateInfo?.updateAvailable && updateInfo.notes && (
-                      <div className="text-[11px] text-[var(--text-muted)] mt-1 line-clamp-2">
+                      <div className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">
                         {updateInfo.notes}
                       </div>
                     )}
@@ -1220,7 +1220,7 @@ export function SettingsModal() {
                       <button
                         type="button"
                         onClick={() => void openExternalUrl(updateInfo.releaseUrl!)}
-                        className="px-2.5 py-1.5 rounded-lg bg-[var(--accent-primary)] text-white text-[11px] font-medium cursor-pointer"
+                        className="px-3 py-2 rounded-lg bg-[var(--accent-primary)] text-white text-xs font-medium cursor-pointer"
                       >
                         {dict.settings.download}
                       </button>
@@ -1229,7 +1229,7 @@ export function SettingsModal() {
                       type="button"
                       disabled={checkingUpdate}
                       onClick={() => void handleCheckUpdate()}
-                      className="px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+                      className="px-3.5 py-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[13px] font-medium text-[var(--text-primary)] cursor-pointer"
                     >
                       {checkingUpdate ? dict.settings.checkingUpdate : dict.settings.checkUpdate}
                     </button>
@@ -1243,9 +1243,9 @@ export function SettingsModal() {
                       await syncNow(getFilter());
                       showToast({ label: dict.settings.syncNowBtn, text: dict.sidebar.syncing, kind: 'info' });
                     }}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-[13px] font-medium text-white cursor-pointer"
                   >
-                    <RefreshCw size={13} />
+                    <RefreshCw size={14} />
                     {dict.settings.syncNowBtn} ({formatShortcutMac(shortcuts.syncVault)})
                   </button>
 
@@ -1255,9 +1255,9 @@ export function SettingsModal() {
                       setSettingsOpen(false);
                       void logout(false);
                     }}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-[var(--status-danger)]/40 text-[var(--status-danger)] hover:bg-[var(--status-danger)]/10 text-xs font-medium cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[var(--status-danger)]/40 text-[var(--status-danger)] hover:bg-[var(--status-danger)]/10 text-[13px] font-medium cursor-pointer"
                   >
-                    <LogOut size={13} />
+                    <LogOut size={14} />
                     {dict.settings.logoutRemoveBtn}
                   </button>
                 </div>

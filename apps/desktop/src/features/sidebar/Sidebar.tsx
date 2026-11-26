@@ -101,7 +101,7 @@ export function Sidebar() {
   const avatarInitial = ((displayName || email || 'K').trim()[0] || 'K').toUpperCase();
 
   const navItemClass = (active: boolean) =>
-    `w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors cursor-pointer ${
+    `w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-[13.5px] font-medium transition-colors cursor-pointer ${
       active
         ? 'bg-[var(--bg-selected)] text-[var(--accent-primary)]'
         : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
@@ -124,7 +124,7 @@ export function Sidebar() {
           />
           <span className="truncate">{catLabel}</span>
         </span>
-        <span className="font-mono-tabular text-[11px] text-[var(--text-muted)]">{count}</span>
+        <span className="font-mono-tabular text-xs text-[var(--text-muted)]">{count}</span>
       </button>
     );
   };
@@ -132,11 +132,7 @@ export function Sidebar() {
   return (
     <aside
       style={{ width: sidebarWidth }}
-      className={`h-full shrink-0 flex flex-col justify-between overflow-hidden ${
-        vibrancyEnabled && inTauri
-          ? 'bg-[var(--bg-sidebar)]/85 backdrop-blur-xl'
-          : 'bg-[var(--bg-sidebar)]'
-      }`}
+      className="h-full shrink-0 flex flex-col justify-between overflow-hidden bg-[var(--bg-sidebar)]"
       aria-label="Sidebar"
     >
       {/* Top macOS Titlebar Spacer + Account & Vault Switchers */}
@@ -159,22 +155,22 @@ export function Sidebar() {
             style={{ anchorName: accountAnchorName } as React.CSSProperties}
             onClick={() => void refreshSavedAccounts()}
             title={email}
-            className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-left transition-colors cursor-pointer"
+            className="w-full flex items-center justify-between gap-2 px-2 py-2 rounded-lg hover:bg-[var(--bg-hover)] text-left transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-2 min-w-0">
-              <span className="w-6 h-6 rounded-full bg-[var(--accent-primary)]/15 text-[var(--accent-primary)] text-[11px] font-semibold flex items-center justify-center shrink-0">
+              <span className="w-7 h-7 rounded-full bg-[var(--accent-primary)]/15 text-[var(--accent-primary)] text-xs font-semibold flex items-center justify-center shrink-0">
                 {avatarInitial}
               </span>
               <div className="min-w-0">
-                <div className="text-[12px] font-semibold text-[var(--text-primary)] truncate leading-tight">
+                <div className="text-[13px] font-semibold text-[var(--text-primary)] truncate leading-tight">
                   {displayName || email}
                 </div>
-                <div className="text-[10.5px] text-[var(--text-muted)] truncate leading-tight">
+                <div className="text-[11.5px] text-[var(--text-muted)] truncate leading-tight">
                   {email}
                 </div>
               </div>
             </div>
-            <ChevronsUpDown size={13} className="text-[var(--text-muted)] shrink-0" />
+            <ChevronsUpDown size={14} className="text-[var(--text-muted)] shrink-0" />
           </button>
 
           {/* Account Switcher Popover */}
@@ -228,20 +224,20 @@ export function Sidebar() {
             type="button"
             popoverTarget={vaultPopoverId}
             style={{ anchorName: vaultAnchorName } as React.CSSProperties}
-            className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-[var(--bg-elevated)]/80 hover:bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-left transition-colors cursor-pointer"
+            className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--bg-elevated)]/80 hover:bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-left transition-colors cursor-pointer"
           >
             <span className="flex items-center gap-2 min-w-0">
               <span
                 className="w-5 h-5 rounded-md flex items-center justify-center text-white shrink-0"
                 style={{ backgroundColor: currentVault?.color ?? 'var(--accent-primary)' }}
               >
-                {currentVault?.isOrganization ? <Building2 size={11} /> : <FolderLock size={11} />}
+                {currentVault?.isOrganization ? <Building2 size={12} /> : <FolderLock size={12} />}
               </span>
-              <span className="text-[12.5px] font-medium text-[var(--text-primary)] truncate">
+              <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">
                 {currentVault ? currentVault.name : dict.sidebar.allVaults}
               </span>
             </span>
-            <ChevronsUpDown size={13} className="text-[var(--text-muted)] shrink-0" />
+            <ChevronsUpDown size={14} className="text-[var(--text-muted)] shrink-0" />
           </button>
 
           <div
@@ -429,7 +425,7 @@ export function Sidebar() {
 
         {/* Categories */}
         <div>
-          <div className="px-2.5 mb-1 text-[10.5px] font-semibold text-[var(--text-muted)]">
+          <div className="px-2.5 mb-1 text-[11.5px] font-semibold text-[var(--text-muted)]">
             {dict.sidebar.categories}
           </div>
           <div className="flex flex-col gap-0.5">
@@ -439,10 +435,10 @@ export function Sidebar() {
           <button
             type="button"
             onClick={() => setMoreCategoriesOpen((v) => !v)}
-            className="mt-1 w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
+            className="mt-1 w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
           >
             <span className="flex items-center gap-1">
-              {moreCategoriesOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              {moreCategoriesOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               {fmt(dict.sidebar.moreCategories, { count: PHASE2_TEMPLATES.length })}
             </span>
           </button>
@@ -457,7 +453,7 @@ export function Sidebar() {
         {/* Tags */}
         {tagCounts.length > 0 && (
           <div>
-            <div className="px-2.5 mb-1.5 text-[10.5px] font-semibold text-[var(--text-muted)]">
+            <div className="px-2.5 mb-1.5 text-[11.5px] font-semibold text-[var(--text-muted)]">
               {dict.sidebar.tags}
             </div>
             <div className="px-1.5 flex flex-wrap gap-1.5">
@@ -468,15 +464,15 @@ export function Sidebar() {
                     key={tag}
                     type="button"
                     onClick={() => setViewTag(tag)}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border transition-colors cursor-pointer ${
+                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
                       isSelected
                         ? 'bg-[var(--accent-primary)] text-white border-[var(--accent-primary)]'
                         : 'bg-[var(--bg-elevated)]/75 text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
                     }`}
                   >
-                    <Hash size={10} />
+                    <Hash size={11} />
                     {tag}
-                    <span className={`font-mono-tabular text-[10px] ${isSelected ? 'text-white/80' : 'text-[var(--text-muted)]'}`}>
+                    <span className={`font-mono-tabular text-[11px] ${isSelected ? 'text-white/80' : 'text-[var(--text-muted)]'}`}>
                       {count}
                     </span>
                   </button>
@@ -494,10 +490,10 @@ export function Sidebar() {
             className={navItemClass(activeView === 'archived')}
           >
             <span className="flex items-center gap-2">
-              <Archive size={14} />
+              <Archive size={15} />
               {dict.sidebar.archived}
             </span>
-            <span className="font-mono-tabular text-[11px] text-[var(--text-muted)]">{archivedCount}</span>
+            <span className="font-mono-tabular text-xs text-[var(--text-muted)]">{archivedCount}</span>
           </button>
 
           <button
@@ -506,23 +502,27 @@ export function Sidebar() {
             className={navItemClass(activeView === 'trash')}
           >
             <span className="flex items-center gap-2">
-              <Trash2 size={14} />
+              <Trash2 size={15} />
               {dict.sidebar.trash}
             </span>
-            <span className="font-mono-tabular text-[11px] text-[var(--text-muted)]">{trashCount}</span>
+            <span className="font-mono-tabular text-xs text-[var(--text-muted)]">{trashCount}</span>
           </button>
         </div>
       </div>
 
       {/* Footer Status Bar */}
-      <div className="px-2 py-2 border-t border-[var(--border-subtle)] flex items-center justify-between gap-0.5 bg-[var(--bg-sidebar)] shrink-0">
+      <div
+        className={`px-2.5 py-2 border-t border-[var(--border-subtle)] flex items-center justify-between gap-1 shrink-0 ${
+          vibrancyEnabled && inTauri ? 'bg-transparent' : 'bg-[var(--bg-sidebar)]'
+        }`}
+      >
         <button
           type="button"
           onClick={() => void lock('manual')}
           title={`${dict.sidebar.lock} (${formatShortcutMac(shortcuts.lockVault)})`}
-          className="inline-flex items-center gap-1 px-1.5 py-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] whitespace-nowrap shrink-0 cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[12.5px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] whitespace-nowrap shrink-0 cursor-pointer"
         >
-          <Lock size={12} className="shrink-0" />
+          <Lock size={13} className="shrink-0" />
           <span>{dict.sidebar.lock}</span>
         </button>
 
@@ -530,14 +530,14 @@ export function Sidebar() {
           type="button"
           onClick={() => void syncNow(getFilter())}
           title={`${dict.settings.syncNowBtn} (${formatShortcutMac(shortcuts.syncVault)})`}
-          className="inline-flex items-center justify-center gap-1 px-1 py-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer min-w-0 flex-1"
+          className="inline-flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer min-w-0 flex-1"
         >
           <span
             className={`w-1.5 h-1.5 rounded-full shrink-0 ${
               syncStatus.signalrConnected ? 'bg-[var(--status-success)]' : 'bg-[var(--text-muted)]/60'
             }`}
           />
-          <RefreshCw size={11} className={`shrink-0 ${syncStatus.state === 'syncing' ? 'animate-spin text-[var(--accent-primary)]' : ''}`} />
+          <RefreshCw size={12} className={`shrink-0 ${syncStatus.state === 'syncing' ? 'animate-spin text-[var(--accent-primary)]' : ''}`} />
           <span className="truncate">
             {clipboardCountdown
               ? fmt(dict.sidebar.clipboardCountdown, { secs: clipboardCountdown.remainingSeconds })
@@ -553,9 +553,9 @@ export function Sidebar() {
             onClick={() => setSettingsOpen(true)}
             title={`${dict.sidebar.settingsTooltip} (${formatShortcutMac(shortcuts.openSettings)})`}
             aria-label={dict.sidebar.settingsTooltip}
-            className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+            className="p-2 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
           >
-            <Settings size={14} />
+            <Settings size={15} />
           </button>
         </div>
       </div>

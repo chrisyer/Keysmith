@@ -155,8 +155,8 @@ function FieldRow({
       }`}
     >
       <div className="min-w-0 flex-1">
-        <div className="text-[11.5px] font-medium text-[var(--text-secondary)]">{field.label}</div>
-        <div className="mt-1 text-[13.5px] leading-relaxed" data-selectable="true">
+        <div className="text-xs font-medium text-[var(--text-secondary)]">{field.label}</div>
+        <div className="mt-1 text-sm leading-relaxed" data-selectable="true">
           {field.sensitive && field.purpose !== 'card_number' ? (
             (isMultiline && !revealed) || repromptLocked ? (
               <span className="font-mono-tabular tracking-[0.18em] text-[var(--text-secondary)]">
@@ -168,7 +168,7 @@ function FieldRow({
           ) : (
             <span
               className={`${isMono ? 'font-mono-tabular' : ''} ${
-                isMultiline ? 'whitespace-pre-wrap break-all text-xs' : 'break-all'
+                isMultiline ? 'whitespace-pre-wrap break-all text-[13px]' : 'break-all'
               } text-[var(--text-primary)]`}
             >
               {displayValue}
@@ -192,9 +192,9 @@ function FieldRow({
             }}
             title={revealed ? dict.detail.hideFieldTitle : dict.detail.showFieldTitle}
             aria-label={fmt(revealed ? dict.detail.hideFieldAria : dict.detail.showFieldAria, { label: field.label })}
-            className="p-1.5 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
+            className="p-2 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
           >
-            {revealed && !repromptLocked ? <EyeOff size={14} /> : <Eye size={14} />}
+            {revealed && !repromptLocked ? <EyeOff size={15} /> : <Eye size={15} />}
           </button>
         )}
         {field.sensitive && field.value && (
@@ -210,9 +210,9 @@ function FieldRow({
             }}
             title={dict.detail.largeTypeTitle}
             aria-label={fmt(dict.detail.largeTypeFieldAria, { label: field.label })}
-            className="p-1.5 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
+            className="p-2 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
           >
-            <Maximize2 size={14} />
+            <Maximize2 size={15} />
           </button>
         )}
         {field.copyable && field.value && (
@@ -221,7 +221,7 @@ function FieldRow({
             onClick={handleCopy}
             title={dict.common.copy}
             aria-label={fmt(dict.detail.copyFieldAria, { label: field.label })}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-[var(--bg-selected)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-[var(--bg-selected)] text-[12.5px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
           >
             {justCopied ? (
               <>
@@ -517,23 +517,23 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
               <h1 className="text-xl font-semibold text-[var(--text-primary)] tracking-tight truncate">
                 {item.title}
               </h1>
-              <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)] whitespace-nowrap shrink-0">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)] whitespace-nowrap shrink-0">
                 {dict.categories[item.category] ?? tpl.label}
               </span>
               {vault && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)] whitespace-nowrap shrink-0">
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-secondary)] whitespace-nowrap shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: vault.color }} />
                   {vault.name}
                 </span>
               )}
             </div>
-            <p className="text-xs text-[var(--text-secondary)] mt-1 truncate">
+            <p className="text-[13px] text-[var(--text-secondary)] mt-1 truncate">
               {item.urls[0]?.uri ? extractDomain(item.urls[0].uri) : item.subtitle || tpl.description}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => void toggleFavorite(item.id, !item.favorite, getFilter())}
@@ -542,7 +542,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
             className="p-2 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer"
           >
             <Star
-              size={16}
+              size={17}
               className={item.favorite ? 'text-amber-500 fill-amber-500' : 'text-[var(--text-muted)]'}
             />
           </button>
@@ -552,9 +552,9 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
               <button
                 type="button"
                 onClick={handleShareViaSend}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[13px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] transition-colors cursor-pointer"
               >
-                <Send size={13} />
+                <Send size={14} />
                 {dict.detail.sendShare}
               </button>
               <button
@@ -566,9 +566,9 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                   }
                   startEditingExisting();
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[13px] font-medium text-[var(--text-primary)] transition-colors cursor-pointer"
               >
-                <Pencil size={13} />
+                <Pencil size={14} />
                 {dict.common.edit}
               </button>
             </>
@@ -581,7 +581,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
             aria-label={dict.detail.moreActionsAria}
             className="p-2 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
           >
-            <MoreHorizontal size={16} />
+            <MoreHorizontal size={17} />
           </button>
 
           <div
@@ -589,9 +589,9 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
             id={menuId}
             popover="auto"
             style={{ positionAnchor: menuAnchor } as React.CSSProperties}
-            className="ks-popover ks-anchored-popover-end w-[200px]"
+            className="ks-popover ks-anchored-popover-end w-[210px]"
           >
-            <div className="p-1.5 flex flex-col gap-0.5 text-xs">
+            <div className="p-1.5 flex flex-col gap-0.5 text-[13px]">
               {passwordField && !repromptLocked && (
                 <button
                   type="button"

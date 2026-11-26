@@ -270,7 +270,10 @@ mod macos_impl {
     };
     use sha2::{Digest, Sha256};
     use tauri::{AppHandle, WebviewWindow};
-    use window_vibrancy::{apply_vibrancy, clear_vibrancy, NSVisualEffectMaterial};
+    use window_vibrancy::{
+        apply_liquid_glass, apply_vibrancy, clear_liquid_glass, clear_vibrancy, LiquidGlassOptions,
+        NSGlassEffectViewStyle, NSVisualEffectMaterial, NSVisualEffectState,
+    };
     use zeroize::Zeroizing;
 
     const KEYCHAIN_SERVICE: &str = "dev.keysmith.desktop";
@@ -422,10 +425,22 @@ mod macos_impl {
     pub fn apply_window_vibrancy(window: &WebviewWindow, enabled: bool) {
         let win_clone = window.clone();
         let _ = window.run_on_main_thread(move || {
+            let _ = clear_liquid_glass(&win_clone);
+            let _ = clear_vibrancy(&win_clone);
             if enabled {
-                let _ = apply_vibrancy(&win_clone, NSVisualEffectMaterial::Sidebar, None, None);
-            } else {
-                let _ = clear_vibrancy(&win_clone);
+                if apply_liquid_glass(
+                    &win_clone,
+                    LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular),
+                )
+                .is_err()
+                {
+                    let _ = apply_vibrancy(
+                        &win_clone,
+                        NSVisualEffectMaterial::Sidebar,
+                        Some(NSVisualEffectState::Active),
+                        None,
+                    );
+                }
             }
         });
     }

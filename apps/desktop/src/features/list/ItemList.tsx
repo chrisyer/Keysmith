@@ -83,7 +83,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 62,
+    estimateSize: () => 66,
     overscan: 8,
   });
 
@@ -222,9 +222,9 @@ export function ItemList({ searchInputRef }: ItemListProps) {
     >
       {/* Search + Action Bar */}
       <div className="p-3 pb-2.5 border-b border-[var(--border-subtle)] flex flex-col gap-2">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <div className="relative flex-1 min-w-0 flex items-center">
-            <Search size={14} className="absolute left-3 text-[var(--text-muted)] pointer-events-none" />
+            <Search size={15} className="absolute left-3 text-[var(--text-muted)] pointer-events-none" />
             <input
               ref={searchInputRef}
               type="search"
@@ -232,7 +232,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={`${dict.list.searchPlaceholder} (${formatShortcutMac(shortcuts.search)})`}
               aria-label={dict.common.search}
-              className="w-full pl-8 pr-14 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              className="w-full pl-9 pr-14 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
             <div className="absolute right-1.5 flex items-center gap-0.5">
               {searchQuery && (
@@ -242,7 +242,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
                   aria-label={dict.common.close}
                   className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
                 >
-                  <X size={12} />
+                  <X size={13} />
                 </button>
               )}
               <button
@@ -253,7 +253,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
                 aria-label={dict.list.syntaxTitle}
                 className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--accent-primary)] cursor-pointer"
               >
-                <HelpCircle size={13} />
+                <HelpCircle size={14} />
               </button>
             </div>
           </div>
@@ -263,9 +263,9 @@ export function ItemList({ searchInputRef }: ItemListProps) {
             onClick={() => setNewItemOpen(true)}
             title={`${dict.app.newItemBtn} (${formatShortcutMac(shortcuts.newItem)})`}
             aria-label={dict.app.newItemBtn}
-            className="w-[30px] h-[30px] shrink-0 inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white transition-colors cursor-pointer"
+            className="w-[36px] h-[36px] shrink-0 inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white transition-colors cursor-pointer"
           >
-            <Plus size={15} />
+            <Plus size={16} />
           </button>
         </div>
 
@@ -274,11 +274,11 @@ export function ItemList({ searchInputRef }: ItemListProps) {
           id={syntaxPopoverId}
           popover="auto"
           style={{ positionAnchor: syntaxAnchor } as React.CSSProperties}
-          className="ks-popover ks-anchored-popover w-[260px]"
+          className="ks-popover ks-anchored-popover w-[270px]"
         >
-          <div className="p-3 text-xs flex flex-col gap-2">
+          <div className="p-3.5 text-[13px] flex flex-col gap-2">
             <div className="font-semibold text-[var(--text-primary)]">{dict.list.syntaxTitle}</div>
-            <p className="text-[11px] text-[var(--text-secondary)]">
+            <p className="text-xs text-[var(--text-secondary)]">
               {dict.list.syntaxHint}
             </p>
             <div className="flex flex-wrap gap-1.5">
@@ -291,7 +291,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
                     syntaxPopoverRef.current?.hidePopover?.();
                     searchInputRef.current?.focus();
                   }}
-                  className="px-2 py-0.5 rounded-md bg-[var(--bg-card)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] font-mono-tabular text-[11px] text-[var(--accent-primary)] cursor-pointer"
+                  className="px-2.5 py-1 rounded-md bg-[var(--bg-card)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] font-mono-tabular text-xs text-[var(--accent-primary)] cursor-pointer"
                 >
                   {chip}
                 </button>
@@ -300,7 +300,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-1.5">
+        <div className="flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => {
@@ -311,13 +311,13 @@ export function ItemList({ searchInputRef }: ItemListProps) {
               }
             }}
             aria-label={dict.list.selectBtn}
-            className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12.5px] font-medium transition-colors cursor-pointer ${
               multiSelectMode
                 ? 'bg-[var(--bg-selected)] text-[var(--accent-primary)]'
                 : 'hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]'
             }`}
           >
-            <ListChecks size={13} />
+            <ListChecks size={14} />
             <span>{multiSelectMode ? dict.list.doneBtn : dict.list.selectBtn}</span>
           </button>
 
@@ -325,11 +325,11 @@ export function ItemList({ searchInputRef }: ItemListProps) {
             type="button"
             popoverTarget={sortPopoverId}
             style={{ anchorName: sortAnchor } as React.CSSProperties}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--bg-hover)] text-[11px] font-medium text-[var(--text-secondary)] cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[12.5px] font-medium text-[var(--text-secondary)] cursor-pointer"
           >
-            <ArrowUpDown size={12} />
-            <span className="truncate max-w-[78px]">{currentSortLabel}</span>
-            <ChevronDown size={12} />
+            <ArrowUpDown size={13} />
+            <span className="truncate max-w-[90px]">{currentSortLabel}</span>
+            <ChevronDown size={13} />
           </button>
 
           <div
@@ -337,9 +337,9 @@ export function ItemList({ searchInputRef }: ItemListProps) {
             id={sortPopoverId}
             popover="auto"
             style={{ positionAnchor: sortAnchor } as React.CSSProperties}
-            className="ks-popover ks-anchored-popover-end w-[150px]"
+            className="ks-popover ks-anchored-popover-end w-[160px]"
           >
-            <div className="p-1 flex flex-col gap-0.5 text-xs">
+            <div className="p-1.5 flex flex-col gap-0.5 text-[13px]">
               {SORT_OPTION_IDS.map((optId) => (
                 <button
                   key={optId}
@@ -348,7 +348,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
                     setSortBy(optId);
                     sortPopoverRef.current?.hidePopover?.();
                   }}
-                  className={`px-2.5 py-1.5 rounded-lg text-left cursor-pointer ${
+                  className={`px-2.5 py-2 rounded-lg text-left cursor-pointer ${
                     sortBy === optId
                       ? 'bg-[var(--bg-selected)] text-[var(--accent-primary)] font-medium'
                       : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
@@ -474,25 +474,25 @@ export function ItemList({ searchInputRef }: ItemListProps) {
                     <ItemIconBadge icon={item.icon} category={item.category} title={item.title} size="md" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">
+                        <span className="text-[13.5px] font-medium text-[var(--text-primary)] truncate">
                           {item.title}
                         </span>
                         {item.favorite && (
-                          <Star size={11} className="text-amber-500 fill-amber-500 shrink-0" />
+                          <Star size={12} className="text-amber-500 fill-amber-500 shrink-0" />
                         )}
                       </div>
-                      <div className="text-[11px] text-[var(--text-secondary)] truncate mt-0.5">
+                      <div className="text-xs text-[var(--text-secondary)] truncate mt-0.5">
                         {item.subtitle}
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {item.hasPasskey && (
-                        <span className="px-1.5 py-0.5 rounded bg-sky-500/12 border border-sky-500/30 text-[9px] font-semibold text-sky-600 dark:text-sky-400">
+                        <span className="px-1.5 py-0.5 rounded bg-sky-500/12 border border-sky-500/30 text-[10px] font-semibold text-sky-600 dark:text-sky-400">
                           Passkey
                         </span>
                       )}
                       {item.hasTotp && (
-                        <span className="px-1.5 py-0.5 rounded bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[9px] font-mono-tabular font-semibold text-[var(--text-secondary)]">
+                        <span className="px-1.5 py-0.5 rounded bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[10px] font-mono-tabular font-semibold text-[var(--text-secondary)]">
                           2FA
                         </span>
                       )}

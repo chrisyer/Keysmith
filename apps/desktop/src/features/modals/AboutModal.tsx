@@ -48,8 +48,8 @@ export function AboutContent({ autoCheckUpdate = false }: AboutContentProps) {
   const versionText = updateInfo ? `v${updateInfo.currentVersion}` : 'v0.1.3';
 
   return (
-    <div className="flex flex-col gap-4 text-xs">
-      <div className="flex items-center gap-3.5 p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)]">
+    <div className="flex flex-col gap-4 text-[13px]">
+      <div className="flex items-center gap-3.5 p-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)]">
         <img
           src="/logo.png"
           alt="Keysmith"
@@ -57,21 +57,21 @@ export function AboutContent({ autoCheckUpdate = false }: AboutContentProps) {
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-[15px] font-semibold text-[var(--text-primary)] tracking-tight">
+            <h2 className="text-base font-semibold text-[var(--text-primary)] tracking-tight">
               Keysmith
             </h2>
-            <span className="px-2 py-0.5 rounded-full bg-[var(--bg-selected)] text-[var(--accent-primary)] font-mono-tabular text-[11px] font-medium">
+            <span className="px-2 py-0.5 rounded-full bg-[var(--bg-selected)] text-[var(--accent-primary)] font-mono-tabular text-xs font-medium">
               {versionText}
             </span>
           </div>
-          <p className="text-[11px] text-[var(--text-secondary)] mt-1 leading-relaxed">
+          <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">
             {dict.about.tagline}
           </p>
         </div>
       </div>
 
       <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] divide-y divide-[var(--border-subtle)]">
-        <div className="px-3.5 py-2.5 flex items-center justify-between gap-3">
+        <div className="px-4 py-3 flex items-center justify-between gap-3">
           <span className="text-[var(--text-secondary)]">{dict.about.authorLabel}</span>
           <button
             type="button"
@@ -79,63 +79,63 @@ export function AboutContent({ autoCheckUpdate = false }: AboutContentProps) {
             className="inline-flex items-center gap-1 font-medium text-[var(--accent-primary)] hover:underline cursor-pointer"
           >
             <span>chrisyer</span>
-            <ExternalLink size={11} />
+            <ExternalLink size={12} />
           </button>
         </div>
 
-        <div className="px-3.5 py-2.5 flex items-center justify-between gap-3">
+        <div className="px-4 py-3 flex items-center justify-between gap-3">
           <span className="text-[var(--text-secondary)]">{dict.about.repositoryLabel}</span>
           <button
             type="button"
             onClick={() => void openExternalUrl(REPO_URL)}
-            className="inline-flex items-center gap-1 font-mono-tabular text-[11px] text-[var(--accent-primary)] hover:underline cursor-pointer truncate"
+            className="inline-flex items-center gap-1 font-mono-tabular text-xs text-[var(--accent-primary)] hover:underline cursor-pointer truncate"
           >
             <span className="truncate">github.com/chrisyer/Keysmith</span>
-            <ExternalLink size={11} className="shrink-0" />
+            <ExternalLink size={12} className="shrink-0" />
           </button>
         </div>
 
-        <div className="px-3.5 py-2.5 flex items-center justify-between gap-3">
+        <div className="px-4 py-3 flex items-center justify-between gap-3">
           <span className="text-[var(--text-secondary)]">{dict.about.stackLabel}</span>
-          <span className="inline-flex items-center gap-1 font-mono-tabular text-[11px] text-[var(--text-primary)]">
-            <Layers size={11} className="text-[var(--text-muted)]" />
+          <span className="inline-flex items-center gap-1.5 font-mono-tabular text-xs text-[var(--text-primary)]">
+            <Layers size={12} className="text-[var(--text-muted)]" />
             Rust · Tauri v2 · React 19
           </span>
         </div>
 
-        <div className="px-3.5 py-2.5 flex items-center justify-between gap-3">
+        <div className="px-4 py-3 flex items-center justify-between gap-3">
           <span className="text-[var(--text-secondary)]">{dict.about.protocolLabel}</span>
-          <span className="inline-flex items-center gap-1 text-[var(--text-primary)] font-medium">
-            <Shield size={11} className="text-[var(--text-muted)]" />
+          <span className="inline-flex items-center gap-1.5 text-[var(--text-primary)] font-medium">
+            <Shield size={12} className="text-[var(--text-muted)]" />
             Bitwarden / Vaultwarden
           </span>
         </div>
 
-        <div className="px-3.5 py-2.5 flex items-center justify-between gap-3">
+        <div className="px-4 py-3 flex items-center justify-between gap-3">
           <span className="text-[var(--text-secondary)]">{dict.about.copyrightLabel}</span>
-          <span className="text-[var(--text-muted)] font-mono-tabular text-[11px]">© 2026 chrisyer</span>
+          <span className="text-[var(--text-muted)] font-mono-tabular text-xs">© 2026 chrisyer</span>
         </div>
       </div>
 
-      <div className="p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between gap-3">
+      <div className="p-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="font-semibold text-[var(--text-primary)]">{dict.about.versionLabel}</div>
-          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5 flex flex-wrap items-center gap-2">
+          <div className="text-xs text-[var(--text-secondary)] mt-0.5 flex flex-wrap items-center gap-2">
             <span className="font-mono-tabular">{versionText}</span>
             {updateInfo && !updateInfo.updateAvailable && (
               <span className="inline-flex items-center gap-1 text-[var(--status-success)] font-medium">
-                <CheckCircle2 size={12} />
+                <CheckCircle2 size={13} />
                 {dict.about.upToDate}
               </span>
             )}
             {updateInfo?.updateAvailable && updateInfo.latestVersion && (
-              <span className="px-1.5 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-primary)] font-medium">
+              <span className="px-2 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-primary)] font-medium">
                 {fmt(dict.settings.newVersionAvailable, { version: updateInfo.latestVersion })}
               </span>
             )}
           </div>
           {updateInfo?.updateAvailable && updateInfo.notes && (
-            <div className="text-[11px] text-[var(--text-muted)] mt-1 line-clamp-2">
+            <div className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">
               {updateInfo.notes}
             </div>
           )}
@@ -145,7 +145,7 @@ export function AboutContent({ autoCheckUpdate = false }: AboutContentProps) {
             <button
               type="button"
               onClick={() => void openExternalUrl(updateInfo.releaseUrl!)}
-              className="px-2.5 py-1.5 rounded-lg bg-[var(--accent-primary)] text-white text-[11px] font-medium cursor-pointer"
+              className="px-3 py-2 rounded-lg bg-[var(--accent-primary)] text-white text-xs font-medium cursor-pointer"
             >
               {dict.settings.download}
             </button>
@@ -154,9 +154,9 @@ export function AboutContent({ autoCheckUpdate = false }: AboutContentProps) {
             type="button"
             disabled={checkingUpdate}
             onClick={() => void handleCheckUpdate()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[13px] font-medium text-[var(--text-primary)] cursor-pointer"
           >
-            <RefreshCw size={12} className={checkingUpdate ? 'animate-spin' : ''} />
+            <RefreshCw size={13} className={checkingUpdate ? 'animate-spin' : ''} />
             {checkingUpdate ? dict.settings.checkingUpdate : dict.settings.checkUpdate}
           </button>
         </div>
@@ -166,25 +166,25 @@ export function AboutContent({ autoCheckUpdate = false }: AboutContentProps) {
         <button
           type="button"
           onClick={() => void openExternalUrl(REPO_URL)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[13px] font-medium text-[var(--text-primary)] cursor-pointer"
         >
-          <Globe size={12} />
+          <Globe size={13} />
           {dict.about.openRepo}
         </button>
         <button
           type="button"
           onClick={() => void openExternalUrl(RELEASES_URL)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[13px] font-medium text-[var(--text-primary)] cursor-pointer"
         >
-          <KeyRound size={12} />
+          <KeyRound size={13} />
           {dict.about.releases}
         </button>
         <button
           type="button"
           onClick={() => void openExternalUrl(ISSUES_URL)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[13px] font-medium text-[var(--text-primary)] cursor-pointer"
         >
-          <ExternalLink size={12} />
+          <ExternalLink size={13} />
           {dict.about.reportIssue}
         </button>
       </div>
@@ -204,11 +204,11 @@ export function AboutModal() {
       onClose={() => setAboutOpen(false)}
       ariaLabelledBy="about-modal-title"
       closedBy="any"
-      className="rounded-xl w-[min(460px,92vw)] shadow-2xl"
+      className="rounded-xl w-[min(480px,92vw)] shadow-2xl"
     >
       <div className="flex flex-col max-h-[85dvh]">
         <div className="px-5 py-3.5 border-b border-[var(--border-subtle)] flex items-center justify-between">
-          <h1 id="about-modal-title" className="text-[15px] font-semibold text-[var(--text-primary)]">
+          <h1 id="about-modal-title" className="text-base font-semibold text-[var(--text-primary)]">
             {dict.about.title}
           </h1>
           <button
