@@ -350,10 +350,12 @@
   // ==================== Shadow DOM Overlay UI ====================
 
   let shadowRoot = null;
+  let overlayHost = null;
   let iconLayer = null;
   let dropdownContainer = null;
   let bannerContainer = null;
   let modalContainer = null;
+  let activeModalDialog = null;
   let toastContainer = null;
 
   const OVERLAY_CSS = `
@@ -589,6 +591,38 @@
       color: var(--ks-text-sec);
       padding: 7px 8px;
     }
+    .ks-modal-dialog {
+      border: none;
+      padding: 16px;
+      margin: auto;
+      background: transparent;
+      max-width: 100vw;
+      max-height: 100vh;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      pointer-events: auto;
+    }
+    .ks-modal-dialog[open] {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ks-modal-dialog::backdrop {
+      background: rgba(10, 14, 20, 0.45);
+      backdrop-filter: blur(3px);
+    }
+    .ks-modal-err {
+      margin-top: 8px;
+      padding: 7px 10px;
+      border-radius: 7px;
+      border: 1px solid rgba(217, 119, 6, 0.35);
+      background: rgba(217, 119, 6, 0.12);
+      color: var(--ks-warn);
+      font-size: 12px;
+      line-height: 1.4;
+      display: none;
+    }
     .ks-modal-backdrop {
       position: fixed;
       inset: 0;
@@ -674,11 +708,17 @@
   `;
 
   function ensureOverlay() {
-    if (shadowRoot) return shadowRoot;
     const parent = document.documentElement || document.body;
+    if (shadowRoot && overlayHost) {
+      if (!overlayHost.isConnected && parent) {
+        parent.appendChild(overlayHost);
+      }
+      return shadowRoot;
+    }
     if (!parent) return null;
 
     const host = document.createElement('keysmith-overlay');
+    overlayHost = host;
     host.id = 'keysmith-ext-root';
     host.setAttribute(
       'style',
@@ -1445,13 +1485,65 @@
   }
 
   function closeModal() {
+    if (activeModalDialog) {
+      try {
+        if (activeModalDialog.open) {
+          activeModalDialog.close();
+        }
+      } catch {
+        // Ignore dialog close errors
+      }
+      activeModalDialog = null;
+    }
     if (modalContainer) {
       modalContainer.textContent = '';
     }
   }
 
-  function isConstrainedSubframe() {
-    return window !== window.top && (window.innerWidth < 320 || window.innerHeight < 220);
+  function mountModalElement(modalEl, onCancel) {
+    closeModal();
+    if (!modalContainer) return false;
+    if (
+      typeof HTMLDialogElement !== 'undefined' &&
+      typeof document.createElement('dialog').showModal === 'function'
+    ) {
+      try {
+        const dialog = document.createElement('dialog');
+        dialog.className = 'ks-modal-dialog';
+        dialog.addEventListener('cancel', (e) => {
+          e.preventDefault();
+          if (typeof onCancel === 'function') onCancel();
+        });
+        dialog.appendChild(modalEl);
+        modalContainer.appendChild(dialog);
+        dialog.showModal();
+        activeModalDialog = dialog;
+        return true;
+      } catch {
+        modalContainer.textContent = '';
+        activeModalDialog = null;
+      }
+    }
+    const backdrop = document.createElement('div');
+    backdrop.className = 'ks-modal-backdrop';
+    backdrop.appendChild(modalEl);
+    modalContainer.appendChild(backdrop);
+    return true;
+  }
+
+  function resolveDisplayRpId(explicitRpId, origin) {
+    if (explicitRpId && String(explicitRpId).trim()) {
+      return String(explicitRpId).trim();
+    }
+    if (origin) {
+      try {
+        const host = new URL(origin).hostname;
+        if (host) return host;
+      } catch {
+        // Ignore invalid origin URL
+      }
+    }
+    return window.location.hostname;
   }
 
   function clearConditionalBanner() {
@@ -1571,13 +1663,12 @@
     bannerContainer.appendChild(card);
   }
 
-  function showPasskeyLockedModal(modalKind, options, listPayload) {
+  function showPasskeyLockedModal(modalKind, options, origin, listPayload, biometricEnabled) {
     return new Promise((resolve) => {
       if (!ensureOverlay() || !modalContainer) {
         resolve({ handled: false, fallback: true });
         return;
       }
-      modalContainer.textContent = '';
 
       let done = false;
       let pollTimer = null;
@@ -1597,8 +1688,6 @@
         }
       };
 
-      const backdrop = document.createElement('div');
-      backdrop.className = 'ks-modal-backdrop';
       const modal = document.createElement('div');
       modal.className = 'ks-modal';
 
@@ -1610,7 +1699,7 @@
         modalKind === 'create-locked' ? t('pkSaveModalTitle') : t('pkSelectModalTitle');
       title.appendChild(titleText);
 
-      const rpId = options?.rpId || options?.rp?.id || window.location.hostname;
+      const rpId = resolveDisplayRpId(options?.rpId || options?.rp?.id, origin);
       const sub = document.createElement('div');
       sub.className = 'ks-modal-sub';
       sub.textContent =
@@ -1626,9 +1715,34 @@
 
       const row = document.createElement('div');
       row.className = 'ks-btn-row';
+
+      if (biometricEnabled) {
+        const bioBtn = document.createElement('button');
+        bioBtn.type = 'button';
+        bioBtn.className = 'ks-btn ks-btn-primary';
+        bioBtn.textContent = t('btnUnlockTouchId');
+        bioBtn.addEventListener('click', async () => {
+          bioBtn.disabled = true;
+          bioBtn.textContent = t('btnUnlockingTouchId');
+          const res = await sendMsg({ type: 'UNLOCK_BIOMETRIC' });
+          if (res && res.ok && res.result?.unlocked) {
+            await checkUnlocked();
+            if (!done) {
+              bioBtn.disabled = false;
+              bioBtn.textContent = t('btnUnlockTouchId');
+            }
+          } else {
+            showToast(res?.error || t('toastTouchIdFailed'), 'warn');
+            bioBtn.disabled = false;
+            bioBtn.textContent = t('btnUnlockTouchId');
+          }
+        });
+        row.appendChild(bioBtn);
+      }
+
       const unlockBtn = document.createElement('button');
       unlockBtn.type = 'button';
-      unlockBtn.className = 'ks-btn ks-btn-primary';
+      unlockBtn.className = biometricEnabled ? 'ks-btn ks-btn-sec' : 'ks-btn ks-btn-primary';
       unlockBtn.textContent = t('pkBtnUnlockDesktop');
       unlockBtn.addEventListener('click', async () => {
         await sendMsg({ type: 'OPEN_DESKTOP' });
@@ -1657,23 +1771,37 @@
 
       row.append(unlockBtn, retryBtn, fbBtn, cancelBtn);
       modal.appendChild(row);
-      backdrop.appendChild(modal);
-      modalContainer.appendChild(backdrop);
+      mountModalElement(modal, () =>
+        finish({ handled: false, cancelled: true, errorName: 'NotAllowedError' })
+      );
 
       pollTimer = setInterval(checkUnlocked, 1200);
     });
   }
 
   async function presentPasskeyModal(modalKind, payload) {
-    if (isConstrainedSubframe()) {
-      return sendMsg({
+    if (window !== window.top) {
+      const relayReply = await sendMsg({
         type: 'PASSKEY_SHOW_TOP_MODAL',
         modalKind,
         ...payload
       });
+      const relaySucceeded =
+        relayReply &&
+        !relayReply._relayFailed &&
+        !(relayReply.ok === false && relayReply.connected === false);
+      if (relaySucceeded) {
+        return relayReply;
+      }
     }
     if (modalKind === 'create-locked' || modalKind === 'get-locked') {
-      return showPasskeyLockedModal(modalKind, payload.options, payload.listPayload);
+      return showPasskeyLockedModal(
+        modalKind,
+        payload.options,
+        payload.origin,
+        payload.listPayload,
+        Boolean(payload.info?.biometricEnabled)
+      );
     }
     if (modalKind === 'create') {
       return showPasskeyCreateModal(payload.options, payload.origin, payload.info);
@@ -1687,10 +1815,6 @@
         resolve({ handled: false, fallback: true });
         return;
       }
-      modalContainer.textContent = '';
-
-      const backdrop = document.createElement('div');
-      backdrop.className = 'ks-modal-backdrop';
 
       const modal = document.createElement('div');
       modal.className = 'ks-modal';
@@ -1702,8 +1826,8 @@
       titleText.textContent = t('pkSaveModalTitle');
       title.appendChild(titleText);
 
-      const rpId = options?.rp?.id || window.location.hostname;
-      const userName = options?.user?.name || 'Passkey User';
+      const rpId = resolveDisplayRpId(options?.rp?.id, origin);
+      const userName = options?.user?.name || options?.user?.displayName || 'Passkey User';
 
       const sub = document.createElement('div');
       sub.className = 'ks-modal-sub';
@@ -1745,8 +1869,10 @@
         });
         row.append(unlockBtn, fbBtn, cancelBtn);
         modal.appendChild(row);
-        backdrop.appendChild(modal);
-        modalContainer.appendChild(backdrop);
+        mountModalElement(modal, () => {
+          closeModal();
+          resolve({ handled: false, cancelled: true, errorName: 'NotAllowedError' });
+        });
         return;
       }
 
@@ -1793,6 +1919,10 @@
       });
       modal.appendChild(titleFieldWrap);
 
+      const errBox = document.createElement('div');
+      errBox.className = 'ks-modal-err';
+      modal.appendChild(errBox);
+
       const btnRow = document.createElement('div');
       btnRow.className = 'ks-btn-row';
 
@@ -1803,6 +1933,8 @@
       saveBtn.addEventListener('click', async () => {
         saveBtn.disabled = true;
         saveBtn.textContent = t('pkBtnCreating');
+        errBox.style.display = 'none';
+        errBox.textContent = '';
         const res = await sendMsg({
           type: 'PASSKEY_CREATE',
           origin,
@@ -1810,19 +1942,24 @@
           title: itemTitleInput.value.trim() || undefined,
           options
         });
-        closeModal();
         if (res.ok && res.result?.handled && res.result?.credential) {
+          closeModal();
           showToast(t('pkToastSaved'), 'success');
           resolve({ handled: true, credential: res.result.credential });
         } else if (res.ok && res.result?.errorName) {
+          closeModal();
           resolve({
             handled: false,
             errorName: res.result.errorName,
             error: res.result.error
           });
         } else {
-          showToast(res.error || res.result?.error || t('pkErrCreate'), 'warn');
-          resolve({ handled: false, fallback: true });
+          const errText = res.error || res.result?.error || t('pkErrCreate');
+          saveBtn.disabled = false;
+          saveBtn.textContent = t('pkBtnSavePasskey');
+          errBox.textContent = errText;
+          errBox.style.display = 'block';
+          showToast(errText, 'warn');
         }
       });
 
@@ -1846,8 +1983,10 @@
 
       btnRow.append(saveBtn, fbBtn, cancelBtn);
       modal.appendChild(btnRow);
-      backdrop.appendChild(modal);
-      modalContainer.appendChild(backdrop);
+      mountModalElement(modal, () => {
+        closeModal();
+        resolve({ handled: false, cancelled: true, errorName: 'NotAllowedError' });
+      });
     });
   }
 
@@ -1857,10 +1996,6 @@
         resolve({ handled: false, fallback: true });
         return;
       }
-      modalContainer.textContent = '';
-
-      const backdrop = document.createElement('div');
-      backdrop.className = 'ks-modal-backdrop';
 
       const modal = document.createElement('div');
       modal.className = 'ks-modal';
@@ -1872,7 +2007,7 @@
       titleText.textContent = t('pkSelectModalTitle');
       title.appendChild(titleText);
 
-      const rpId = options?.rpId || window.location.hostname;
+      const rpId = resolveDisplayRpId(options?.rpId, origin);
       const sub = document.createElement('div');
       sub.className = 'ks-modal-sub';
       sub.textContent = t('pkSelectModalSub', { rpId });
@@ -1950,8 +2085,10 @@
 
       btnRow.append(fbBtn, cancelBtn);
       modal.appendChild(btnRow);
-      backdrop.appendChild(modal);
-      modalContainer.appendChild(backdrop);
+      mountModalElement(modal, () => {
+        closeModal();
+        resolve({ handled: false, cancelled: true, errorName: 'NotAllowedError' });
+      });
     });
   }
 
@@ -2056,6 +2193,9 @@
       });
 
       if (!listRes || !listRes.connected || !listRes.ok) {
+        if (data.type === 'PASSKEY_CREATE_REQUEST') {
+          showToast(listRes?.error || t('toastConnectDesktopFirst'), 'warn');
+        }
         reply({ handled: false, fallback: true });
         return;
       }
@@ -2074,7 +2214,8 @@
           const lockReply = await presentPasskeyModal('create-locked', {
             options: data.options,
             origin,
-            listPayload
+            listPayload,
+            info
           });
           if (!lockReply?.unlocked) {
             reply(lockReply || { handled: false, fallback: true });
@@ -2104,7 +2245,8 @@
         const lockReply = await presentPasskeyModal('get-locked', {
           options: data.options,
           origin,
-          listPayload
+          listPayload,
+          info
         });
         if (!lockReply?.unlocked) {
           reply(lockReply || { handled: false, fallback: true });

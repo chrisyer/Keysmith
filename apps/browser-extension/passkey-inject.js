@@ -103,6 +103,8 @@
       bytes = new Uint8Array(input);
     } else if (ArrayBuffer.isView(input)) {
       bytes = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+    } else if (Array.isArray(input)) {
+      bytes = Uint8Array.from(input, (n) => Number(n) & 0xff);
     } else if (typeof input === 'string') {
       return input.trim().replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     } else {
@@ -131,38 +133,151 @@
     }
   }
 
+  function toIterableArray(list) {
+    if (!list) return null;
+    if (Array.isArray(list)) return list;
+    if (typeof list[Symbol.iterator] === 'function') {
+      try {
+        return Array.from(list);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
   function serializeDescriptorList(list) {
-    if (!Array.isArray(list)) return [];
-    return list
-      .filter((item) => item && item.id)
-      .map((item) => ({
-        type: item.type || 'public-key',
-        id: bufferToBase64Url(item.id),
-        transports: Array.isArray(item.transports) ? item.transports : undefined
-      }));
+    const items = toIterableArray(list);
+    if (!items) return [];
+    const out = [];
+    for (const item of items) {
+      if (!item || !item.id) continue;
+      const id = bufferToBase64Url(item.id);
+      if (!id) continue;
+      const entry = {
+        type: item.type ? String(item.type) : 'public-key',
+        id
+      };
+      const transports = toIterableArray(item.transports);
+      if (transports) {
+        entry.transports = transports.map((tr) => String(tr));
+      }
+      out.push(entry);
+    }
+    return out;
+  }
+
+  function sanitizeCreatePubKeyCredParams(list) {
+    const items = toIterableArray(list);
+    if (!items) return [];
+    const out = [];
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue;
+      const alg = Number(item.alg);
+      if (!Number.isFinite(alg)) continue;
+      out.push({
+        type: item.type ? String(item.type) : 'public-key',
+        alg
+      });
+    }
+    return out;
+  }
+
+  function sanitizeAuthenticatorSelection(sel) {
+    if (!sel || typeof sel !== 'object') return undefined;
+    const out = {};
+    if (sel.authenticatorAttachment != null) {
+      out.authenticatorAttachment = String(sel.authenticatorAttachment);
+    }
+    if (sel.residentKey != null) {
+      out.residentKey = String(sel.residentKey);
+    }
+    if (typeof sel.requireResidentKey === 'boolean') {
+      out.requireResidentKey = sel.requireResidentKey;
+    }
+    if (sel.userVerification != null) {
+      out.userVerification = String(sel.userVerification);
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  }
+
+  function sanitizePlainValue(val, depth = 0) {
+    if (depth > 4) return undefined;
+    if (val === null || val === undefined) return val;
+    const valType = typeof val;
+    if (valType === 'string' || valType === 'number' || valType === 'boolean') {
+      return val;
+    }
+    if (valType === 'function' || valType === 'symbol' || valType === 'bigint') {
+      return undefined;
+    }
+    const tag = Object.prototype.toString.call(val);
+    if (val instanceof ArrayBuffer || tag === '[object ArrayBuffer]' || ArrayBuffer.isView(val)) {
+      return bufferToBase64Url(val);
+    }
+    if (Array.isArray(val)) {
+      const arr = [];
+      for (const item of val) {
+        const cleaned = sanitizePlainValue(item, depth + 1);
+        if (cleaned !== undefined) arr.push(cleaned);
+      }
+      return arr;
+    }
+    if (valType === 'object') {
+      const obj = {};
+      for (const key of Object.keys(val)) {
+        try {
+          const cleaned = sanitizePlainValue(val[key], depth + 1);
+          if (cleaned !== undefined) {
+            obj[key] = cleaned;
+          }
+        } catch {
+          // Ignore throwing getters on framework proxies
+        }
+      }
+      return obj;
+    }
+    return undefined;
+  }
+
+  function sanitizeExtensions(ext) {
+    if (!ext || typeof ext !== 'object') return undefined;
+    const cleaned = sanitizePlainValue(ext, 0);
+    return cleaned && typeof cleaned === 'object' && Object.keys(cleaned).length > 0
+      ? cleaned
+      : undefined;
   }
 
   function serializeCreateOptions(pk) {
     const rawRpId = pk.rp?.id && String(pk.rp.id).trim() ? String(pk.rp.id).trim() : '';
+    const userName = pk.user?.name != null ? String(pk.user.name) : '';
+    const userDisplay =
+      pk.user?.displayName != null && String(pk.user.displayName).length > 0
+        ? String(pk.user.displayName)
+        : userName;
     return {
       rp: pk.rp
-        ? { id: rawRpId || window.location.hostname, name: pk.rp.name || '' }
+        ? {
+            id: rawRpId || window.location.hostname,
+            name: pk.rp.name != null ? String(pk.rp.name) : ''
+          }
         : { id: window.location.hostname, name: '' },
+      rpIdExplicit: Boolean(rawRpId),
       user: pk.user
         ? {
             id: bufferToBase64Url(pk.user.id),
-            name: pk.user.name || '',
-            displayName: pk.user.displayName || pk.user.name || ''
+            name: userName,
+            displayName: userDisplay
           }
         : null,
       challenge: bufferToBase64Url(pk.challenge),
-      pubKeyCredParams: Array.isArray(pk.pubKeyCredParams) ? pk.pubKeyCredParams : [],
-      timeout: pk.timeout,
+      pubKeyCredParams: sanitizeCreatePubKeyCredParams(pk.pubKeyCredParams),
+      timeout: typeof pk.timeout === 'number' ? pk.timeout : undefined,
       excludeCredentials: serializeDescriptorList(pk.excludeCredentials),
-      authenticatorSelection: pk.authenticatorSelection || undefined,
-      attestation: pk.attestation || 'none',
+      authenticatorSelection: sanitizeAuthenticatorSelection(pk.authenticatorSelection),
+      attestation: pk.attestation != null ? String(pk.attestation) : 'none',
       crossOrigin: detectCrossOrigin(),
-      extensions: pk.extensions || undefined
+      extensions: sanitizeExtensions(pk.extensions)
     };
   }
 
@@ -173,11 +288,11 @@
       rpId: rawRpId || window.location.hostname,
       rpIdExplicit: Boolean(rawRpId),
       crossOrigin: detectCrossOrigin(),
-      timeout: pk.timeout,
+      timeout: typeof pk.timeout === 'number' ? pk.timeout : undefined,
       allowCredentials: serializeDescriptorList(pk.allowCredentials),
-      userVerification: pk.userVerification || 'preferred',
+      userVerification: pk.userVerification != null ? String(pk.userVerification) : 'preferred',
       mediation: mediation || 'optional',
-      extensions: pk.extensions || undefined
+      extensions: sanitizeExtensions(pk.extensions)
     };
   }
 
@@ -447,6 +562,9 @@
 
   async function keysmithCredentialsCreate(options) {
     if (!options || !options.publicKey) {
+      return callNativeCreate(this, options);
+    }
+    if (options.mediation === 'silent') {
       return callNativeCreate(this, options);
     }
 

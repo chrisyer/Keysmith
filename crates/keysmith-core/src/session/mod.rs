@@ -1537,6 +1537,32 @@ impl AppCore {
         }
     }
 
+    fn preserve_local_fido2_if_stripped(local: &CipherDto, remote: &mut CipherDto) {
+        let Some(local_creds) = local
+            .login
+            .as_ref()
+            .map(|l| &l.fido2_credentials)
+            .filter(|v| !v.is_empty())
+        else {
+            return;
+        };
+        let remote_empty = remote
+            .login
+            .as_ref()
+            .map(|l| l.fido2_credentials.is_empty())
+            .unwrap_or(true);
+        if remote_empty {
+            eprintln!(
+                "[keysmith] warning: remote cipher {} omitted fido2Credentials; preserving {} local credential(s)",
+                remote.id,
+                local_creds.len()
+            );
+            let mut login = remote.login.take().unwrap_or_default();
+            login.fido2_credentials = local_creds.clone();
+            remote.login = Some(login);
+        }
+    }
+
     pub async fn item_create(&self, draft: ItemDraft) -> Result<ItemDetail, CoreError> {
         let local_id = new_uuid();
         let (mut account, mut cipher, mut item) = {
@@ -1558,7 +1584,7 @@ impl AppCore {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let cipher_clone = cipher.clone();
-            if let Ok(remote) = self
+            match self
                 .with_fresh_token(&mut account, move |tok| {
                     let client = client.clone();
                     let server_url = server_url.clone();
@@ -1567,9 +1593,15 @@ impl AppCore {
                 })
                 .await
             {
-                item.id = remote.id.clone();
-                cipher = remote;
-                dirty_op = None;
+                Ok(mut remote) => {
+                    Self::preserve_local_fido2_if_stripped(&cipher, &mut remote);
+                    item.id = remote.id.clone();
+                    cipher = remote;
+                    dirty_op = None;
+                }
+                Err(err) => {
+                    eprintln!("[keysmith] remote create_cipher failed, queued offline create: {err}");
+                }
             }
         }
 
@@ -1641,9 +1673,15 @@ impl AppCore {
                     }
                 })
                 .await;
-            if let Ok(remote) = res {
-                cipher = remote;
-                dirty_op = None;
+            match res {
+                Ok(mut remote) => {
+                    Self::preserve_local_fido2_if_stripped(&cipher, &mut remote);
+                    cipher = remote;
+                    dirty_op = None;
+                }
+                Err(err) => {
+                    eprintln!("[keysmith] remote update_cipher failed, queued offline update: {err}");
+                }
             }
         }
 

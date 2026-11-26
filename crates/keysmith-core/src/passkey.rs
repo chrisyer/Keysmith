@@ -40,6 +40,8 @@ pub struct PasskeyCreateParams {
     pub discoverable: bool,
     #[serde(default)]
     pub cross_origin: bool,
+    #[serde(default)]
+    pub authenticator_attachment: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -105,9 +107,31 @@ pub fn decode_b64u_or_b64(input: &str) -> Result<Vec<u8>, CoreError> {
         .map_err(|e| CoreError::Validation(format!("Base64 解码失败: {e}")))
 }
 
-/// Normalize a WebAuthn RP ID by trimming whitespace and trailing dots and lowercasing.
+/// Normalize a WebAuthn RP ID by extracting host from URL if needed, stripping port and trailing dots, and lowercasing.
 pub fn normalize_rp_id(rp_id: &str) -> String {
-    rp_id.trim().trim_end_matches('.').to_ascii_lowercase()
+    let trimmed = rp_id.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let host_part = if trimmed.contains("://") {
+        if let Ok(parsed) = Url::parse(trimmed) {
+            parsed.host_str().unwrap_or(trimmed).to_string()
+        } else {
+            trimmed.to_string()
+        }
+    } else {
+        trimmed.to_string()
+    };
+    let without_port = if !host_part.starts_with('[') {
+        host_part
+            .split(':')
+            .next()
+            .unwrap_or(&host_part)
+            .to_string()
+    } else {
+        host_part
+    };
+    without_port.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
 /// Bitwarden stores credential IDs as hyphenated 36-char UUIDs, `b64.<base64>`, `hex.<hex>`, or Base64URL.
@@ -411,11 +435,16 @@ pub fn create_passkey_credential(
         last_used_at: None,
     };
 
+    let attachment = match params.authenticator_attachment.as_deref().map(str::trim) {
+        Some("cross-platform") => "cross-platform",
+        _ => "platform",
+    };
+
     let response_json = json!({
         "id": cred_id_b64u,
         "rawId": cred_id_b64u,
         "type": "public-key",
-        "authenticatorAttachment": "platform",
+        "authenticatorAttachment": attachment,
         "response": {
             "clientDataJSON": encode_b64u(&client_data_json),
             "attestationObject": encode_b64u(&attestation_object),

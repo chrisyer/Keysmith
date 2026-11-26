@@ -1347,6 +1347,7 @@ fn rpc_passkey_list_for_rp(core: &AppCore, params: &Value) -> Result<Value, Stri
         return Ok(json!({
             "locked": true,
             "signedOut": state.status == AuthStatus::Unauthenticated,
+            "biometricEnabled": state.biometric_enabled,
             "rpId": resolved_rp_id,
             "excluded": false,
             "passkeys": [],
@@ -1474,10 +1475,9 @@ async fn rpc_passkey_create(
         .get("rp")
         .and_then(|r| r.get("id"))
         .and_then(|v| v.as_str())
-        .map(str::trim)
+        .map(normalize_rp_id)
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_ascii_lowercase())
-        .or_else(|| parse_url_host(&origin).map(|(_, h)| h))
+        .or_else(|| parse_url_host(&origin).map(|(_, h)| normalize_rp_id(&h)))
         .ok_or_else(|| "无法解析 WebAuthn RP ID".to_string())?;
 
     if !rp_id_matches_origin(&rp_id, &origin) {
@@ -1497,7 +1497,7 @@ async fn rpc_passkey_create(
         for sum in existing_items {
             if let Ok(Some(item)) = core.item_get(&sum.id) {
                 if item.payload.passkeys.iter().any(|pk| {
-                    pk.rp_id.eq_ignore_ascii_case(&rp_id)
+                    normalize_rp_id(&pk.rp_id) == rp_id
                         && passkey_matches_credential_list(pk, &exclude_ids)
                 }) {
                     return Ok(json!({
@@ -1524,16 +1524,21 @@ async fn rpc_passkey_create(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let user_name = user
+    let raw_user_name = user
         .get("name")
         .and_then(|v| v.as_str())
-        .unwrap_or("Passkey User")
-        .to_string();
-    let user_display_name = user
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let raw_user_display = user
         .get("displayName")
         .and_then(|v| v.as_str())
-        .unwrap_or(&user_name)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let user_name = raw_user_name
+        .or(raw_user_display)
+        .unwrap_or("Passkey User")
         .to_string();
+    let user_display_name = raw_user_display.unwrap_or(&user_name).to_string();
     let challenge_b64u = options
         .get("challenge")
         .and_then(|v| v.as_str())
@@ -1545,7 +1550,13 @@ async fn rpc_passkey_create(
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|p| p.get("alg").and_then(|a| a.as_i64()).map(|n| n as i32))
+                .filter_map(|p| {
+                    p.get("alg").and_then(|a| {
+                        a.as_i64()
+                            .map(|n| n as i32)
+                            .or_else(|| a.as_str().and_then(|s| s.trim().parse::<i32>().ok()))
+                    })
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -1558,6 +1569,13 @@ async fn rpc_passkey_create(
             _ => true,
         })
         .unwrap_or(true);
+    let authenticator_attachment = options
+        .get("authenticatorSelection")
+        .and_then(|s| s.get("authenticatorAttachment"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let cross_origin = params
         .get("crossOrigin")
         .and_then(|v| v.as_bool())
@@ -1575,6 +1593,7 @@ async fn rpc_passkey_create(
         pub_key_cred_params,
         discoverable,
         cross_origin,
+        authenticator_attachment,
     })
     .map_err(|e| e.to_string())?;
 

@@ -222,4 +222,95 @@ await assert.rejects(
   (err) => err && err.name === 'AbortError',
 );
 assert.equal(sawCancel, true);
+
+// 4. Verify passkey-inject.js create() handles Proxy-wrapped options, Set excludeCredentials, cross-realm ArrayBuffers, and AttestationResponse methods
+const userIdOtherRealm = vm.runInNewContext('new Uint8Array([9, 8, 7, 6]).buffer');
+const createChalOtherRealm = vm.runInNewContext('new Uint8Array([11, 22, 33, 44]).buffer');
+const proxyCredParams = new Proxy([{ type: 'public-key', alg: -7 }], {});
+const proxyAuthSelection = new Proxy(
+  { authenticatorAttachment: 'platform', residentKey: 'required', requireResidentKey: true, userVerification: 'preferred' },
+  {},
+);
+const proxyExtensions = new Proxy(
+  {
+    credProps: true,
+    prf: { eval: { first: new Uint8Array([1, 2, 3]) } },
+    fnIgnored: () => 'should-be-stripped',
+  },
+  {},
+);
+
+let capturedCreatePost = null;
+env.sandbox.__onPost = (msg, target) => {
+  assert.equal(target, 'https://www.paypal.com');
+  if (msg.type === 'PASSKEY_CREATE_REQUEST') {
+    capturedCreatePost = JSON.parse(JSON.stringify(msg));
+    setTimeout(() => {
+      env.emitMessage({
+        source: 'keysmith-content',
+        nonce: msg.nonce,
+        handled: true,
+        credential: {
+          id: 'NEWCRED',
+          rawId: 'NEWCRED',
+          type: 'public-key',
+          authenticatorAttachment: 'platform',
+          response: {
+            clientDataJSON: Buffer.from('{}').toString('base64url'),
+            attestationObject: Buffer.from([0xa0]).toString('base64url'),
+            authenticatorData: Buffer.alloc(37).toString('base64url'),
+            publicKey: Buffer.from([1, 2, 3, 4]).toString('base64url'),
+            publicKeyAlgorithm: -7,
+            transports: ['internal', 'hybrid'],
+          },
+          clientExtensionResults: { credProps: { rk: true } },
+        },
+      });
+    }, 5);
+  }
+};
+
+const createdRes = await env.sandbox.navigator.credentials.create({
+  publicKey: {
+    rp: { id: 'paypal.com', name: 'PayPal' },
+    user: { id: userIdOtherRealm, name: 'buyer@paypal.com', displayName: 'Buyer' },
+    challenge: createChalOtherRealm,
+    pubKeyCredParams: proxyCredParams,
+    excludeCredentials: new Set([{ type: 'public-key', id: 'existing-id', transports: ['internal'] }]),
+    authenticatorSelection: proxyAuthSelection,
+    extensions: proxyExtensions,
+  },
+});
+assert.ok(capturedCreatePost, 'Expected PASSKEY_CREATE_REQUEST message');
+assert.equal(capturedCreatePost.options.rp.id, 'paypal.com');
+assert.equal(capturedCreatePost.options.rpIdExplicit, true);
+assert.equal(capturedCreatePost.options.user.id, Buffer.from([9, 8, 7, 6]).toString('base64url'));
+assert.equal(capturedCreatePost.options.challenge, Buffer.from([11, 22, 33, 44]).toString('base64url'));
+assert.deepEqual(capturedCreatePost.options.pubKeyCredParams, [{ type: 'public-key', alg: -7 }]);
+assert.equal(capturedCreatePost.options.excludeCredentials.length, 1);
+assert.equal(capturedCreatePost.options.excludeCredentials[0].id, 'existing-id');
+assert.deepEqual(capturedCreatePost.options.authenticatorSelection, {
+  authenticatorAttachment: 'platform',
+  residentKey: 'required',
+  requireResidentKey: true,
+  userVerification: 'preferred',
+});
+assert.equal(capturedCreatePost.options.extensions.credProps, true);
+assert.equal(
+  capturedCreatePost.options.extensions.prf.eval.first,
+  Buffer.from([1, 2, 3]).toString('base64url'),
+);
+assert.equal('fnIgnored' in capturedCreatePost.options.extensions, false);
+
+assert.equal(createdRes.id, 'NEWCRED');
+assert.ok(createdRes instanceof env.sandbox.PublicKeyCredential);
+assert.ok(createdRes.response instanceof env.sandbox.AuthenticatorAttestationResponse);
+assert.deepEqual(Array.from(createdRes.response.getTransports()), ['internal', 'hybrid']);
+assert.equal(createdRes.response.getAuthenticatorData().byteLength, 37);
+assert.equal(createdRes.response.getPublicKey().byteLength, 4);
+assert.equal(createdRes.response.getPublicKeyAlgorithm(), -7);
+assert.deepEqual(JSON.parse(JSON.stringify(createdRes.toJSON().clientExtensionResults)), {
+  credProps: { rk: true },
+});
+
 console.log('Extension test suite passed successfully.');

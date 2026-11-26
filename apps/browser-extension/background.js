@@ -757,7 +757,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'PASSKEY_SHOW_TOP_MODAL': {
         if (!sender?.tab?.id) {
-          sendResponse({ handled: false, fallback: true });
+          sendResponse({ handled: false, fallback: true, _relayFailed: true });
           break;
         }
         try {
@@ -776,39 +776,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               { frameId: 0 },
               (resp) => {
                 if (chrome.runtime.lastError) {
-                  resolve({ handled: false, fallback: true });
+                  resolve({ handled: false, fallback: true, _relayFailed: true });
                   return;
                 }
-                resolve(resp || { handled: false, fallback: true });
+                resolve(resp || { handled: false, fallback: true, _relayFailed: true });
               }
             );
           });
           sendResponse(reply);
         } catch {
-          sendResponse({ handled: false, fallback: true });
+          sendResponse({ handled: false, fallback: true, _relayFailed: true });
         }
         break;
       }
       case 'PASSKEY_CREATE': {
-        const res = await rpcRaw('passkey_create', {
-          origin: message.origin || '',
-          itemId: message.itemId || undefined,
-          title: message.title || undefined,
-          options: message.options || {}
-        });
-        await refreshActiveTabBadge();
+        const res = await rpcRaw(
+          'passkey_create',
+          {
+            origin: message.origin || '',
+            itemId: message.itemId || undefined,
+            title: message.title || undefined,
+            options: message.options || {}
+          },
+          35000
+        );
+        refreshActiveTabBadge();
         sendResponse(res);
         break;
       }
       case 'PASSKEY_ASSERT': {
         sendResponse(
-          await rpcRaw('passkey_assert', {
-            origin: message.origin || '',
-            itemId: message.itemId || '',
-            credentialId: message.credentialId || '',
-            verifyBiometric: Boolean(message.verifyBiometric),
-            options: message.options || {}
-          })
+          await rpcRaw(
+            'passkey_assert',
+            {
+              origin: message.origin || '',
+              itemId: message.itemId || '',
+              credentialId: message.credentialId || '',
+              verifyBiometric: Boolean(message.verifyBiometric),
+              options: message.options || {}
+            },
+            35000
+          )
         );
         break;
       }

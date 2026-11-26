@@ -1715,6 +1715,7 @@ fn passkey_create_and_assert_es256_webauthn_valid() {
         pub_key_cred_params: vec![-7, -257],
         discoverable: true,
         cross_origin: false,
+        authenticator_attachment: None,
     })
     .unwrap();
 
@@ -1844,6 +1845,7 @@ fn bitwarden_login_fido2_credentials_roundtrip_and_assert() {
         pub_key_cred_params: vec![-7],
         discoverable: true,
         cross_origin: false,
+        authenticator_attachment: None,
     })
     .unwrap();
 
@@ -1899,6 +1901,7 @@ fn passkey_normalization_credential_id_variants_and_cross_origin_assert() {
         pub_key_cred_params: vec![-7],
         discoverable: true,
         cross_origin: false,
+        authenticator_attachment: None,
     })
     .unwrap();
 
@@ -2106,6 +2109,7 @@ fn passkey_prefixed_b64_and_hex_credential_ids_decode_and_assert() {
         pub_key_cred_params: vec![-7],
         discoverable: true,
         cross_origin: false,
+        authenticator_attachment: None,
     })
     .unwrap();
 
@@ -2140,6 +2144,99 @@ fn passkey_prefixed_b64_and_hex_credential_ids_decode_and_assert() {
     .unwrap();
     assert_eq!(next_cnt, 1);
     assert_eq!(assertion["id"].as_str().unwrap(), b64u);
+}
+
+#[test]
+fn passkey_fido2_creation_date_plain_and_rp_id_scheme_port_normalization() {
+    use keysmith_core::passkey::{create_passkey_credential, normalize_rp_id, PasskeyCreateParams};
+
+    assert_eq!(normalize_rp_id("https://id.binance.com:8443/"), "id.binance.com");
+    assert_eq!(normalize_rp_id("Example.COM:443."), "example.com");
+
+    let usk = UserSymmetricKey::from_bytes(&[23u8; 64]).unwrap();
+    let created = create_passkey_credential(&PasskeyCreateParams {
+        origin: "https://id.binance.com".to_string(),
+        rp_id: "binance.com".to_string(),
+        rp_name: "Binance".to_string(),
+        user_id_b64u: encode_b64u_test(b"binance-uid-1"),
+        user_name: "trader@example.com".to_string(),
+        user_display_name: "Trader".to_string(),
+        challenge_b64u: encode_b64u_test(b"chal-binance-1"),
+        pub_key_cred_params: vec![-7],
+        discoverable: true,
+        cross_origin: false,
+        authenticator_attachment: Some("cross-platform".to_string()),
+    })
+    .unwrap();
+
+    assert_eq!(created.response_json["authenticatorAttachment"], "cross-platform");
+
+    // 1. New Login cipher with Passkey emits plain RFC3339 creationDate (never "2." encrypted)
+    let new_draft = ItemDraft {
+        id: None,
+        vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+        title: "Binance".to_string(),
+        favorite: false,
+        category: ItemCategory::Login,
+        subtitle: None,
+        icon: None,
+        tags: Vec::new(),
+        urls: vec![ItemUrl {
+            id: "u-1".to_string(),
+            uri: "https://id.binance.com".to_string(),
+            label: None,
+            match_rule: UrlMatchRule::Domain,
+        }],
+        sections: vec![ItemSection {
+            id: "sec-1".to_string(),
+            title: "登录信息".to_string(),
+            fields: vec![ItemField {
+                id: "f-1".to_string(),
+                label: "用户名".to_string(),
+                field_type: FieldType::Text,
+                value: "trader@example.com".to_string(),
+                sensitive: false,
+                copyable: true,
+                purpose: Some(FieldPurpose::Username),
+            }],
+        }],
+        passkeys: vec![created.credential.clone()],
+        notes: String::new(),
+        password_history: Vec::new(),
+        watchtower: Default::default(),
+        archived: false,
+        reprompt: false,
+    };
+
+    let (new_cipher, _) = draft_to_cipher("cipher-new-pk", &new_draft, None, None, &usk).unwrap();
+    let f2 = &new_cipher.login.as_ref().unwrap().fido2_credentials[0];
+    let cdate = f2.creation_date.as_deref().unwrap();
+    assert!(!cdate.starts_with("2.") && !cdate.starts_with("0."), "creationDate must be plaintext ISO, got {cdate}");
+    assert!(chrono::DateTime::parse_from_rfc3339(cdate).is_ok());
+
+    let decoded = cipher_to_item(&new_cipher, &usk).unwrap();
+    assert_eq!(decoded.payload.passkeys.len(), 1);
+    assert_eq!(decoded.payload.passkeys[0].rp_id, "binance.com");
+
+    // 2. Updating an existing cipher with legacy encrypted creationDate heals it back to plaintext RFC3339
+    let mut legacy_cipher = new_cipher.clone();
+    legacy_cipher.login.as_mut().unwrap().fido2_credentials[0].creation_date =
+        Some(usk.encrypt_string(cdate).unwrap());
+    let mut upd_draft = decoded.to_draft();
+    upd_draft.passkeys[0].sign_count = 3;
+    let (healed_cipher, _) = draft_to_cipher(
+        &decoded.id,
+        &upd_draft,
+        Some(&legacy_cipher),
+        Some(&decoded),
+        &usk,
+    )
+    .unwrap();
+    let healed_cdate = healed_cipher.login.as_ref().unwrap().fido2_credentials[0]
+        .creation_date
+        .as_deref()
+        .unwrap();
+    assert_eq!(healed_cdate, cdate);
 }
 
 fn encode_b64u_test(bytes: &[u8]) -> String {
