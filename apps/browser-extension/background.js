@@ -231,7 +231,7 @@ function privacySet(setting, value) {
       return;
     }
     try {
-      setting.set({ value }, () => {
+      setting.set({ value, scope: 'regular' }, () => {
         resolve(!chrome.runtime.lastError);
       });
     } catch {
@@ -247,7 +247,7 @@ function privacyClear(setting) {
       return;
     }
     try {
-      setting.clear({}, () => {
+      setting.clear({ scope: 'regular' }, () => {
         resolve(!chrome.runtime.lastError);
       });
     } catch {
@@ -276,21 +276,30 @@ async function applyBrowserPasswordManagerControl(enabled) {
 
 async function getBrowserPasswordManagerControlStatus() {
   const prefEnabled = await getSavedTakeoverPreference();
+  const hasManifestPrivacy = Boolean(
+    chrome.runtime?.getManifest?.()?.permissions?.includes('privacy')
+  );
   const pwSetting = chrome.privacy?.services?.passwordSavingEnabled;
   if (!pwSetting) {
     return {
       supported: false,
-      enabled: prefEnabled,
+      reason: hasManifestPrivacy ? 'api_unavailable' : 'manifest_needs_reload',
+      enabled: false,
+      prefEnabled,
       value: null,
       levelOfControl: 'not_controllable'
     };
   }
   const details = await privacyGet(pwSetting);
+  const level = details?.levelOfControl || 'controllable_by_this_extension';
+  const controlledBySelf = level === 'controlled_by_this_extension' && details?.value === false;
   return {
     supported: true,
-    enabled: prefEnabled,
+    reason: null,
+    enabled: controlledBySelf,
+    prefEnabled,
     value: details?.value ?? null,
-    levelOfControl: details?.levelOfControl || 'controllable_by_this_extension'
+    levelOfControl: level
   };
 }
 

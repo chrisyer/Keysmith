@@ -24,6 +24,7 @@ const detailBodyEl = document.getElementById('detail-body');
 const settingsViewEl = document.getElementById('settings-view');
 const takeoverToggleEl = document.getElementById('takeover-toggle');
 const takeoverStatusEl = document.getElementById('takeover-status');
+const reloadExtBtn = document.getElementById('reload-ext-btn');
 const neverSaveListEl = document.getElementById('never-save-list');
 const neverSaveEmptyEl = document.getElementById('never-save-empty');
 const settingsExtIdEl = document.getElementById('settings-ext-id');
@@ -567,16 +568,152 @@ function renderLiveTotpCard(itemId) {
 
 // ==================== Settings View ====================
 
+function getLocalPrivacySettingApi() {
+  return chrome.privacy?.services?.passwordSavingEnabled || null;
+}
+
+function privacyApiGet(setting) {
+  return new Promise((resolve) => {
+    if (!setting) {
+      resolve(null);
+      return;
+    }
+    try {
+      setting.get({}, (details) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
+        resolve(details || null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+function privacyApiSet(setting, value) {
+  return new Promise((resolve) => {
+    if (!setting) {
+      resolve(false);
+      return;
+    }
+    try {
+      setting.set({ value, scope: 'regular' }, () => {
+        resolve(!chrome.runtime.lastError);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+function privacyApiClear(setting) {
+  return new Promise((resolve) => {
+    if (!setting) {
+      resolve(false);
+      return;
+    }
+    try {
+      setting.clear({ scope: 'regular' }, () => {
+        resolve(!chrome.runtime.lastError);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function getPrivacyStatusUnified() {
+  const pwSetting = getLocalPrivacySettingApi();
+  if (pwSetting) {
+    const details = await privacyApiGet(pwSetting);
+    const level = details?.levelOfControl || 'controllable_by_this_extension';
+    return {
+      ok: true,
+      supported: true,
+      reason: null,
+      enabled: level === 'controlled_by_this_extension' && details?.value === false,
+      value: details?.value ?? null,
+      levelOfControl: level
+    };
+  }
+
+  const bgResp = await sendBg({ type: 'GET_PRIVACY_CONTROL' });
+  if (bgResp && bgResp.supported) {
+    return bgResp;
+  }
+
+  const hasManifestPrivacy = Boolean(
+    chrome.runtime?.getManifest?.()?.permissions?.includes('privacy')
+  );
+  const needsReload =
+    !hasManifestPrivacy || bgResp?.error === 'Unknown message type';
+  return {
+    ok: Boolean(bgResp?.ok),
+    supported: false,
+    reason: bgResp?.reason || (needsReload ? 'manifest_needs_reload' : 'api_unavailable'),
+    enabled: false,
+    value: null,
+    levelOfControl: bgResp?.levelOfControl || 'not_controllable'
+  };
+}
+
+async function setPrivacyControlUnified(enabled) {
+  const pwSetting = getLocalPrivacySettingApi();
+  const cardSetting = chrome.privacy?.services?.autofillCreditCardEnabled || null;
+  if (pwSetting) {
+    try {
+      await chrome.storage.local.set({ takeoverBrowserPasswordManager: Boolean(enabled) });
+    } catch {
+      // ignore storage failure
+    }
+    if (enabled) {
+      await privacyApiSet(pwSetting, false);
+      if (cardSetting) {
+        await privacyApiSet(cardSetting, false);
+      }
+    } else {
+      await privacyApiClear(pwSetting);
+      if (cardSetting) {
+        await privacyApiClear(cardSetting);
+      }
+    }
+    return getPrivacyStatusUnified();
+  }
+
+  const bgResp = await sendBg({ type: 'SET_PRIVACY_CONTROL', enabled: Boolean(enabled) });
+  if (bgResp && bgResp.supported) {
+    return bgResp;
+  }
+  return getPrivacyStatusUnified();
+}
+
 function renderPrivacyStatus(resp) {
   takeoverStatusEl.className = 'takeover-status';
   if (!resp || !resp.supported) {
+    takeoverToggleEl.checked = false;
+    takeoverToggleEl.disabled = true;
     takeoverStatusEl.classList.add('warn');
-    takeoverStatusEl.textContent = t('takeoverUnsupported');
+    const needsReload = resp?.reason === 'manifest_needs_reload';
+    takeoverStatusEl.textContent = needsReload
+      ? t('takeoverNeedsReload')
+      : t('takeoverUnsupported');
+    if (reloadExtBtn) {
+      reloadExtBtn.classList.toggle('hidden', !needsReload);
+    }
     return;
   }
+  if (reloadExtBtn) {
+    reloadExtBtn.classList.add('hidden');
+  }
+  takeoverToggleEl.disabled = resp.levelOfControl === 'not_controllable';
   takeoverToggleEl.checked = Boolean(resp.enabled);
   const level = resp.levelOfControl;
-  if (level === 'controlled_by_this_extension') {
+  if (level === 'not_controllable') {
+    takeoverStatusEl.classList.add('warn');
+    takeoverStatusEl.textContent = t('takeoverNotControllable');
+  } else if (level === 'controlled_by_this_extension') {
     takeoverStatusEl.classList.add('ok');
     takeoverStatusEl.textContent = t('takeoverControlledSelf');
   } else if (level === 'controlled_by_other_extensions') {
@@ -627,7 +764,7 @@ async function openSettingsView() {
   if (langSelectEl && i18n) {
     langSelectEl.value = i18n.getLanguageMode();
   }
-  const pRes = await sendBg({ type: 'GET_PRIVACY_CONTROL' });
+  const pRes = await getPrivacyStatusUnified();
   renderPrivacyStatus(pRes);
   await refreshNeverSaveList();
 }
@@ -988,7 +1125,7 @@ if (langSelectEl && i18n) {
     if (currentGeneratedValue) {
       await runGenerator();
     }
-    const pRes = await sendBg({ type: 'GET_PRIVACY_CONTROL' });
+    const pRes = await getPrivacyStatusUnified();
     renderPrivacyStatus(pRes);
     showToast(t('langSaved'));
   });
@@ -1012,12 +1149,19 @@ document.getElementById('detail-desktop-btn').addEventListener('click', () => {
 });
 
 takeoverToggleEl.addEventListener('change', async () => {
-  const res = await sendBg({
-    type: 'SET_PRIVACY_CONTROL',
-    enabled: takeoverToggleEl.checked
-  });
+  const res = await setPrivacyControlUnified(takeoverToggleEl.checked);
   renderPrivacyStatus(res);
 });
+
+if (reloadExtBtn) {
+  reloadExtBtn.addEventListener('click', () => {
+    try {
+      chrome.runtime.reload();
+    } catch {
+      window.close();
+    }
+  });
+}
 
 for (const btn of document.querySelectorAll('.tab-btn')) {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab));
