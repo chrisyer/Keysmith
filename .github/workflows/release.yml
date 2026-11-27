@@ -260,10 +260,10 @@ jobs:
                ```bash
                curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/main/install.sh | sh
                ```
-            2. **Homebrew Cask (supports `brew upgrade`):**
+            2. **Homebrew Cask (supports `brew upgrade --cask chrisyer/keysmith/keysmith`; tap prefix avoids colliding with Homebrew's official `keysmith` cask):**
                ```bash
                brew tap chrisyer/keysmith https://github.com/chrisyer/Keysmith.git
-               brew install --cask keysmith
+               brew install --cask chrisyer/keysmith/keysmith
                ```
             3. **Manual `.dmg` install:** Drag `Keysmith.app` into `/Applications`. If macOS Gatekeeper prompts on first launch, allow it under **System Settings → Privacy & Security → Open Anyway**, or run `xattr -cr /Applications/Keysmith.app`.
           files: release-assets/*

@@ -83,8 +83,10 @@ curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/main/install.sh |
 
 ```bash
 brew tap chrisyer/keysmith https://github.com/chrisyer/Keysmith.git
-brew install --cask keysmith
+brew install --cask chrisyer/keysmith/keysmith
 ```
+
+To upgrade later, run `brew upgrade --cask chrisyer/keysmith/keysmith` (the `chrisyer/keysmith/` prefix is required to avoid colliding with Homebrew's unrelated official `keysmith` cask).
 
 #### Option 3: Manual `.dmg` Download
 
