@@ -63,16 +63,43 @@ public actor KeysmithCoreAdapter {
         twoFactorRemember: Bool,
         allowInsecureHttp: Bool
     ) throws -> KSSessionState {
-        let json = try requireHandle().authLoginJson(
-            serverUrl: serverUrl,
-            email: email,
-            masterPassword: masterPassword,
-            twoFactorProvider: twoFactorProvider,
-            twoFactorToken: twoFactorToken,
-            twoFactorRemember: twoFactorRemember,
-            allowInsecureHttp: allowInsecureHttp
-        )
-        return try decodeJSON(json)
+        do {
+            let json = try requireHandle().authLoginJson(
+                serverUrl: serverUrl,
+                email: email,
+                masterPassword: masterPassword,
+                twoFactorProvider: twoFactorProvider,
+                twoFactorToken: twoFactorToken,
+                twoFactorRemember: twoFactorRemember,
+                allowInsecureHttp: allowInsecureHttp
+            )
+            return try decodeJSON(json)
+        } catch let ffiError as FfiError {
+            throw mapFfiError(ffiError)
+        }
+    }
+
+    private func mapFfiError(_ error: FfiError) -> KSCoreAdapterError {
+        switch error {
+        case .TwoFactorRequired(let msg):
+            return .twoFactorRequired(message: msg, providers: [])
+        case .InvalidMasterPassword(let msg):
+            return .invalidMasterPassword(msg)
+        case .Locked(let msg):
+            return .locked(msg)
+        case .Network(let msg):
+            return .network(msg)
+        case .Validation(let msg):
+            return .validation(msg)
+        case .Biometric(let msg):
+            return .biometric(msg)
+        case .Authentication(let msg),
+             .InvalidState(let msg),
+             .Crypto(let msg),
+             .Storage(let msg),
+             .Internal(let msg):
+            return .backend(msg)
+        }
     }
 
     public func authRegister(

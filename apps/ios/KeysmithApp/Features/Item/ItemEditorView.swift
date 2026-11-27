@@ -173,12 +173,17 @@ public struct ItemEditorView: View {
             }
         }
         .sheet(item: $scanningFieldLocation) { loc in
-            TotpScannerSheet { scannedUri in
-                if loc.sectionIndex < draft.sections.count,
-                   loc.fieldIndex < draft.sections[loc.sectionIndex].fields.count {
-                    draft.sections[loc.sectionIndex].fields[loc.fieldIndex].value = scannedUri
+            TotpScannerSheet(
+                parseQrData: { data in
+                    try await store.parseTotpQrImage(data: data)
+                },
+                onScanned: { scannedUri in
+                    if loc.sectionIndex < draft.sections.count,
+                       loc.fieldIndex < draft.sections[loc.sectionIndex].fields.count {
+                        draft.sections[loc.sectionIndex].fields[loc.fieldIndex].value = scannedUri
+                    }
                 }
-            }
+            )
         }
     }
 

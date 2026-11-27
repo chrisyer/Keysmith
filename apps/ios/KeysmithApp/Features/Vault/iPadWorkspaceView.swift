@@ -132,9 +132,14 @@ public struct iPadWorkspaceView: View {
             }
         }
         .sheet(isPresented: $isShowingScannerSheet) {
-            TotpScannerSheet { scannedUri in
-                store.copyToClipboard(scannedUri, label: "TOTP URI", isSensitive: true)
-            }
+            TotpScannerSheet(
+                parseQrData: { data in
+                    try await store.parseTotpQrImage(data: data)
+                },
+                onScanned: { scannedUri in
+                    store.copyToClipboard(scannedUri, label: "TOTP URI", isSensitive: true)
+                }
+            )
         }
     }
 
