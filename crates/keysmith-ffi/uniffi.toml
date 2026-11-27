@@ -1,0 +1,5 @@
+[bindings.swift]
+module_name = "KeysmithFFI"
+ffi_module_name = "keysmithFFI"
+generate_immutable_records = false
+experimental_sendable_value_types = true

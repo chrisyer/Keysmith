@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
@@ -233,6 +234,7 @@ pub struct AppCore {
     clipboard: Arc<dyn ClipboardManager>,
     state: RwLock<CoreState>,
     sync_lock: AsyncMutex<()>,
+    defer_remote_sync: AtomicBool,
 }
 
 impl AppCore {
@@ -248,6 +250,15 @@ impl AppCore {
         storage: Storage,
         biometric: Arc<dyn BiometricKeyStore>,
         clipboard: Arc<dyn ClipboardManager>,
+    ) -> Result<Self, CoreError> {
+        Self::with_storage_and_client_info(storage, biometric, clipboard, None)
+    }
+
+    pub fn with_storage_and_client_info(
+        storage: Storage,
+        biometric: Arc<dyn BiometricKeyStore>,
+        clipboard: Arc<dyn ClipboardManager>,
+        user_agent: Option<String>,
     ) -> Result<Self, CoreError> {
         let account = storage.load_primary_account()?;
         let pending_count = match &account {
@@ -266,7 +277,7 @@ impl AppCore {
                 .filter(|s| !s.trim().is_empty())
         });
 
-        let client = VaultwardenClient::new();
+        let client = VaultwardenClient::with_user_agent(user_agent.as_deref());
         if let Some(ref acc) = account {
             let allow_http = storage
                 .get_all_app_settings()
@@ -298,7 +309,14 @@ impl AppCore {
                 last_server_revision,
             }),
             sync_lock: AsyncMutex::new(()),
+            defer_remote_sync: AtomicBool::new(false),
         })
+    }
+
+    /// When enabled (e.g., in iOS AutoFill extension), mutations persist encrypted to local SQLite
+    /// with a `pending_op` without waiting for network round-trips.
+    pub fn set_defer_remote_sync(&self, defer: bool) {
+        self.defer_remote_sync.store(defer, Ordering::Relaxed);
     }
 
     fn read_state(&self) -> Result<std::sync::RwLockReadGuard<'_, CoreState>, CoreError> {
@@ -336,6 +354,7 @@ impl AppCore {
                 server_url: acc.server_url.clone(),
                 biometric_enabled: acc.biometric_enabled && biometric_available,
                 auto_lock_minutes: acc.auto_lock_minutes,
+                auto_lock_seconds: acc.auto_lock_seconds,
                 clipboard_clear_seconds: acc.clipboard_clear_seconds,
                 last_sync_at: acc.last_sync_at.clone().unwrap_or_default(),
                 kdf_type: KdfConfig {
@@ -366,6 +385,7 @@ impl AppCore {
                 server_url: String::new(),
                 biometric_enabled: false,
                 auto_lock_minutes: 15,
+                auto_lock_seconds: None,
                 clipboard_clear_seconds: 30,
                 last_sync_at: String::new(),
                 kdf_type: "Argon2id".to_string(),
@@ -831,6 +851,29 @@ impl AppCore {
         two_factor_code: Option<&str>,
         allow_insecure_http: bool,
     ) -> Result<SessionState, CoreError> {
+        self.auth_login_with_2fa(
+            server_url,
+            email,
+            master_password,
+            Some(0),
+            two_factor_code,
+            false,
+            allow_insecure_http,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn auth_login_with_2fa(
+        &self,
+        server_url: &str,
+        email: &str,
+        master_password: &str,
+        two_factor_provider: Option<u8>,
+        two_factor_token: Option<&str>,
+        two_factor_remember: bool,
+        allow_insecure_http: bool,
+    ) -> Result<SessionState, CoreError> {
         let normalized_email = normalize_email(email);
         if normalized_email.is_empty() || master_password.is_empty() {
             return Err(CoreError::Validation("请输入邮箱与主密码".to_string()));
@@ -858,12 +901,14 @@ impl AppCore {
 
         let token = self
             .client
-            .login_password_with_policy(
+            .login_password_with_2fa(
                 &clean_url,
                 &normalized_email,
                 &mph,
                 &device_id,
-                two_factor_code,
+                two_factor_provider,
+                two_factor_token,
+                two_factor_remember,
                 allow_insecure_http,
             )
             .await?;
@@ -1008,6 +1053,29 @@ impl AppCore {
         kdf_config: Option<KdfConfig>,
         allow_insecure_http: bool,
     ) -> Result<SessionState, CoreError> {
+        self.auth_register_with_hint(
+            server_url,
+            email,
+            name,
+            master_password,
+            None,
+            kdf_config,
+            allow_insecure_http,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn auth_register_with_hint(
+        &self,
+        server_url: &str,
+        email: &str,
+        name: &str,
+        master_password: &str,
+        hint: Option<&str>,
+        kdf_config: Option<KdfConfig>,
+        allow_insecure_http: bool,
+    ) -> Result<SessionState, CoreError> {
         let normalized_email = normalize_email(email);
         if normalized_email.is_empty()
             || master_password.chars().count() < 12
@@ -1036,6 +1104,10 @@ impl AppCore {
         let pw_owned = master_password.to_string();
         let email_owned = normalized_email.clone();
         let name_owned = display_name.clone();
+        let hint_owned = hint
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
 
         let req = tokio::task::spawn_blocking(move || {
             let mk = derive_master_key(&pw_owned, &email_owned, &kdf)?;
@@ -1049,7 +1121,7 @@ impl AppCore {
                 email: email_owned,
                 name: name_owned,
                 master_password_hash: mph,
-                master_password_hint: None,
+                master_password_hint: hint_owned,
                 user_symmetric_key: protected_key.clone(),
                 key: protected_key,
                 keys: RegisterKeysRequest {
@@ -1192,6 +1264,7 @@ impl AppCore {
                 server_url: String::new(),
                 biometric_enabled: false,
                 auto_lock_minutes: 15,
+                auto_lock_seconds: None,
                 clipboard_clear_seconds: 30,
                 last_sync_at: String::new(),
                 kdf_type: "Argon2id".to_string(),
@@ -1246,6 +1319,9 @@ impl AppCore {
         }
         if let Some(mins) = patch.auto_lock_minutes {
             account.auto_lock_minutes = mins;
+        }
+        if let Some(secs) = patch.auto_lock_seconds {
+            account.auto_lock_seconds = Some(secs);
         }
         if let Some(secs) = patch.clipboard_clear_seconds {
             account.clipboard_clear_seconds = secs;
@@ -1630,19 +1706,31 @@ impl AppCore {
         if guard.unlocked.is_none() {
             return Ok(false);
         }
-        let mins = guard
-            .account
-            .as_ref()
-            .map(|a| a.auto_lock_minutes)
-            .unwrap_or(15);
-        if mins == 0 {
-            return Ok(false);
-        }
-        if guard.last_activity.elapsed().as_secs() >= (mins as u64) * 60 {
+        let threshold_secs: u64 = match guard.account.as_ref() {
+            Some(acc) => match acc.auto_lock_seconds {
+                Some(s) if s <= 0 => return Ok(false),
+                Some(s) => s as u64,
+                None => {
+                    if acc.auto_lock_minutes == 0 {
+                        return Ok(false);
+                    }
+                    (acc.auto_lock_minutes as u64) * 60
+                }
+            },
+            None => 15 * 60,
+        };
+        if guard.last_activity.elapsed().as_secs() >= threshold_secs {
             guard.unlocked = None;
             return Ok(true);
         }
         Ok(false)
+    }
+
+    #[cfg(test)]
+    pub fn force_last_activity_elapsed_for_test(&self, secs_ago: u64) {
+        if let Ok(mut guard) = self.write_state() {
+            guard.last_activity = Instant::now() - std::time::Duration::from_secs(secs_ago);
+        }
     }
 
     // --- Vaults ---
@@ -2258,7 +2346,10 @@ impl AppCore {
 
         let mut dirty_op = Some("create");
         let mut synced_remotely = false;
-        if self.is_auto_sync_enabled() && self.has_online_session() {
+        if !self.defer_remote_sync.load(Ordering::Relaxed)
+            && self.is_auto_sync_enabled()
+            && self.has_online_session()
+        {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let cipher_clone = cipher.clone();
@@ -2342,7 +2433,10 @@ impl AppCore {
 
         let mut dirty_op = Some(if was_offline_create { "create" } else { "update" });
         let mut synced_remotely = false;
-        if self.is_auto_sync_enabled() && self.has_online_session() {
+        if !self.defer_remote_sync.load(Ordering::Relaxed)
+            && self.is_auto_sync_enabled()
+            && self.has_online_session()
+        {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -4920,13 +5014,26 @@ impl AppCore {
         label: &str,
         is_sensitive: bool,
     ) -> Result<(), CoreError> {
-        let clear_after = {
-            let guard = self.read_state()?;
-            guard
-                .account
-                .as_ref()
-                .map(|a| a.clipboard_clear_seconds)
-                .unwrap_or(30)
+        self.clipboard_copy_secret_with_timeout(text, label, is_sensitive, None)
+    }
+
+    pub fn clipboard_copy_secret_with_timeout(
+        &self,
+        text: &str,
+        label: &str,
+        is_sensitive: bool,
+        clear_after_secs: Option<u64>,
+    ) -> Result<(), CoreError> {
+        let clear_after = match clear_after_secs {
+            Some(s) => s,
+            None => {
+                let guard = self.read_state()?;
+                guard
+                    .account
+                    .as_ref()
+                    .map(|a| a.clipboard_clear_seconds)
+                    .unwrap_or(30)
+            }
         };
         self.clipboard
             .copy_secret(text, label, is_sensitive, clear_after)
@@ -5713,6 +5820,94 @@ impl AppCore {
 
     pub fn checkpoint_storage(&self) -> Result<(), CoreError> {
         self.storage.wal_checkpoint()
+    }
+}
+
+#[cfg(test)]
+mod auto_lock_tests {
+    use super::*;
+    use crate::traits::{NoopBiometricKeyStore, NoopClipboardManager};
+
+    async fn setup_unlocked_core(auto_lock_minutes: u32, auto_lock_seconds: Option<i32>) -> AppCore {
+        let storage = Storage::open_in_memory().unwrap();
+        let kdf = KdfConfig {
+            kdf: 0,
+            kdf_iterations: 5_000,
+            kdf_memory: None,
+            kdf_parallelism: None,
+        };
+        let mk = derive_master_key("LockPass#2026!", "autolock@example.com", &kdf).unwrap();
+        let smk = stretch_master_key(&mk).unwrap();
+        let usk = UserSymmetricKey::generate();
+        let mut acc = StoredAccount::default_prefs(
+            "acc-autolock".to_string(),
+            "https://vault.example.com".to_string(),
+            "autolock@example.com".to_string(),
+            "autolock".to_string(),
+            kdf.kdf,
+            kdf.kdf_iterations,
+            kdf.kdf_memory,
+            kdf.kdf_parallelism,
+            protect_user_symmetric_key(&usk, &smk).unwrap(),
+            "dev-autolock".to_string(),
+        );
+        acc.auto_lock_minutes = auto_lock_minutes;
+        acc.auto_lock_seconds = auto_lock_seconds;
+        storage.upsert_account(&acc).unwrap();
+
+        let core = AppCore::with_storage_and_client_info(
+            storage,
+            Arc::new(NoopBiometricKeyStore),
+            Arc::new(NoopClipboardManager),
+            Some("Keysmith/0.1.4 (iOS; SwiftUI)".to_string()),
+        )
+        .unwrap();
+        core.session_unlock_password("LockPass#2026!").await.unwrap();
+        core
+    }
+
+    #[tokio::test]
+    async fn sub_minute_auto_lock_15s_30s_never_and_fallback() {
+        // 15 seconds exact threshold
+        let core_15 = setup_unlocked_core(15, Some(15)).await;
+        assert_eq!(core_15.session_get_state().auto_lock_seconds, Some(15));
+        core_15.force_last_activity_elapsed_for_test(14);
+        assert!(!core_15.check_auto_lock().unwrap());
+        core_15.force_last_activity_elapsed_for_test(15);
+        assert!(core_15.check_auto_lock().unwrap());
+        assert_eq!(core_15.session_get_state().status, AuthStatus::Locked);
+
+        // 30 seconds via session_update_preferences + persistence reload
+        let core_30 = setup_unlocked_core(15, None).await;
+        let updated = core_30
+            .session_update_preferences(SessionPreferencesPatch {
+                auto_lock_seconds: Some(30),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(updated.auto_lock_seconds, Some(30));
+        core_30.force_last_activity_elapsed_for_test(29);
+        assert!(!core_30.check_auto_lock().unwrap());
+        core_30.force_last_activity_elapsed_for_test(30);
+        assert!(core_30.check_auto_lock().unwrap());
+
+        // -1 means Never, even after a very long elapsed time
+        let core_never = setup_unlocked_core(1, Some(-1)).await;
+        core_never.force_last_activity_elapsed_for_test(86_400);
+        assert!(!core_never.check_auto_lock().unwrap());
+        assert_eq!(core_never.session_get_state().status, AuthStatus::Unlocked);
+
+        // Fallback to auto_lock_minutes * 60 when auto_lock_seconds is None
+        let core_fallback = setup_unlocked_core(2, None).await;
+        core_fallback.force_last_activity_elapsed_for_test(119);
+        assert!(!core_fallback.check_auto_lock().unwrap());
+        core_fallback.force_last_activity_elapsed_for_test(120);
+        assert!(core_fallback.check_auto_lock().unwrap());
+
+        // Preserve auto_lock_minutes == 0 meaning Never when auto_lock_seconds is None
+        let core_min_zero = setup_unlocked_core(0, None).await;
+        core_min_zero.force_last_activity_elapsed_for_test(86_400);
+        assert!(!core_min_zero.check_auto_lock().unwrap());
     }
 }
 

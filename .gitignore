@@ -23,3 +23,8 @@ apps/desktop/src-tauri/target/
 npm-debug.log*
 .DS_Store
 Thumbs.db
+
+# Generated iOS XCFramework, UniFFI Swift bindings, and Xcode project
+apps/ios/Frameworks/KeysmithCore.xcframework/
+apps/ios/Shared/Bindings/
+apps/ios/Keysmith.xcodeproj/

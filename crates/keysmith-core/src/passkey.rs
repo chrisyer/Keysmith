@@ -88,6 +88,25 @@ pub struct PasskeyCreateOutput {
     pub response_json: Value,
 }
 
+#[derive(Debug, Clone)]
+pub struct ApplePasskeyCreateOutput {
+    pub credential: PasskeyCredential,
+    pub credential_id: Vec<u8>,
+    pub attestation_object: Vec<u8>,
+    pub authenticator_data: Vec<u8>,
+    pub client_data_hash: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApplePasskeyAssertOutput {
+    pub next_sign_count: u32,
+    pub credential_id: Vec<u8>,
+    pub user_handle: Vec<u8>,
+    pub authenticator_data: Vec<u8>,
+    pub signature: Vec<u8>,
+    pub client_data_hash: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PasskeyAssertParams {
@@ -533,20 +552,26 @@ fn choose_cose_algorithm(pub_key_cred_params: &[i32]) -> Result<i32, CoreError> 
     ))
 }
 
-/// Generate a new WebAuthn ES256 (-7) or Ed25519 (-8) Passkey credential and attestation response.
-pub fn create_passkey_credential(
-    params: &PasskeyCreateParams,
-) -> Result<PasskeyCreateOutput, CoreError> {
-    let rp_id = normalize_rp_id(&params.rp_id);
-    let origin = params.origin.trim().to_string();
-    if !rp_id_matches_origin_ext(&rp_id, &origin, &params.custom_equivalent_domains) {
-        return Err(CoreError::Validation(format!(
-            "Passkey RP ID ({rp_id}) 与页面源 ({origin}) 不匹配"
-        )));
-    }
-    let chosen_alg = choose_cose_algorithm(&params.pub_key_cred_params)?;
+struct GeneratedPasskeyMaterial {
+    credential: PasskeyCredential,
+    cred_id_bytes: Vec<u8>,
+    auth_data: Vec<u8>,
+    attestation_object: Vec<u8>,
+    transports: Vec<String>,
+}
 
-    let user_id_bytes = decode_b64u_or_b64(&params.user_id_b64u)?;
+fn generate_passkey_material(
+    rp_id: &str,
+    rp_name: &str,
+    user_id_bytes: &[u8],
+    user_name: &str,
+    user_display_name: &str,
+    chosen_alg: i32,
+    discoverable: bool,
+) -> Result<GeneratedPasskeyMaterial, CoreError> {
+    if rp_id.trim().is_empty() {
+        return Err(CoreError::Validation("缺少 WebAuthn RP ID".to_string()));
+    }
     if user_id_bytes.is_empty() || user_id_bytes.len() > 64 {
         return Err(CoreError::Validation(
             "WebAuthn user.id 长度必须在 1..=64 字节之间".to_string(),
@@ -592,8 +617,7 @@ pub fn create_passkey_credential(
     };
 
     let cred_uuid = Uuid::new_v4();
-    let cred_id_bytes = cred_uuid.as_bytes();
-    let cred_id_b64u = encode_b64u(cred_id_bytes);
+    let cred_id_bytes = cred_uuid.as_bytes().to_vec();
     let rp_hash = Sha256::digest(rp_id.as_bytes());
 
     // Flags: UP (0x01) | UV (0x04) | BE (0x08) | BS (0x10) | AT (0x40) = 0x5d
@@ -606,10 +630,74 @@ pub fn create_passkey_credential(
     auth_data.extend_from_slice(&sign_count.to_be_bytes());
     auth_data.extend_from_slice(&KEYSMITH_AAGUID);
     auth_data.extend_from_slice(&(cred_id_bytes.len() as u16).to_be_bytes());
-    auth_data.extend_from_slice(cred_id_bytes);
+    auth_data.extend_from_slice(&cred_id_bytes);
     auth_data.extend_from_slice(&cose_key);
 
     let attestation_object = encode_none_attestation_object(&auth_data);
+    let transports = vec!["internal".to_string(), "hybrid".to_string()];
+    let rp_name_clean = if rp_name.trim().is_empty() {
+        rp_id.to_string()
+    } else {
+        rp_name.trim().to_string()
+    };
+    let user_name_clean = user_name.trim().to_string();
+    let user_display_clean = if user_display_name.trim().is_empty() {
+        user_name_clean.clone()
+    } else {
+        user_display_name.trim().to_string()
+    };
+
+    let credential = PasskeyCredential {
+        credential_id: cred_uuid.to_string(),
+        rp_id: rp_id.to_string(),
+        rp_name: rp_name_clean,
+        user_handle: STANDARD.encode(user_id_bytes),
+        user_name: user_name_clean,
+        user_display_name: user_display_clean,
+        algorithm: chosen_alg,
+        private_key_pkcs8: private_key_pkcs8_b64u,
+        public_key_spki: public_key_spki_b64u,
+        sign_count,
+        discoverable,
+        aaguid: KEYSMITH_AAGUID_STR.to_string(),
+        transports: transports.clone(),
+        backed_up: true,
+        created_at: Utc::now().to_rfc3339(),
+        last_used_at: None,
+    };
+
+    Ok(GeneratedPasskeyMaterial {
+        credential,
+        cred_id_bytes,
+        auth_data,
+        attestation_object,
+        transports,
+    })
+}
+
+/// Generate a new WebAuthn ES256 (-7) or Ed25519 (-8) Passkey credential and attestation response.
+pub fn create_passkey_credential(
+    params: &PasskeyCreateParams,
+) -> Result<PasskeyCreateOutput, CoreError> {
+    let rp_id = normalize_rp_id(&params.rp_id);
+    let origin = params.origin.trim().to_string();
+    if !rp_id_matches_origin_ext(&rp_id, &origin, &params.custom_equivalent_domains) {
+        return Err(CoreError::Validation(format!(
+            "Passkey RP ID ({rp_id}) 与页面源 ({origin}) 不匹配"
+        )));
+    }
+    let chosen_alg = choose_cose_algorithm(&params.pub_key_cred_params)?;
+    let user_id_bytes = decode_b64u_or_b64(&params.user_id_b64u)?;
+
+    let generated = generate_passkey_material(
+        &rp_id,
+        &params.rp_name,
+        &user_id_bytes,
+        &params.user_name,
+        &params.user_display_name,
+        chosen_alg,
+        params.discoverable,
+    )?;
     let client_data_json = build_client_data_json(
         "webauthn.create",
         &params.challenge_b64u,
@@ -617,45 +705,13 @@ pub fn create_passkey_credential(
         params.cross_origin,
     )?;
 
-    let transports = vec!["internal".to_string(), "hybrid".to_string()];
-    let rp_name = if params.rp_name.trim().is_empty() {
-        rp_id.clone()
-    } else {
-        params.rp_name.trim().to_string()
-    };
-    let user_name = params.user_name.trim().to_string();
-    let user_display_name = if params.user_display_name.trim().is_empty() {
-        user_name.clone()
-    } else {
-        params.user_display_name.trim().to_string()
-    };
-
     let prf_ext = build_prf_extension_result(
-        &private_key_pkcs8_b64u,
+        &generated.credential.private_key_pkcs8,
         true,
         params.prf_requested,
         params.prf_eval_first_b64u.as_deref(),
         params.prf_eval_second_b64u.as_deref(),
     )?;
-
-    let credential = PasskeyCredential {
-        credential_id: cred_uuid.to_string(),
-        rp_id: rp_id.clone(),
-        rp_name,
-        user_handle: STANDARD.encode(&user_id_bytes),
-        user_name,
-        user_display_name,
-        algorithm: chosen_alg,
-        private_key_pkcs8: private_key_pkcs8_b64u,
-        public_key_spki: public_key_spki_b64u.clone(),
-        sign_count,
-        discoverable: params.discoverable,
-        aaguid: KEYSMITH_AAGUID_STR.to_string(),
-        transports: transports.clone(),
-        backed_up: true,
-        created_at: Utc::now().to_rfc3339(),
-        last_used_at: None,
-    };
 
     let attachment = match params.authenticator_attachment.as_deref().map(str::trim) {
         Some("cross-platform") => "cross-platform",
@@ -671,6 +727,7 @@ pub fn create_passkey_credential(
         ext_results["prf"] = prf_val;
     }
 
+    let cred_id_b64u = encode_b64u(&generated.cred_id_bytes);
     let response_json = json!({
         "id": cred_id_b64u,
         "rawId": cred_id_b64u,
@@ -678,18 +735,125 @@ pub fn create_passkey_credential(
         "authenticatorAttachment": attachment,
         "response": {
             "clientDataJSON": encode_b64u(&client_data_json),
-            "attestationObject": encode_b64u(&attestation_object),
-            "authenticatorData": encode_b64u(&auth_data),
-            "publicKey": public_key_spki_b64u,
+            "attestationObject": encode_b64u(&generated.attestation_object),
+            "authenticatorData": encode_b64u(&generated.auth_data),
+            "publicKey": generated.credential.public_key_spki,
             "publicKeyAlgorithm": chosen_alg,
-            "transports": transports,
+            "transports": generated.transports,
         },
         "clientExtensionResults": ext_results,
     });
 
     Ok(PasskeyCreateOutput {
-        credential,
+        credential: generated.credential,
         response_json,
+    })
+}
+
+/// Create a Passkey credential directly from an Apple-supplied 32-byte `clientDataHash`.
+pub fn create_passkey_with_client_data_hash(
+    client_data_hash: &[u8],
+    rp_id: &str,
+    rp_name: &str,
+    user_id: &[u8],
+    user_name: &str,
+    user_display_name: &str,
+    pub_key_cred_params: &[i32],
+) -> Result<ApplePasskeyCreateOutput, CoreError> {
+    if client_data_hash.len() != 32 {
+        return Err(CoreError::Validation(format!(
+            "Apple Passkey clientDataHash 长度必须为 32 字节，实际为 {}",
+            client_data_hash.len()
+        )));
+    }
+    let clean_rp_id = normalize_rp_id(rp_id);
+    let chosen_alg = choose_cose_algorithm(pub_key_cred_params)?;
+    let generated = generate_passkey_material(
+        &clean_rp_id,
+        rp_name,
+        user_id,
+        user_name,
+        user_display_name,
+        chosen_alg,
+        true,
+    )?;
+
+    Ok(ApplePasskeyCreateOutput {
+        credential: generated.credential,
+        credential_id: generated.cred_id_bytes,
+        attestation_object: generated.attestation_object,
+        authenticator_data: generated.auth_data,
+        client_data_hash: client_data_hash.to_vec(),
+    })
+}
+
+struct SignedPasskeyAssertion {
+    next_sign_count: u32,
+    credential_id: Vec<u8>,
+    user_handle: Vec<u8>,
+    authenticator_data: Vec<u8>,
+    signature: Vec<u8>,
+}
+
+fn sign_passkey_assertion(
+    passkey: &PasskeyCredential,
+    rp_id: &str,
+    client_data_hash: &[u8],
+    custom_equivalent_domains: &[Vec<String>],
+) -> Result<SignedPasskeyAssertion, CoreError> {
+    let clean_rp_id = normalize_rp_id(rp_id);
+    if clean_rp_id.is_empty() {
+        return Err(CoreError::Validation("缺少 WebAuthn RP ID".to_string()));
+    }
+    let stored_rp = normalize_rp_id(&passkey.rp_id);
+    if stored_rp != clean_rp_id
+        && !domains_are_equivalent(&stored_rp, &clean_rp_id, custom_equivalent_domains)
+    {
+        return Err(CoreError::Validation(format!(
+            "Passkey 所属域名 ({}) 与请求 RP ID ({clean_rp_id}) 不一致",
+            passkey.rp_id
+        )));
+    }
+    if passkey.algorithm != COSE_ALG_ES256 && passkey.algorithm != COSE_ALG_EDDSA {
+        return Err(CoreError::Validation(format!(
+            "当前仅支持 ES256 (-7) 与 Ed25519 (-8) Passkey 签名，不支持算法 {}",
+            passkey.algorithm
+        )));
+    }
+
+    let next_sign_count = passkey.sign_count.saturating_add(1);
+    let rp_hash = Sha256::digest(clean_rp_id.as_bytes());
+
+    // Flags: UP (0x01) | UV (0x04) | BE (0x08) | BS (0x10) = 0x1d
+    let flags: u8 = 0x1d;
+    let mut auth_data = Vec::with_capacity(37);
+    auth_data.extend_from_slice(&rp_hash);
+    auth_data.push(flags);
+    auth_data.extend_from_slice(&next_sign_count.to_be_bytes());
+
+    let mut signed_payload = Vec::with_capacity(auth_data.len() + client_data_hash.len());
+    signed_payload.extend_from_slice(&auth_data);
+    signed_payload.extend_from_slice(client_data_hash);
+
+    let signature = if passkey.algorithm == COSE_ALG_EDDSA {
+        let ed_key = decode_ed25519_signing_key(&passkey.private_key_pkcs8)?;
+        let sig = ed_key.sign(&signed_payload);
+        sig.to_bytes().to_vec()
+    } else {
+        let signing_key = decode_pkcs8_signing_key(&passkey.private_key_pkcs8)?;
+        let sig: DerSignature = signing_key.sign(&signed_payload);
+        sig.as_bytes().to_vec()
+    };
+
+    let credential_id = decode_credential_id_bytes(&passkey.credential_id)?;
+    let user_handle = decode_b64u_or_b64(&passkey.user_handle).unwrap_or_default();
+
+    Ok(SignedPasskeyAssertion {
+        next_sign_count,
+        credential_id,
+        user_handle,
+        authenticator_data: auth_data,
+        signature,
     })
 }
 
@@ -706,23 +870,6 @@ pub fn assert_passkey_credential(
             "Passkey RP ID ({rp_id}) 与页面源 ({origin}) 不匹配"
         )));
     }
-    let stored_rp = normalize_rp_id(&passkey.rp_id);
-    if stored_rp != rp_id
-        && !domains_are_equivalent(&stored_rp, &rp_id, &params.custom_equivalent_domains)
-    {
-        return Err(CoreError::Validation(format!(
-            "Passkey 所属域名 ({}) 与请求 RP ID ({rp_id}) 不一致",
-            passkey.rp_id
-        )));
-    }
-    if passkey.algorithm != COSE_ALG_ES256 && passkey.algorithm != COSE_ALG_EDDSA {
-        return Err(CoreError::Validation(format!(
-            "当前仅支持 ES256 (-7) 与 Ed25519 (-8) Passkey 签名，不支持算法 {}",
-            passkey.algorithm
-        )));
-    }
-
-    let next_sign_count = passkey.sign_count.saturating_add(1);
 
     let client_data_json = build_client_data_json(
         "webauthn.get",
@@ -731,36 +878,18 @@ pub fn assert_passkey_credential(
         params.cross_origin,
     )?;
     let client_data_hash = Sha256::digest(&client_data_json);
-    let rp_hash = Sha256::digest(rp_id.as_bytes());
+    let signed = sign_passkey_assertion(
+        passkey,
+        &rp_id,
+        &client_data_hash,
+        &params.custom_equivalent_domains,
+    )?;
 
-    // Flags: UP (0x01) | UV (0x04) | BE (0x08) | BS (0x10) = 0x1d
-    let flags: u8 = 0x1d;
-    let mut auth_data = Vec::with_capacity(37);
-    auth_data.extend_from_slice(&rp_hash);
-    auth_data.push(flags);
-    auth_data.extend_from_slice(&next_sign_count.to_be_bytes());
-
-    let mut signed_payload = Vec::with_capacity(auth_data.len() + client_data_hash.len());
-    signed_payload.extend_from_slice(&auth_data);
-    signed_payload.extend_from_slice(&client_data_hash);
-
-    let signature_b64u = if passkey.algorithm == COSE_ALG_EDDSA {
-        let ed_key = decode_ed25519_signing_key(&passkey.private_key_pkcs8)?;
-        let sig = ed_key.sign(&signed_payload);
-        encode_b64u(&sig.to_bytes())
-    } else {
-        let signing_key = decode_pkcs8_signing_key(&passkey.private_key_pkcs8)?;
-        let sig: DerSignature = signing_key.sign(&signed_payload);
-        encode_b64u(sig.as_bytes())
-    };
-
-    let cred_id_bytes = decode_credential_id_bytes(&passkey.credential_id)?;
-    let cred_id_b64u = encode_b64u(&cred_id_bytes);
-    let user_handle_bytes = decode_b64u_or_b64(&passkey.user_handle).unwrap_or_default();
-    let user_handle_val = if user_handle_bytes.is_empty() {
+    let cred_id_b64u = encode_b64u(&signed.credential_id);
+    let user_handle_val = if signed.user_handle.is_empty() {
         Value::Null
     } else {
-        Value::String(encode_b64u(&user_handle_bytes))
+        Value::String(encode_b64u(&signed.user_handle))
     };
 
     let mut ext_results = serde_json::Map::new();
@@ -781,12 +910,164 @@ pub fn assert_passkey_credential(
         "authenticatorAttachment": "platform",
         "response": {
             "clientDataJSON": encode_b64u(&client_data_json),
-            "authenticatorData": encode_b64u(&auth_data),
-            "signature": signature_b64u,
+            "authenticatorData": encode_b64u(&signed.authenticator_data),
+            "signature": encode_b64u(&signed.signature),
             "userHandle": user_handle_val,
         },
         "clientExtensionResults": Value::Object(ext_results),
     });
 
-    Ok((next_sign_count, response_json))
+    Ok((signed.next_sign_count, response_json))
+}
+
+/// Sign a WebAuthn assertion directly over an Apple-supplied 32-byte `clientDataHash`.
+pub fn assert_passkey_with_client_data_hash(
+    passkey: &PasskeyCredential,
+    client_data_hash: &[u8],
+    rp_id: &str,
+    custom_equivalent_domains: &[Vec<String>],
+) -> Result<ApplePasskeyAssertOutput, CoreError> {
+    if client_data_hash.len() != 32 {
+        return Err(CoreError::Validation(format!(
+            "Apple Passkey clientDataHash 长度必须为 32 字节，实际为 {}",
+            client_data_hash.len()
+        )));
+    }
+    let signed = sign_passkey_assertion(
+        passkey,
+        rp_id,
+        client_data_hash,
+        custom_equivalent_domains,
+    )?;
+    Ok(ApplePasskeyAssertOutput {
+        next_sign_count: signed.next_sign_count,
+        credential_id: signed.credential_id,
+        user_handle: signed.user_handle,
+        authenticator_data: signed.authenticator_data,
+        signature: signed.signature,
+        client_data_hash: client_data_hash.to_vec(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p256::ecdsa::{signature::Verifier as _, VerifyingKey as P256VerifyingKey};
+    use p256::pkcs8::DecodePublicKey;
+
+    #[test]
+    fn apple_passkey_es256_client_data_hash_create_and_assert_verified() {
+        let client_data_hash = Sha256::digest(b"apple-es256-test-client-data").to_vec();
+        let created = create_passkey_with_client_data_hash(
+            &client_data_hash,
+            "github.com",
+            "GitHub",
+            b"user-handle-42",
+            "cherry@example.com",
+            "Cherry",
+            &[COSE_ALG_ES256],
+        )
+        .unwrap();
+
+        assert_eq!(created.credential.algorithm, COSE_ALG_ES256);
+        assert_eq!(created.credential_id.len(), 16);
+        assert!(created.authenticator_data.len() > 37);
+        assert!(!created.attestation_object.is_empty());
+
+        let asserted = assert_passkey_with_client_data_hash(
+            &created.credential,
+            &client_data_hash,
+            "github.com",
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(asserted.next_sign_count, 1);
+        assert_eq!(asserted.credential_id, created.credential_id);
+        assert_eq!(asserted.user_handle, b"user-handle-42");
+        assert_eq!(asserted.authenticator_data.len(), 37);
+        assert_eq!(asserted.client_data_hash, client_data_hash);
+
+        let spki_der = decode_b64u_or_b64(&created.credential.public_key_spki).unwrap();
+        let pub_key = p256::PublicKey::from_public_key_der(&spki_der).unwrap();
+        let verifying_key = P256VerifyingKey::from(&pub_key);
+        let sig = DerSignature::from_bytes(&asserted.signature).unwrap();
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&asserted.authenticator_data);
+        payload.extend_from_slice(&client_data_hash);
+        verifying_key.verify(&payload, &sig).unwrap();
+    }
+
+    #[test]
+    fn apple_passkey_ed25519_client_data_hash_create_and_assert_verified() {
+        let client_data_hash = Sha256::digest(b"apple-ed25519-test-client-data").to_vec();
+        let created = create_passkey_with_client_data_hash(
+            &client_data_hash,
+            "example.org",
+            "Example",
+            b"ed-user-99",
+            "alice@example.org",
+            "Alice",
+            &[COSE_ALG_EDDSA],
+        )
+        .unwrap();
+
+        assert_eq!(created.credential.algorithm, COSE_ALG_EDDSA);
+
+        let asserted = assert_passkey_with_client_data_hash(
+            &created.credential,
+            &client_data_hash,
+            "example.org",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(asserted.signature.len(), 64);
+
+        let spki_der = decode_b64u_or_b64(&created.credential.public_key_spki).unwrap();
+        // RFC 8410 Ed25519 SPKI DER is 12-byte header + 32-byte raw public key
+        let raw_pub: [u8; 32] = spki_der[spki_der.len() - 32..].try_into().unwrap();
+        let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&raw_pub).unwrap();
+        let sig = ed25519_dalek::Signature::from_slice(&asserted.signature).unwrap();
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&asserted.authenticator_data);
+        payload.extend_from_slice(&client_data_hash);
+        verifying_key.verify_strict(&payload, &sig).unwrap();
+    }
+
+    #[test]
+    fn apple_passkey_rejects_invalid_hash_len_and_rp_mismatch() {
+        assert!(create_passkey_with_client_data_hash(
+            &[1, 2, 3],
+            "github.com",
+            "GitHub",
+            b"u1",
+            "u",
+            "U",
+            &[],
+        )
+        .is_err());
+
+        let valid_hash = [7u8; 32];
+        let created = create_passkey_with_client_data_hash(
+            &valid_hash,
+            "github.com",
+            "GitHub",
+            b"u1",
+            "u",
+            "U",
+            &[],
+        )
+        .unwrap();
+
+        assert!(
+            assert_passkey_with_client_data_hash(&created.credential, &valid_hash, "evil.com", &[])
+                .is_err()
+        );
+        assert!(
+            assert_passkey_with_client_data_hash(&created.credential, &[0u8; 16], "github.com", &[])
+                .is_err()
+        );
+    }
 }

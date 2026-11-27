@@ -56,6 +56,7 @@ pub struct StoredAccount {
     pub last_sync_at: Option<String>,
     pub biometric_enabled: bool,
     pub auto_lock_minutes: u32,
+    pub auto_lock_seconds: Option<i32>,
     pub clipboard_clear_seconds: u64,
     pub device_identifier: String,
     pub is_active: bool,
@@ -103,6 +104,7 @@ impl StoredAccount {
             last_sync_at: None,
             biometric_enabled: false,
             auto_lock_minutes: 15,
+            auto_lock_seconds: None,
             clipboard_clear_seconds: 30,
             device_identifier,
             is_active: true,
@@ -212,7 +214,8 @@ const ACCOUNT_COLUMNS: &str = r#"
     is_active, close_to_tray, lock_on_sleep, screen_capture_protected,
     vibrancy_enabled, favicon_enabled, quick_access_shortcut,
     biometric_max_days, launch_at_login, last_master_password_unlock_at,
-    travel_mode, trash_auto_purge_days, ssh_biometric_confirm
+    travel_mode, trash_auto_purge_days, ssh_biometric_confirm,
+    auto_lock_seconds
 "#;
 
 fn map_account_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredAccount> {
@@ -234,6 +237,7 @@ fn map_account_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredAccount> {
         last_sync_at: row.get(13)?,
         biometric_enabled: row.get::<_, i64>(14)? != 0,
         auto_lock_minutes: row.get::<_, i64>(15)? as u32,
+        auto_lock_seconds: row.get::<_, Option<i64>>(31)?.map(|v| v as i32),
         clipboard_clear_seconds: row.get::<_, i64>(16)? as u64,
         device_identifier: row.get(17)?,
         is_active: row.get::<_, i64>(18)? != 0,
@@ -312,6 +316,8 @@ impl Storage {
         }
         let conn = Connection::open(path)
             .map_err(|e| CoreError::Storage(format!("打开 SQLite 数据库失败: {e}")))?;
+        conn.execute_batch("PRAGMA busy_timeout = 5000;")
+            .map_err(|e| CoreError::Storage(format!("设置 SQLite busy_timeout 失败: {e}")))?;
         harden_sqlite_sidecars(path);
         let storage = Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -360,6 +366,7 @@ impl Storage {
             .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
         conn.execute_batch(
             r#"
+            PRAGMA busy_timeout = 5000;
             PRAGMA journal_mode = WAL;
             PRAGMA foreign_keys = ON;
 
@@ -394,7 +401,8 @@ impl Storage {
                 last_master_password_unlock_at TEXT,
                 travel_mode INTEGER NOT NULL DEFAULT 0,
                 trash_auto_purge_days INTEGER NOT NULL DEFAULT 30,
-                ssh_biometric_confirm INTEGER NOT NULL DEFAULT 1
+                ssh_biometric_confirm INTEGER NOT NULL DEFAULT 1,
+                auto_lock_seconds INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS vaults (
@@ -501,6 +509,7 @@ impl Storage {
             "ALTER TABLE accounts ADD COLUMN travel_mode INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE accounts ADD COLUMN trash_auto_purge_days INTEGER NOT NULL DEFAULT 30",
             "ALTER TABLE accounts ADD COLUMN ssh_biometric_confirm INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE accounts ADD COLUMN auto_lock_seconds INTEGER",
             "ALTER TABLE vaults ADD COLUMN is_organization INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE vaults ADD COLUMN organization_id TEXT",
         ];
@@ -618,11 +627,12 @@ impl Storage {
                 is_active, close_to_tray, lock_on_sleep, screen_capture_protected,
                 vibrancy_enabled, favicon_enabled, quick_access_shortcut,
                 biometric_max_days, launch_at_login, last_master_password_unlock_at,
-                travel_mode, trash_auto_purge_days, ssh_biometric_confirm
+                travel_mode, trash_auto_purge_days, ssh_biometric_confirm,
+                auto_lock_seconds
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
                 ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31
+                ?29, ?30, ?31, ?32
             )
             ON CONFLICT(id) DO UPDATE SET
                 server_url = excluded.server_url,
@@ -654,7 +664,8 @@ impl Storage {
                 last_master_password_unlock_at = excluded.last_master_password_unlock_at,
                 travel_mode = excluded.travel_mode,
                 trash_auto_purge_days = excluded.trash_auto_purge_days,
-                ssh_biometric_confirm = excluded.ssh_biometric_confirm
+                ssh_biometric_confirm = excluded.ssh_biometric_confirm,
+                auto_lock_seconds = excluded.auto_lock_seconds
             "#,
             params![
                 account.id,
@@ -688,6 +699,7 @@ impl Storage {
                 if account.travel_mode { 1 } else { 0 },
                 account.trash_auto_purge_days as i64,
                 if account.ssh_biometric_confirm { 1 } else { 0 },
+                account.auto_lock_seconds.map(|v| v as i64),
             ],
         )
         .map_err(|e| CoreError::Storage(format!("写入账户信息失败: {e}")))?;

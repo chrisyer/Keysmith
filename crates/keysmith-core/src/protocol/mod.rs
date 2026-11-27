@@ -890,8 +890,16 @@ pub fn validate_favicon_host(raw: &str) -> Option<String> {
 
 impl VaultwardenClient {
     pub fn new() -> Self {
+        Self::with_user_agent(None)
+    }
+
+    pub fn with_user_agent(user_agent: Option<&str>) -> Self {
+        let ua = user_agent
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("Keysmith/0.1.4 (macOS; Tauri)");
         let http = Client::builder()
-            .user_agent("Keysmith/0.1.4 (macOS; Tauri)")
+            .user_agent(ua)
             .timeout(std::time::Duration::from_secs(20))
             .build()
             .unwrap_or_else(|_| Client::new());
@@ -1187,6 +1195,30 @@ impl VaultwardenClient {
         two_factor_code: Option<&str>,
         allow_insecure_http: bool,
     ) -> Result<TokenResponse, CoreError> {
+        self.login_password_with_2fa(
+            server_url,
+            email,
+            master_password_hash,
+            device_identifier,
+            Some(0),
+            two_factor_code,
+            false,
+            allow_insecure_http,
+        )
+        .await
+    }
+
+    pub async fn login_password_with_2fa(
+        &self,
+        server_url: &str,
+        email: &str,
+        master_password_hash: &str,
+        device_identifier: &str,
+        two_factor_provider: Option<u8>,
+        two_factor_token: Option<&str>,
+        two_factor_remember: bool,
+        allow_insecure_http: bool,
+    ) -> Result<TokenResponse, CoreError> {
         let base = Self::normalize_base_url_with_policy(server_url, allow_insecure_http)?;
         let normalized = normalize_email(email);
         let auth_email = URL_SAFE_NO_PAD.encode(normalized.as_bytes());
@@ -1202,12 +1234,16 @@ impl VaultwardenClient {
             ("deviceName", "Keysmith".to_string()),
         ];
 
-        if let Some(code) = two_factor_code {
+        if let Some(code) = two_factor_token {
             let clean = code.trim();
             if !clean.is_empty() {
-                form.push(("twoFactorProvider", "0".to_string()));
+                let provider = two_factor_provider.unwrap_or(0);
+                form.push(("twoFactorProvider", provider.to_string()));
                 form.push(("twoFactorToken", clean.to_string()));
-                form.push(("twoFactorRemember", "0".to_string()));
+                form.push((
+                    "twoFactorRemember",
+                    if two_factor_remember { "1" } else { "0" }.to_string(),
+                ));
             }
         }
 

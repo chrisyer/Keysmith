@@ -3517,3 +3517,73 @@ async fn security_ssh_defaults_and_user_presence_fail_closed() {
         .await
         .is_ok());
 }
+
+#[tokio::test]
+async fn custom_user_agent_and_auto_lock_seconds_persisted_in_sqlite() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let base_url = format!("http://{addr}");
+
+    let server_task = tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut buf = vec![0u8; 4096];
+        let n = sock.read(&mut buf).await.unwrap();
+        let req = String::from_utf8_lossy(&buf[..n]).to_string();
+        assert!(
+            req.to_ascii_lowercase()
+                .contains("user-agent: keysmith/0.1.4 (ios; swiftui)"),
+            "missing custom User-Agent in request: {req}"
+        );
+        let body = r#"{"version":"2026.6.0","settings":{"disableUserRegistration":false}}"#;
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        sock.write_all(resp.as_bytes()).await.unwrap();
+    });
+
+    let tmp_dir = std::env::temp_dir().join(format!("keysmith_ua_test_{}", uuid::Uuid::new_v4()));
+    let db_path = tmp_dir.join("keysmith.db");
+    let storage = Storage::open(&db_path).unwrap();
+
+    let kdf = KdfConfig {
+        kdf: 0,
+        kdf_iterations: 5_000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    };
+    let mk = derive_master_key("UaPass#2026!", "ua@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let mut acc = make_test_account(
+        "acc-ua",
+        "ua@example.com",
+        &base_url,
+        &kdf,
+        protect_user_symmetric_key(&usk, &smk).unwrap(),
+    );
+    acc.auto_lock_seconds = Some(15);
+    storage.upsert_account(&acc).unwrap();
+
+    let reloaded = storage.load_account_by_id("acc-ua").unwrap().unwrap();
+    assert_eq!(reloaded.auto_lock_seconds, Some(15));
+
+    let core = AppCore::with_storage_and_client_info(
+        storage,
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+        Some("Keysmith/0.1.4 (iOS; SwiftUI)".to_string()),
+    )
+    .unwrap();
+    assert_eq!(core.session_get_state().auto_lock_seconds, Some(15));
+
+    let checked = core
+        .auth_check_server_with_policy(&base_url, true)
+        .await
+        .unwrap();
+    assert!(checked.ok);
+    server_task.await.unwrap();
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}

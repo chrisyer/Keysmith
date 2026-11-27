@@ -557,6 +557,8 @@ pub struct SessionState {
     pub server_url: String,
     pub biometric_enabled: bool,
     pub auto_lock_minutes: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_lock_seconds: Option<i32>,
     pub clipboard_clear_seconds: u64,
     pub last_sync_at: String,
     pub kdf_type: String,
@@ -581,6 +583,8 @@ pub struct SessionState {
 pub struct SessionPreferencesPatch {
     pub biometric_enabled: Option<bool>,
     pub auto_lock_minutes: Option<u32>,
+    #[serde(default)]
+    pub auto_lock_seconds: Option<i32>,
     pub clipboard_clear_seconds: Option<u64>,
     pub close_to_tray: Option<bool>,
     pub lock_on_sleep: Option<bool>,
