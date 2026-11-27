@@ -62,6 +62,11 @@ export const ko = {
     demoHint: '데모 마스터 비밀번호: {pw}',
     savedAccountsQuickSwitch: '저장된 계정',
     cancelAddAccount: '취소',
+    insecureHttpWarning: '로컬이 아닌 서버에 암호화되지 않은 HTTP 연결이 감지되었습니다. HTTPS를 사용하지 않으면 자격 증명과 토큰이 네트워크에서 가로채일 수 있습니다.',
+    insecureHttpConfirm: '위험을 이해했으며 이 서버에 암호화되지 않은 HTTP 사용을 허용합니다',
+    insecureHttpRequired: '계속하기 전에 암호화되지 않은 HTTP 위험 경고에 동의하거나 https:// 주소로 변경하세요.',
+    weakKdfWarning: '약한 KDF 설정이 감지되었습니다(PBKDF2 {iterations}회 < 권장 600,000회). 서버에서 KDF 반복 횟수를 높이는 것이 좋습니다.',
+    masterPasswordTooWeak: '마스터 비밀번호는 최소 12자 이상이어야 하며 대문자, 소문자, 숫자, 기호 중 2가지 이상을 포함해야 합니다.',
   },
   lock: {
     unlockPlaceholder: '마스터 비밀번호 입력',

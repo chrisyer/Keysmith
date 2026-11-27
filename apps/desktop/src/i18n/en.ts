@@ -62,6 +62,11 @@ export const en = {
     demoHint: 'Demo master password: {pw}',
     savedAccountsQuickSwitch: 'Saved Accounts',
     cancelAddAccount: 'Cancel',
+    insecureHttpWarning: 'Insecure HTTP connection detected for a non-local server. Credentials and tokens could be intercepted on the network unless you use HTTPS.',
+    insecureHttpConfirm: 'I understand the risk and allow unencrypted HTTP for this server',
+    insecureHttpRequired: 'Please confirm the unencrypted HTTP risk warning before continuing, or switch to https://.',
+    weakKdfWarning: 'Weak KDF detected (PBKDF2 {iterations} iterations < 600,000). Recommend upgrading KDF settings on your server.',
+    masterPasswordTooWeak: 'Master password must be at least 12 characters and include at least 2 character classes (uppercase, lowercase, digits, symbols).',
   },
   lock: {
     unlockPlaceholder: 'Enter master password',

@@ -61,7 +61,7 @@ pub fn write_nmh_message<W: Write>(writer: &mut W, payload: &[u8]) -> Result<()>
 
 /// Runs the Chrome Native Messaging Host stdio loop, bridging to `keysmith.sock`.
 pub async fn run_nmh() -> Result<()> {
-    let client = SocketClient::from_default_path()?;
+    let client = SocketClient::from_nmh_default_path()?;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(16);
 
     // Blocking stdin reader thread so stdio doesn't stall the tokio runtime

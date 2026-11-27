@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use keysmith_core::domain::{AuthStatus, GeneratorOptions, SyncStateKind};
 use keysmith_core::error::CoreError;
-use keysmith_core::protocol::signalr::{run_signalr_session, SignalREvent};
+use keysmith_core::protocol::signalr::{run_signalr_session_with_policy, SignalREvent};
 use keysmith_core::AppCore;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
@@ -32,8 +32,8 @@ use crate::events::{
 };
 use crate::ipc_socket::spawn_ipc_socket_server;
 use crate::macos::{
-    register_sleep_and_screen_lock_observers, set_app_dock_icon, MacosBiometricKeyStore,
-    MacosClipboard,
+    cleanup_stale_qr_temp_files, register_sleep_and_screen_lock_observers, set_app_dock_icon,
+    MacosBiometricKeyStore, MacosClipboard,
 };
 
 const DOCK_ICON_PNG: &[u8] = include_bytes!("../icons/128x128@2x.png");
@@ -672,12 +672,12 @@ fn spawn_signalr_supervisor(
             let session = core.session_get_state();
             let auto_sync = core.is_auto_sync_enabled();
             let creds = if session.status == AuthStatus::Unlocked && auto_sync {
-                core.signalr_credentials()
+                core.signalr_credentials_with_policy()
             } else {
                 None
             };
 
-            let Some((server_url, access_token)) = creds else {
+            let Some((server_url, access_token, allow_insecure_http)) = creds else {
                 core.set_signalr_connected(false);
                 let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
                 reconnect_delay_secs = 5;
@@ -699,7 +699,14 @@ fn spawn_signalr_supervisor(
             let url_c = server_url.clone();
             let tok_c = access_token.clone();
             let session_task = tauri::async_runtime::spawn(async move {
-                let res = run_signalr_session(&url_c, &tok_c, ev_tx, shutdown_rx).await;
+                let res = run_signalr_session_with_policy(
+                    &url_c,
+                    &tok_c,
+                    allow_insecure_http,
+                    ev_tx,
+                    shutdown_rx,
+                )
+                .await;
                 let _ = res_tx.send(res);
             });
 
@@ -716,11 +723,11 @@ fn spawn_signalr_supervisor(
                         let st = core.session_get_state();
                         let next_auto = core.is_auto_sync_enabled();
                         let next_creds = if st.status == AuthStatus::Unlocked && next_auto {
-                            core.signalr_credentials()
+                            core.signalr_credentials_with_policy()
                         } else {
                             None
                         };
-                        if next_creds.as_ref() != Some(&(server_url.clone(), access_token.clone())) {
+                        if next_creds.as_ref() != Some(&(server_url.clone(), access_token.clone(), allow_insecure_http)) {
                             let _ = shutdown_tx.send(true);
                             should_exit_on_poke = true;
                             break;
@@ -936,6 +943,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             set_app_dock_icon(DOCK_ICON_PNG);
+            cleanup_stale_qr_temp_files();
 
             let biometric = Arc::new(MacosBiometricKeyStore::new());
             let clipboard = Arc::new(MacosClipboard::new(handle.clone()));
@@ -1036,6 +1044,7 @@ pub fn run() {
             register_sleep_and_screen_lock_observers(Arc::new(move |reason| {
                 let st = sleep_core.session_get_state();
                 if st.lock_on_sleep && st.status == AuthStatus::Unlocked {
+                    crate::ipc_socket::clear_ssh_approval_cache();
                     destroy_floating_windows_and_wipe(&sleep_handle);
                     if sleep_core.session_lock(reason).is_ok() {
                         set_main_window_compact(&sleep_handle, true);
@@ -1060,6 +1069,7 @@ pub fn run() {
                 loop {
                     tokio::time::sleep(Duration::from_secs(10)).await;
                     if let Ok(true) = bg_core.check_auto_lock() {
+                        crate::ipc_socket::clear_ssh_approval_cache();
                         destroy_floating_windows_and_wipe(&bg_handle);
                         set_main_window_compact(&bg_handle, true);
                         let next = bg_poke.borrow().wrapping_add(1);
@@ -1109,7 +1119,6 @@ pub fn run() {
             commands::auth_login,
             commands::auth_register,
             commands::auth_logout,
-            commands::auth_passkey_login,
             commands::account_list,
             commands::account_switch,
             commands::session_get_state,
@@ -1177,10 +1186,6 @@ pub fn run() {
             commands::clipboard_copy_secret,
             commands::clipboard_clear_now,
             commands::clipboard_read_image_base64,
-            commands::account_passkey_list,
-            commands::account_passkey_register,
-            commands::account_passkey_rename,
-            commands::account_passkey_delete,
             commands::account_update_profile,
             commands::window_main_ready,
             commands::window_set_compact_lock,
@@ -1215,6 +1220,7 @@ pub fn run() {
                 show_main_window(app_handle);
             }
             RunEvent::Exit => {
+                crate::ipc_socket::cleanup_ipc_tokens();
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     let _ = state.core.checkpoint_storage();
                 }

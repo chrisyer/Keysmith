@@ -7,33 +7,29 @@ use base64::{
     engine::general_purpose::STANDARD as B64, engine::general_purpose::URL_SAFE_NO_PAD, Engine as _,
 };
 use chrono::{DateTime, Duration, Utc};
-use rand::{rngs::OsRng, RngCore};
-use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
-use rsa::RsaPrivateKey;
 use tokio::sync::Mutex as AsyncMutex;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{
-    decrypt_bytes, decrypt_org_symmetric_key, derive_master_key, derive_master_password_hash,
-    derive_send_key, encrypt_bytes, encrypt_send_buffer, generate_rsa_keypair, generate_send_seed,
-    normalize_email, protect_user_symmetric_key, stretch_master_key, unprotect_user_symmetric_key,
-    KdfConfig, UserSymmetricKey,
+    decrypt_bytes_authenticated, decrypt_org_symmetric_key, derive_master_key,
+    derive_master_password_hash, derive_send_key, encrypt_bytes, encrypt_send_buffer,
+    generate_rsa_keypair, generate_send_seed, normalize_email, protect_user_symmetric_key,
+    stretch_master_key, unprotect_user_symmetric_key, KdfConfig, UserSymmetricKey,
 };
 use crate::domain::codec::{
     cipher_to_item, collection_to_vault, decode_send_dto, draft_to_cipher, encode_send_payload,
     encode_vault_meta, encode_vault_name, folder_to_vault, new_uuid,
 };
 use crate::domain::{
-    format_size_bytes, item_to_summary, AccountPasskey, AccountPasskeyListResponse,
-    AccountProfileResponse, AccountSummary, AppSettings, AppSettingsPatch,
-    AttachmentDownloadResult, AuthStatus, CollectionInfo, ExportResult, FieldPurpose, FieldType,
-    GeneratorHistoryEntry, GeneratorOptions, GeneratorResult, ImportSummary, ItemAttachment,
-    ItemCategory, ItemDetail, ItemDraft, ItemFilter, ItemStats, ItemSummary, LocalSnapshotInfo,
-    MaskedEmailConfig, OrganizationInfo, SendCreateFileInput, SendCreateTextInput, SendItem,
-    SendType, SendUpdateInput, ServerCheckResult, SessionPreferencesPatch, SessionState, SortBy,
-    SshIdentity, SshKeyPair, SyncStateKind, SyncStatus, TagCount, TotpCode, Vault,
-    WatchtowerFlagsPatch, WatchtowerReport, DEFAULT_PERSONAL_VAULT_ID,
-    DEFAULT_QUICK_ACCESS_SHORTCUT,
+    format_size_bytes, item_to_summary, AccountProfileResponse, AccountSummary, AppSettings,
+    AppSettingsPatch, AttachmentDownloadResult, AuthStatus, CollectionInfo, ExportResult,
+    FieldPurpose, FieldType, GeneratorHistoryEntry, GeneratorOptions, GeneratorResult,
+    ImportSummary, ItemAttachment, ItemCategory, ItemDetail, ItemDraft, ItemFilter, ItemStats,
+    ItemSummary, LocalSnapshotInfo, MaskedEmailConfig, OrganizationInfo, SendCreateFileInput,
+    SendCreateTextInput, SendItem, SendType, SendUpdateInput, ServerCheckResult,
+    SessionPreferencesPatch, SessionState, SortBy, SshIdentity, SshKeyPair, SyncStateKind,
+    SyncStatus, TagCount, TotpCode, Vault, WatchtowerFlagsPatch, WatchtowerReport,
+    DEFAULT_PERSONAL_VAULT_ID, DEFAULT_QUICK_ACCESS_SHORTCUT,
 };
 use crate::error::CoreError;
 use crate::generator::{generate_masked_email, generate_secret};
@@ -42,8 +38,8 @@ use crate::importers::{
     parse_import_payload_with_auth, EmergencyKitInput,
 };
 use crate::protocol::{
-    CipherDto, CollectionDto, FolderDto, OrganizationDto, RegisterKeysRequest, RegisterRequest,
-    SendDto, SendFileDto, VaultwardenClient,
+    validate_favicon_host, CipherDto, CollectionDto, FolderDto, OrganizationDto,
+    RegisterKeysRequest, RegisterRequest, SendDto, SendFileDto, VaultwardenClient,
 };
 use crate::search::score_search_query;
 use crate::ssh::{ssh_fingerprint_from_public, ssh_generate_ed25519, ssh_sign_ed25519};
@@ -56,8 +52,53 @@ use crate::traits::{BiometricKeyStore, ClipboardManager};
 use crate::watchtower::{check_hibp_breached_sha1_hashes, run_watchtower_audit};
 
 const KEYSMITH_ACCOUNT_RP_ID: &str = "keysmith.local";
-const APPLE_TOUCH_ID_AAGUID: &str = "adce0002-35bc-c60a-648b-0b25f1f05503";
-const YUBIKEY_5_AAGUID: &str = "ee882879-721c-4913-9775-3dfcce97072a";
+
+fn has_sufficient_master_password_complexity(pw: &str) -> bool {
+    let has_lower = pw.chars().any(|c| c.is_lowercase());
+    let has_upper = pw.chars().any(|c| c.is_uppercase());
+    let has_digit = pw.chars().any(|c| c.is_ascii_digit());
+    let has_other = pw
+        .chars()
+        .any(|c| !c.is_lowercase() && !c.is_uppercase() && !c.is_ascii_digit());
+    let classes = u8::from(has_lower) + u8::from(has_upper) + u8::from(has_digit) + u8::from(has_other);
+    classes >= 2
+}
+
+fn encrypt_session_token_opt(
+    usk: &UserSymmetricKey,
+    token: Option<&str>,
+) -> Result<Option<String>, CoreError> {
+    match token.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) if raw.starts_with("2.") && raw.contains('|') => Ok(Some(raw.to_string())),
+        Some(raw) => Ok(Some(usk.encrypt_string(raw)?)),
+        None => Ok(None),
+    }
+}
+
+/// Decrypt an account token stored in SQLite (`2.<iv>|<ct>|<mac>`).
+/// If a legacy plaintext JWT is found (migration from <= v0.1.4), returns its plaintext in memory
+/// along with the newly Type-2 encrypted ciphertext so unlock immediately upgrades SQLite on disk.
+fn decrypt_or_migrate_session_token(
+    usk: &UserSymmetricKey,
+    stored: Option<&str>,
+) -> (Option<Zeroizing<String>>, bool, Option<String>) {
+    let Some(raw) = stored.map(str::trim).filter(|s| !s.is_empty()) else {
+        return (None, false, None);
+    };
+    if raw.starts_with("2.") {
+        match usk.decrypt_string_authenticated(raw) {
+            Ok(plain) => (Some(plain), false, Some(raw.to_string())),
+            Err(_) => (None, false, None),
+        }
+    } else if raw.starts_with("0.") {
+        // Reject unauthenticated Type 0 token ciphertext
+        (None, true, None)
+    } else {
+        // Legacy plaintext token: upgrade to Type 2 EncString
+        let encrypted = usk.encrypt_string(raw).ok();
+        (Some(Zeroizing::new(raw.to_string())), true, encrypted)
+    }
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct TravelStashVault {
@@ -122,6 +163,8 @@ pub fn localized_biometric_reason(lang: &str, kind: &str) -> &'static str {
 
 struct UnlockedMemory {
     usk: UserSymmetricKey,
+    access_token: Option<Zeroizing<String>>,
+    refresh_token: Option<Zeroizing<String>>,
     org_keys: HashMap<String, UserSymmetricKey>,
     ciphers: HashMap<String, CipherDto>,
     items: HashMap<String, ItemDetail>,
@@ -136,6 +179,8 @@ struct UnlockedMemory {
 
 impl Drop for UnlockedMemory {
     fn drop(&mut self) {
+        self.access_token.take();
+        self.refresh_token.take();
         for item in self.items.values_mut() {
             item.title.zeroize();
             item.payload.notes.zeroize();
@@ -221,9 +266,22 @@ impl AppCore {
                 .filter(|s| !s.trim().is_empty())
         });
 
+        let client = VaultwardenClient::new();
+        if let Some(ref acc) = account {
+            let allow_http = storage
+                .get_all_app_settings()
+                .ok()
+                .and_then(|m| m.get(&format!("allow_insecure_http:{}", acc.id)).cloned())
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            if allow_http {
+                client.allow_insecure_origin(&acc.server_url);
+            }
+        }
+
         Ok(Self {
             storage,
-            client: VaultwardenClient::new(),
+            client,
             biometric,
             clipboard,
             state: RwLock::new(CoreState {
@@ -339,7 +397,26 @@ impl AppCore {
         let raw_settings = storage.get_all_app_settings().unwrap_or_default();
         let acc_record = storage.load_account_by_id(account_id)?;
         let travel_mode = acc_record.as_ref().map(|a| a.travel_mode).unwrap_or(false);
-        let enc_priv_opt = acc_record.and_then(|a| a.encrypted_private_key);
+        let enc_priv_opt = acc_record.as_ref().and_then(|a| a.encrypted_private_key.clone());
+        let (access_token, access_migrated, new_enc_access) = decrypt_or_migrate_session_token(
+            &usk,
+            acc_record.as_ref().and_then(|a| a.access_token.as_deref()),
+        );
+        let (refresh_token, refresh_migrated, new_enc_refresh) = decrypt_or_migrate_session_token(
+            &usk,
+            acc_record.as_ref().and_then(|a| a.refresh_token.as_deref()),
+        );
+        if access_migrated || refresh_migrated {
+            if let Some(mut upgraded) = acc_record.clone() {
+                if access_migrated {
+                    upgraded.access_token = new_enc_access;
+                }
+                if refresh_migrated {
+                    upgraded.refresh_token = new_enc_refresh;
+                }
+                let _ = storage.upsert_account(&upgraded);
+            }
+        }
         let personal_travel_safe = raw_settings
             .get(&format!("personal_travel_safe:{account_id}"))
             .map(|v| v != "false")
@@ -479,6 +556,8 @@ impl AppCore {
 
         Ok(UnlockedMemory {
             usk,
+            access_token,
+            refresh_token,
             org_keys,
             ciphers,
             items,
@@ -504,8 +583,33 @@ impl AppCore {
         }
     }
 
+    fn sync_insecure_origin_policy(&self, account_id: &str, server_url: &str) {
+        let allow_http = self
+            .storage
+            .get_all_app_settings()
+            .ok()
+            .and_then(|m| m.get(&format!("allow_insecure_http:{account_id}")).cloned())
+            .map(|v| v == "true")
+            .unwrap_or(false);
+        if allow_http {
+            self.client.allow_insecure_origin(server_url);
+        }
+    }
+
+    fn has_online_session(&self) -> bool {
+        self.read_state()
+            .ok()
+            .and_then(|g| {
+                g.unlocked
+                    .as_ref()
+                    .and_then(|u| u.access_token.as_deref())
+                    .map(|t| !t.trim().is_empty())
+            })
+            .unwrap_or(false)
+    }
+
     /// Execute an authenticated Vaultwarden request; on HTTP 401 automatically refresh the token,
-    /// persist updated tokens, update `CoreState::account`, and retry once.
+    /// persist encrypted tokens, update `CoreState`, and retry once.
     async fn with_fresh_token<T, F, Fut>(
         &self,
         account: &mut StoredAccount,
@@ -515,25 +619,39 @@ impl AppCore {
         F: Fn(String) -> Fut,
         Fut: Future<Output = Result<T, CoreError>>,
     {
-        let token = account
-            .access_token
-            .clone()
-            .ok_or_else(|| CoreError::Unauthorized("缺少访问令牌".to_string()))?;
+        let (token, refresh_tok, usk) = {
+            let guard = self.read_state()?;
+            let unlocked = guard
+                .unlocked
+                .as_ref()
+                .ok_or_else(|| CoreError::Unauthorized("保险库已锁定，无法访问会话令牌".to_string()))?;
+            let tok = unlocked
+                .access_token
+                .as_ref()
+                .map(|z| z.to_string())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or_else(|| CoreError::Unauthorized("缺少访问令牌".to_string()))?;
+            let rt = unlocked.refresh_token.as_ref().map(|z| z.to_string());
+            (tok, rt, unlocked.usk.clone())
+        };
 
         match op(token).await {
             Ok(val) => Ok(val),
             Err(CoreError::Unauthorized(msg)) => {
-                let Some(rt) = account.refresh_token.clone() else {
+                let Some(rt) = refresh_tok.filter(|s| !s.trim().is_empty()) else {
                     return Err(CoreError::Unauthorized(msg));
                 };
                 let refreshed = self
                     .client
                     .refresh_token(&account.server_url, &rt)
                     .await?;
-                account.access_token = Some(refreshed.access_token.clone());
-                if let Some(new_rt) = refreshed.refresh_token {
-                    account.refresh_token = Some(new_rt);
-                }
+                let next_access_plain = refreshed.access_token.clone();
+                let next_refresh_plain = refreshed.refresh_token.clone().unwrap_or(rt);
+
+                account.access_token =
+                    encrypt_session_token_opt(&usk, Some(&next_access_plain))?;
+                account.refresh_token =
+                    encrypt_session_token_opt(&usk, Some(&next_refresh_plain))?;
                 self.storage.upsert_account(account)?;
                 if let Ok(mut guard) = self.write_state() {
                     if let Some(cur) = &mut guard.account {
@@ -541,6 +659,10 @@ impl AppCore {
                             cur.access_token = account.access_token.clone();
                             cur.refresh_token = account.refresh_token.clone();
                         }
+                    }
+                    if let Some(unlocked) = &mut guard.unlocked {
+                        unlocked.access_token = Some(Zeroizing::new(next_access_plain));
+                        unlocked.refresh_token = Some(Zeroizing::new(next_refresh_plain));
                     }
                 }
                 op(refreshed.access_token).await
@@ -550,13 +672,20 @@ impl AppCore {
     }
 
     pub fn signalr_credentials(&self) -> Option<(String, String)> {
+        self.signalr_credentials_with_policy()
+            .map(|(url, tok, _)| (url, tok))
+    }
+
+    pub fn signalr_credentials_with_policy(&self) -> Option<(String, String, bool)> {
         let guard = self.read_state().ok()?;
         let acc = guard.account.as_ref()?;
-        let token = acc.access_token.as_ref()?.clone();
+        let unlocked = guard.unlocked.as_ref()?;
+        let token = unlocked.access_token.as_ref()?.to_string();
         if token.trim().is_empty() {
             return None;
         }
-        Some((acc.server_url.clone(), token))
+        let allow_http = self.client.is_insecure_origin_allowed(&acc.server_url);
+        Some((acc.server_url.clone(), token, allow_http))
     }
 
     pub fn set_signalr_connected(&self, connected: bool) {
@@ -598,24 +727,33 @@ impl AppCore {
     }
 
     pub async fn refresh_access_token(&self) -> Result<bool, CoreError> {
-        let mut account = {
+        let (mut account, rt, usk) = {
             let guard = self.read_state()?;
             let Some(acc) = guard.account.clone() else {
                 return Ok(false);
             };
-            acc
-        };
-        let Some(rt) = account.refresh_token.clone() else {
-            return Ok(false);
+            let Some(unlocked) = guard.unlocked.as_ref() else {
+                return Ok(false);
+            };
+            let Some(rt) = unlocked
+                .refresh_token
+                .as_ref()
+                .map(|z| z.to_string())
+                .filter(|s| !s.trim().is_empty())
+            else {
+                return Ok(false);
+            };
+            (acc, rt, unlocked.usk.clone())
         };
         let refreshed = self
             .client
             .refresh_token(&account.server_url, &rt)
             .await?;
-        account.access_token = Some(refreshed.access_token);
-        if let Some(new_rt) = refreshed.refresh_token {
-            account.refresh_token = Some(new_rt);
-        }
+        let next_access_plain = refreshed.access_token;
+        let next_refresh_plain = refreshed.refresh_token.unwrap_or(rt);
+
+        account.access_token = encrypt_session_token_opt(&usk, Some(&next_access_plain))?;
+        account.refresh_token = encrypt_session_token_opt(&usk, Some(&next_refresh_plain))?;
         self.storage.upsert_account(&account)?;
         let mut guard = self.write_state()?;
         if let Some(cur) = &mut guard.account {
@@ -624,13 +762,28 @@ impl AppCore {
                 cur.refresh_token = account.refresh_token.clone();
             }
         }
+        if let Some(unlocked) = &mut guard.unlocked {
+            unlocked.access_token = Some(Zeroizing::new(next_access_plain));
+            unlocked.refresh_token = Some(Zeroizing::new(next_refresh_plain));
+        }
         Ok(true)
     }
 
     // --- Auth & Server ---
 
     pub async fn auth_check_server(&self, server_url: &str) -> Result<ServerCheckResult, CoreError> {
-        let (version, disable_user_registration) = self.client.check_server(server_url).await?;
+        self.auth_check_server_with_policy(server_url, false).await
+    }
+
+    pub async fn auth_check_server_with_policy(
+        &self,
+        server_url: &str,
+        allow_insecure_http: bool,
+    ) -> Result<ServerCheckResult, CoreError> {
+        let (version, disable_user_registration) = self
+            .client
+            .check_server_with_policy(server_url, allow_insecure_http)
+            .await?;
         Ok(ServerCheckResult {
             ok: true,
             version,
@@ -639,10 +792,24 @@ impl AppCore {
     }
 
     pub async fn auth_prelogin(&self, server_url: &str, email: &str) -> Result<KdfConfig, CoreError> {
+        self.auth_prelogin_with_policy(server_url, email, false).await
+    }
+
+    pub async fn auth_prelogin_with_policy(
+        &self,
+        server_url: &str,
+        email: &str,
+        allow_insecure_http: bool,
+    ) -> Result<KdfConfig, CoreError> {
         if email.trim().is_empty() {
             return Err(CoreError::Validation("请输入邮箱地址".to_string()));
         }
-        self.client.prelogin(server_url, email).await
+        let cfg = self
+            .client
+            .prelogin_with_policy(server_url, email, allow_insecure_http)
+            .await?;
+        cfg.validate()?;
+        Ok(cfg)
     }
 
     pub async fn auth_login(
@@ -652,14 +819,31 @@ impl AppCore {
         master_password: &str,
         two_factor_code: Option<&str>,
     ) -> Result<SessionState, CoreError> {
+        self.auth_login_with_policy(server_url, email, master_password, two_factor_code, false)
+            .await
+    }
+
+    pub async fn auth_login_with_policy(
+        &self,
+        server_url: &str,
+        email: &str,
+        master_password: &str,
+        two_factor_code: Option<&str>,
+        allow_insecure_http: bool,
+    ) -> Result<SessionState, CoreError> {
         let normalized_email = normalize_email(email);
         if normalized_email.is_empty() || master_password.is_empty() {
             return Err(CoreError::Validation("请输入邮箱与主密码".to_string()));
         }
-        let clean_url = VaultwardenClient::normalize_base_url(server_url)?;
+        let clean_url =
+            VaultwardenClient::normalize_base_url_with_policy(server_url, allow_insecure_http)?;
         let device_id = new_device_identifier();
 
-        let kdf = self.client.prelogin(&clean_url, &normalized_email).await?;
+        let kdf = self
+            .client
+            .prelogin_with_policy(&clean_url, &normalized_email, allow_insecure_http)
+            .await?;
+        kdf.validate()?;
 
         let pw_owned = master_password.to_string();
         let email_owned = normalized_email.clone();
@@ -674,14 +858,19 @@ impl AppCore {
 
         let token = self
             .client
-            .login_password(
+            .login_password_with_policy(
                 &clean_url,
                 &normalized_email,
                 &mph,
                 &device_id,
                 two_factor_code,
+                allow_insecure_http,
             )
             .await?;
+
+        if allow_insecure_http && clean_url.starts_with("http://") {
+            self.client.allow_insecure_origin(&clean_url);
+        }
 
         let sync_resp = self.client.sync(&clean_url, &token.access_token).await?;
 
@@ -718,14 +907,16 @@ impl AppCore {
         );
         account.encrypted_private_key =
             token.private_key.or_else(|| sync_resp.profile.private_key.clone());
-        account.access_token = Some(token.access_token);
-        account.refresh_token = token.refresh_token;
         account.last_sync_at = Some(now.clone());
-        account.biometric_enabled = self.biometric.is_available();
+        // Require explicit opt-in inside Settings before enabling biometric unlock
+        account.biometric_enabled = false;
         account.last_master_password_unlock_at = Some(now.clone());
 
+        let plain_access = token.access_token;
+        let plain_refresh = token.refresh_token;
         let storage = self.storage.clone();
-        let account_clone = account.clone();
+        let mut account_clone = account.clone();
+        let plain_access_for_rev = plain_access.clone();
         let folders = sync_resp.folders;
         let collections = sync_resp.collections;
         let ciphers = sync_resp.ciphers;
@@ -736,8 +927,13 @@ impl AppCore {
             sync_resp.profile.organizations
         };
 
-        let (usk, unlocked) = tokio::task::spawn_blocking(move || {
+        let (account_persisted, unlocked) = tokio::task::spawn_blocking(move || {
             let usk = unprotect_user_symmetric_key(&protected_key, &smk)?;
+            // Encrypt session tokens BEFORE writing anything to SQLite
+            account_clone.access_token =
+                encrypt_session_token_opt(&usk, Some(&plain_access))?;
+            account_clone.refresh_token =
+                encrypt_session_token_opt(&usk, plain_refresh.as_deref())?;
             storage.clear_account_data(&account_clone.id, true)?;
             storage.upsert_account(&account_clone)?;
             storage.replace_synced_organizations(&account_clone.id, &orgs)?;
@@ -748,25 +944,32 @@ impl AppCore {
                 &storage,
                 &account_clone.id,
                 &account_clone.server_url,
-                usk.clone(),
+                usk,
             )?;
-            Ok::<_, CoreError>((usk, unlocked))
+            Ok::<_, CoreError>((account_clone, unlocked))
         })
         .await
         .map_err(|e| CoreError::Internal(format!("登录后解密同步失败: {e}")))??;
 
-        if account.biometric_enabled {
-            let _ = self.biometric.save_unlock_key(&account.id, &*usk.to_bytes());
-        }
-        let _ = self.storage.set_app_setting("last_server_url", &account.server_url);
-
-        let rev_token = account.access_token.clone();
-        let rev_server = account.server_url.clone();
-        let initial_rev = if let Some(tok) = rev_token {
-            self.client.get_revision_date(&rev_server, &tok).await.ok()
+        account = account_persisted;
+        if allow_insecure_http && account.server_url.starts_with("http://") {
+            let _ = self
+                .storage
+                .set_app_setting(&format!("allow_insecure_http:{}", account.id), "true");
         } else {
-            None
-        };
+            let _ = self
+                .storage
+                .delete_app_setting(&format!("allow_insecure_http:{}", account.id));
+        }
+        let _ = self
+            .storage
+            .set_app_setting("last_server_url", &account.server_url);
+
+        let initial_rev = self
+            .client
+            .get_revision_date(&account.server_url, &plain_access_for_rev)
+            .await
+            .ok();
         let stored_rev = self.persist_server_revision(&account.id, initial_rev);
 
         let mut guard = self.write_state()?;
@@ -792,15 +995,33 @@ impl AppCore {
         master_password: &str,
         kdf_config: Option<KdfConfig>,
     ) -> Result<SessionState, CoreError> {
+        self.auth_register_with_policy(server_url, email, name, master_password, kdf_config, false)
+            .await
+    }
+
+    pub async fn auth_register_with_policy(
+        &self,
+        server_url: &str,
+        email: &str,
+        name: &str,
+        master_password: &str,
+        kdf_config: Option<KdfConfig>,
+        allow_insecure_http: bool,
+    ) -> Result<SessionState, CoreError> {
         let normalized_email = normalize_email(email);
-        if normalized_email.is_empty() || master_password.chars().count() < 6 {
+        if normalized_email.is_empty()
+            || master_password.chars().count() < 12
+            || !has_sufficient_master_password_complexity(master_password)
+        {
             return Err(CoreError::Validation(
-                "请填写有效邮箱与至少 6 位主密码".to_string(),
+                "请填写有效邮箱与至少 12 位主密码（需包含大小写字母/数字/符号中的至少两类）"
+                    .to_string(),
             ));
         }
-        let clean_url = VaultwardenClient::normalize_base_url(server_url)?;
+        let clean_url =
+            VaultwardenClient::normalize_base_url_with_policy(server_url, allow_insecure_http)?;
         let kdf = kdf_config.unwrap_or_default();
-        kdf.validate()?;
+        kdf.validate_for_registration()?;
 
         let display_name = if name.trim().is_empty() {
             normalized_email
@@ -845,10 +1066,18 @@ impl AppCore {
         .await
         .map_err(|e| CoreError::Internal(format!("注册密钥生成失败: {e}")))??;
 
-        self.client.register(&clean_url, req).await?;
+        self.client
+            .register_with_policy(&clean_url, req, allow_insecure_http)
+            .await?;
 
-        self.auth_login(&clean_url, &normalized_email, master_password, None)
-            .await
+        self.auth_login_with_policy(
+            &clean_url,
+            &normalized_email,
+            master_password,
+            None,
+            allow_insecure_http,
+        )
+        .await
     }
 
     pub async fn auth_logout(&self, clear_local_cache: bool) -> Result<(), CoreError> {
@@ -871,12 +1100,14 @@ impl AppCore {
         if let Some(id) = account_id {
             let _ = self.biometric.delete_unlock_key(&id);
             let _ = self.storage.delete_app_setting(&format!("server_revision:{id}"));
+            let _ = self.storage.delete_app_setting(&format!("allow_insecure_http:{id}"));
             self.storage.clear_account_data(&id, clear_local_cache)?;
         }
 
         // If another account remains saved locally, switch to it in Locked state
         if let Some(next_acc) = self.storage.load_primary_account()? {
             let next_active = self.storage.set_active_account(&next_acc.id)?;
+            self.sync_insecure_origin_policy(&next_active.id, &next_active.server_url);
             let pending = self.storage.count_pending_dirty(&next_active.id)?;
             let next_rev = self
                 .storage
@@ -891,36 +1122,6 @@ impl AppCore {
             guard.account = Some(next_active);
         }
         Ok(())
-    }
-
-    pub async fn auth_passkey_login(
-        &self,
-        credential_id: Option<&str>,
-    ) -> Result<SessionState, CoreError> {
-        let account = {
-            let guard = self.read_state()?;
-            guard
-                .account
-                .clone()
-                .ok_or_else(|| CoreError::InvalidState("尚未登录账户，请先使用主密码登录".to_string()))?
-        };
-
-        let mut passkeys = self.storage.list_account_passkeys(&account.id)?;
-        let target = if let Some(cid) = credential_id {
-            passkeys.iter_mut().find(|p| p.id == cid)
-        } else {
-            passkeys.first_mut()
-        }
-        .ok_or_else(|| {
-            CoreError::NotFound("未找到可用的账户通行密钥，请使用主密码登录".to_string())
-        })?;
-
-        target.counter = target.counter.saturating_add(1);
-        target.last_used_at = Some(Utc::now().timestamp_millis());
-        let updated = target.clone();
-        self.storage.upsert_account_passkey(&account.id, &updated)?;
-
-        self.session_unlock_biometric().await
     }
 
     // --- Multi-account ---
@@ -954,6 +1155,7 @@ impl AppCore {
 
     pub fn account_switch(&self, account_id: &str) -> Result<SessionState, CoreError> {
         let target = self.storage.set_active_account(account_id)?;
+        self.sync_insecure_origin_policy(&target.id, &target.server_url);
         let pending = self.storage.count_pending_dirty(&target.id)?;
         let next_rev = self
             .storage
@@ -1019,13 +1221,26 @@ impl AppCore {
             .ok_or_else(|| CoreError::InvalidState("请先登录账户".to_string()))?;
 
         if let Some(bio) = patch.biometric_enabled {
-            account.biometric_enabled = bio;
             if bio {
-                if let Some(unlocked) = &guard.unlocked {
-                    self.biometric
-                        .save_unlock_key(&account.id, &*unlocked.usk.to_bytes())?;
+                if !self.biometric.is_available() {
+                    return Err(CoreError::Biometric(
+                        "当前设备不支持系统生物识别解锁".to_string(),
+                    ));
                 }
+                let unlocked = guard.unlocked.as_ref().ok_or_else(|| {
+                    CoreError::InvalidState("开启生物识别解锁前请先使用主密码解锁".to_string())
+                })?;
+                let lang = self
+                    .app_settings_get()
+                    .map(|s| s.language)
+                    .unwrap_or_else(|_| "en".to_string());
+                let reason = localized_biometric_reason(&lang, "unlock");
+                self.biometric.verify_user(reason)?;
+                self.biometric
+                    .save_unlock_key(&account.id, &*unlocked.usk.to_bytes())?;
+                account.biometric_enabled = true;
             } else {
+                account.biometric_enabled = false;
                 let _ = self.biometric.delete_unlock_key(&account.id);
             }
         }
@@ -1136,7 +1351,7 @@ impl AppCore {
                     self.storage.upsert_account(&account)?;
                     let raw_settings = self.storage.get_all_app_settings().unwrap_or_default();
                     if let Some(stash_enc) = raw_settings.get(&stash_key) {
-                        if let Ok(dec) = usk.decrypt_string(stash_enc) {
+                        if let Ok(dec) = usk.decrypt_string_authenticated(stash_enc) {
                             if let Ok(stash) = serde_json::from_str::<TravelStashBundle>(&dec) {
                                 for sv in stash.vaults {
                                     let _ = self.storage.upsert_vault(&StoredVault {
@@ -1228,8 +1443,14 @@ impl AppCore {
         .map_err(|e| CoreError::Internal(format!("解锁任务执行失败: {e}")))??;
 
         let now = Utc::now().to_rfc3339();
+        let reloaded_acc = self
+            .storage
+            .load_account_by_id(&account.id)?
+            .unwrap_or(account);
+        account = reloaded_acc;
         account.last_master_password_unlock_at = Some(now);
         self.storage.upsert_account(&account)?;
+        self.sync_insecure_origin_policy(&account.id, &account.server_url);
 
         if account.biometric_enabled && self.biometric.is_available() {
             let _ = self.biometric.save_unlock_key(&account.id, &*usk.to_bytes());
@@ -1297,14 +1518,59 @@ impl AppCore {
         .await
         .map_err(|e| CoreError::Internal(format!("Biometric unlock task failed: {e}")))??;
 
+        let reloaded_acc = self
+            .storage
+            .load_account_by_id(&account.id)?
+            .unwrap_or(account);
+        self.sync_insecure_origin_policy(&reloaded_acc.id, &reloaded_acc.server_url);
+
         {
             let mut guard = self.write_state()?;
+            guard.account = Some(reloaded_acc);
             guard.unlocked = Some(unlocked);
             guard.last_activity = Instant::now();
         }
         let _ = self.purge_expired_trash().await;
         self.maybe_create_scheduled_snapshot();
         Ok(self.session_get_state())
+    }
+
+    /// Verify biometric / OS user presence unconditionally (fail-closed) when unlocked.
+    /// Does NOT require `biometric_enabled` (unlock-via-biometric) to be on.
+    pub async fn session_verify_user_presence(
+        &self,
+        custom_reason: Option<&str>,
+    ) -> Result<(), CoreError> {
+        {
+            let guard = self.read_state()?;
+            if guard.account.is_none() {
+                return Err(CoreError::InvalidState("No active account".to_string()));
+            }
+            if guard.unlocked.is_none() {
+                return Err(CoreError::InvalidState("Vault is locked".to_string()));
+            }
+        }
+
+        if !self.biometric.is_available() {
+            return Err(CoreError::Biometric(
+                "Biometric / OS user-presence verification is unavailable".to_string(),
+            ));
+        }
+
+        let prompt_lang = self
+            .app_settings_get()
+            .map(|s| s.language)
+            .unwrap_or_else(|_| "en".to_string());
+        let reason = custom_reason
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| localized_biometric_reason(&prompt_lang, "reprompt"))
+            .to_string();
+
+        let biometric = Arc::clone(&self.biometric);
+        tokio::task::spawn_blocking(move || biometric.verify_user(&reason))
+            .await
+            .map_err(|e| CoreError::Internal(format!("User verification task failed: {e}")))?
     }
 
     pub async fn session_verify_biometric_reprompt(
@@ -1422,7 +1688,7 @@ impl AppCore {
         let mut dirty_op = Some("create".to_string());
         let mut synced_remotely = false;
 
-        if self.is_auto_sync_enabled() && account.access_token.is_some() {
+        if self.is_auto_sync_enabled() && self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let name_enc_clone = name_enc.clone();
@@ -1522,7 +1788,7 @@ impl AppCore {
         let mut dirty_op = Some("update".to_string());
         let mut synced_remotely = false;
 
-        if self.is_auto_sync_enabled() && account.access_token.is_some() {
+        if self.is_auto_sync_enabled() && self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -1619,7 +1885,7 @@ impl AppCore {
             if let Some(name_enc) = name_enc_opt {
                 let mut revision_date = Utc::now().to_rfc3339();
                 let mut dirty_op = Some("update".to_string());
-                if self.is_auto_sync_enabled() && account.access_token.is_some() {
+                if self.is_auto_sync_enabled() && self.has_online_session() {
                     let client = self.client.clone();
                     let server_url = account.server_url.clone();
                     let id_owned = id.to_string();
@@ -1705,7 +1971,7 @@ impl AppCore {
         };
 
         let mut deleted_remotely = false;
-        if self.is_auto_sync_enabled() && account.access_token.is_some() {
+        if self.is_auto_sync_enabled() && self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -1992,7 +2258,7 @@ impl AppCore {
 
         let mut dirty_op = Some("create");
         let mut synced_remotely = false;
-        if self.is_auto_sync_enabled() && account.access_token.is_some() {
+        if self.is_auto_sync_enabled() && self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let cipher_clone = cipher.clone();
@@ -2076,7 +2342,7 @@ impl AppCore {
 
         let mut dirty_op = Some(if was_offline_create { "create" } else { "update" });
         let mut synced_remotely = false;
-        if self.is_auto_sync_enabled() && account.access_token.is_some() {
+        if self.is_auto_sync_enabled() && self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -2337,7 +2603,7 @@ impl AppCore {
 
         let mut dirty_op = Some("trash");
         let mut synced_remotely = false;
-        if self.is_auto_sync_enabled() && account.access_token.is_some() {
+        if self.is_auto_sync_enabled() && self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -2400,7 +2666,7 @@ impl AppCore {
 
         let mut dirty_op = Some("restore");
         let mut synced_remotely = false;
-        if self.is_auto_sync_enabled() && account.access_token.is_some() {
+        if self.is_auto_sync_enabled() && self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -2464,8 +2730,9 @@ impl AppCore {
             .as_deref()
             == Some("create");
 
+        let online = self.has_online_session();
         let mut deleted_remotely = false;
-        if !was_offline_create && self.is_auto_sync_enabled() && account.access_token.is_some() {
+        if !was_offline_create && self.is_auto_sync_enabled() && online {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -2490,7 +2757,7 @@ impl AppCore {
             }
         }
 
-        if deleted_remotely || was_offline_create || account.access_token.is_none() {
+        if deleted_remotely || was_offline_create || !online {
             self.storage.delete_cipher_row(id)?;
         } else if let Some(c) = cipher_opt {
             self.storage.upsert_cipher(&account.id, &c, Some("delete"))?;
@@ -2536,7 +2803,8 @@ impl AppCore {
             .filter(|sc| sc.dirty_op.as_deref() == Some("create"))
             .map(|sc| sc.id)
             .collect();
-        let should_push = self.is_auto_sync_enabled() && account.access_token.is_some();
+        let online = self.has_online_session();
+        let should_push = self.is_auto_sync_enabled() && online;
 
         let mut purged = 0usize;
         let mut any_synced_remotely = false;
@@ -2562,7 +2830,7 @@ impl AppCore {
                     any_synced_remotely = true;
                 }
             }
-            if deleted_remotely || was_offline || account.access_token.is_none() {
+            if deleted_remotely || was_offline || !online {
                 self.storage.delete_cipher_row(&id)?;
             } else if let Some(c) = cipher_opt {
                 self.storage.upsert_cipher(&account.id, &c, Some("delete"))?;
@@ -2618,7 +2886,8 @@ impl AppCore {
             return Ok(0);
         }
 
-        let should_push = self.is_auto_sync_enabled() && account.access_token.is_some();
+        let online = self.has_online_session();
+        let should_push = self.is_auto_sync_enabled() && online;
         let mut purged = 0usize;
         let mut any_synced_remotely = false;
         let mut removed_ids = Vec::with_capacity(expired.len());
@@ -2642,7 +2911,7 @@ impl AppCore {
                     any_synced_remotely = true;
                 }
             }
-            if deleted_remotely || account.access_token.is_none() {
+            if deleted_remotely || !online {
                 self.storage.delete_cipher_row(&id)?;
             } else if let Some(c) = cipher_opt {
                 self.storage.upsert_cipher(&account.id, &c, Some("delete"))?;
@@ -3463,13 +3732,13 @@ impl AppCore {
     ) -> Result<bool, CoreError> {
         let (mut account, prev_rev) = {
             let guard = self.read_state()?;
-            if guard.unlocked.is_none() {
+            let Some(unlocked) = guard.unlocked.as_ref() else {
                 return Ok(false);
-            }
+            };
             let Some(acc) = guard.account.clone() else {
                 return Ok(false);
             };
-            if acc
+            if unlocked
                 .access_token
                 .as_deref()
                 .map(|t| t.trim().is_empty())
@@ -3696,7 +3965,7 @@ impl AppCore {
 
         // Attempt remote Vaultwarden attachment upload when online
         let mut uploaded_att: Option<ItemAttachment> = None;
-        if account.access_token.is_some() {
+        if self.has_online_session() {
             let att_key = UserSymmetricKey::generate();
             let att_key_enc = encrypt_bytes(&*att_key.to_bytes(), usk.enc_key(), usk.mac_key())?;
             let enc_data_str = encrypt_bytes(&raw_bytes, att_key.enc_key(), att_key.mac_key())?;
@@ -3813,8 +4082,8 @@ impl AppCore {
         };
 
         if let Some(local) = self.storage.get_local_attachment(&account.id, attachment_id)? {
-            let file_name = usk.decrypt_string(&local.file_name_enc)?.to_string();
-            let pt = decrypt_bytes(&local.data_enc, usk.enc_key(), usk.mac_key())?;
+            let file_name = usk.decrypt_string_authenticated(&local.file_name_enc)?.to_string();
+            let pt = decrypt_bytes_authenticated(&local.data_enc, usk.enc_key(), usk.mac_key())?;
             return Ok(AttachmentDownloadResult {
                 mime_type: guess_mime_from_filename(&file_name),
                 file_name,
@@ -3822,7 +4091,7 @@ impl AppCore {
             });
         }
 
-        if account.access_token.is_some() {
+        if self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let cid = item_id.to_string();
@@ -3846,11 +4115,17 @@ impl AppCore {
 
             let dec_bytes = if let Some(key_enc) = remote_dto.as_ref().and_then(|d| d.key.as_deref())
             {
-                let att_key_bytes = decrypt_bytes(key_enc, usk.enc_key(), usk.mac_key())?;
+                let att_key_bytes =
+                    decrypt_bytes_authenticated(key_enc, usk.enc_key(), usk.mac_key())?;
                 let att_key = UserSymmetricKey::from_bytes(&att_key_bytes)?;
                 if let Ok(text) = std::str::from_utf8(&bytes) {
-                    if text.starts_with("2.") || text.starts_with("0.") {
-                        decrypt_bytes(text, att_key.enc_key(), att_key.mac_key())?.to_vec()
+                    if text.starts_with("2.") {
+                        decrypt_bytes_authenticated(text, att_key.enc_key(), att_key.mac_key())?
+                            .to_vec()
+                    } else if text.starts_with("0.") {
+                        return Err(CoreError::Crypto(
+                            "拒绝解密未携带 MAC 校验的 Type 0 附件内容".to_string(),
+                        ));
                     } else {
                         bytes
                     }
@@ -3894,7 +4169,7 @@ impl AppCore {
         self.storage
             .delete_local_attachment(&account.id, attachment_id)?;
 
-        if account.access_token.is_some() {
+        if self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let cid = item_id.to_string();
@@ -3992,25 +4267,9 @@ impl AppCore {
     // --- Favicon ---
 
     pub async fn favicon_fetch(&self, host: &str) -> Result<Option<String>, CoreError> {
-        let clean_host = host
-            .trim()
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-            .split('/')
-            .next()
-            .unwrap_or("")
-            .split(':')
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase();
-
-        if clean_host.is_empty()
-            || clean_host == "localhost"
-            || clean_host == "127.0.0.1"
-            || !clean_host.contains('.')
-        {
+        let Some(clean_host) = validate_favicon_host(host) else {
             return Ok(None);
-        }
+        };
 
         let (favicon_enabled, server_url) = {
             let guard = self.read_state()?;
@@ -4032,16 +4291,24 @@ impl AppCore {
             }
         }
 
-        let mut candidates = Vec::new();
-        if let Some(base) = server_url {
-            if let Ok(norm) = VaultwardenClient::normalize_base_url(&base) {
-                candidates.push(format!("{norm}/icons/{clean_host}/icon.png"));
+        let target = if let Some(base) = server_url {
+            let allow_http = self.client.is_insecure_origin_allowed(&base);
+            if let Ok(norm) = VaultwardenClient::normalize_base_url_with_policy(&base, allow_http)
+            {
+                Some((format!("{norm}/icons/{clean_host}/icon.png"), true))
+            } else {
+                None
             }
-        }
-        candidates.push(format!("https://{clean_host}/favicon.ico"));
+        } else {
+            Some((format!("https://{clean_host}/favicon.ico"), false))
+        };
 
-        for url in candidates {
-            if let Some(bytes) = self.client.fetch_favicon_bytes(&url, 64 * 1024).await {
+        if let Some((url, trusted_proxy)) = target {
+            if let Some(bytes) = self
+                .client
+                .fetch_favicon_bytes(&url, 64 * 1024, trusted_proxy)
+                .await
+            {
                 if let Some(mime) = detect_image_mime(&bytes) {
                     let data_uri = format!("data:{mime};base64,{}", B64.encode(&bytes));
                     let _ = self.storage.upsert_favicon_cache(
@@ -4669,123 +4936,10 @@ impl AppCore {
         self.clipboard.clear_now()
     }
 
-    // --- Account Passkeys & Profile ---
+    // --- Account Profile ---
 
     fn account_user_handle(account_id: &str) -> String {
         URL_SAFE_NO_PAD.encode(account_id.as_bytes())
-    }
-
-    pub fn account_passkey_list(&self) -> Result<AccountPasskeyListResponse, CoreError> {
-        let guard = self.read_state()?;
-        let acc = guard
-            .account
-            .as_ref()
-            .ok_or_else(|| CoreError::InvalidState("请先登录".to_string()))?;
-        let credentials = self.storage.list_account_passkeys(&acc.id)?;
-        Ok(AccountPasskeyListResponse {
-            rp_id: KEYSMITH_ACCOUNT_RP_ID.to_string(),
-            user_id: Self::account_user_handle(&acc.id),
-            credentials,
-        })
-    }
-
-    pub fn account_passkey_register(
-        &self,
-        name: &str,
-        device_type: &str,
-    ) -> Result<AccountPasskey, CoreError> {
-        let guard = self.read_state()?;
-        let acc = guard
-            .account
-            .as_ref()
-            .ok_or_else(|| CoreError::InvalidState("请先登录".to_string()))?;
-        if guard.unlocked.is_none() {
-            return Err(CoreError::InvalidState("保险库已锁定，请先解锁".to_string()));
-        }
-
-        let mut cred_id_bytes = [0u8; 24];
-        OsRng.fill_bytes(&mut cred_id_bytes);
-        let cred_id = URL_SAFE_NO_PAD.encode(cred_id_bytes);
-
-        let priv_key = RsaPrivateKey::new(&mut OsRng, 2048)
-            .map_err(|e| CoreError::Crypto(format!("生成通行密钥对失败: {e}")))?;
-        let spki = priv_key
-            .to_public_key()
-            .to_public_key_der()
-            .map_err(|e| CoreError::Crypto(format!("导出通行密钥公钥失败: {e}")))?;
-        let _pkcs8 = priv_key.to_pkcs8_der();
-
-        let is_multi = device_type == "multiDevice";
-        let clean_name = if name.trim().is_empty() {
-            if is_multi {
-                "Mac Touch ID 通行密钥".to_string()
-            } else {
-                "外置硬件安全密钥".to_string()
-            }
-        } else {
-            name.trim().to_string()
-        };
-
-        let pk = AccountPasskey {
-            id: cred_id,
-            passkey_user_id: Self::account_user_handle(&acc.id),
-            credential_public_key: B64.encode(spki.as_bytes()),
-            credential_type: "public-key".to_string(),
-            credential_device_type: if is_multi {
-                "multiDevice".to_string()
-            } else {
-                "singleDevice".to_string()
-            },
-            credential_backed_up: is_multi,
-            aaguid: if is_multi {
-                APPLE_TOUCH_ID_AAGUID.to_string()
-            } else {
-                YUBIKEY_5_AAGUID.to_string()
-            },
-            provider_icon: None,
-            name: clean_name,
-            transports: if is_multi {
-                vec!["internal".to_string(), "hybrid".to_string()]
-            } else {
-                vec!["usb".to_string(), "nfc".to_string()]
-            },
-            last_used_at: None,
-            registered_at: Utc::now().timestamp_millis(),
-            counter: 0,
-            prf_supported: true,
-        };
-
-        self.storage.upsert_account_passkey(&acc.id, &pk)?;
-        Ok(pk)
-    }
-
-    pub fn account_passkey_rename(&self, id: &str, name: &str) -> Result<AccountPasskey, CoreError> {
-        let guard = self.read_state()?;
-        let acc = guard
-            .account
-            .as_ref()
-            .ok_or_else(|| CoreError::InvalidState("请先登录".to_string()))?;
-        let mut list = self.storage.list_account_passkeys(&acc.id)?;
-        let target = list
-            .iter_mut()
-            .find(|p| p.id == id)
-            .ok_or_else(|| CoreError::NotFound("通行密钥不存在".to_string()))?;
-        let trimmed = name.trim();
-        if !trimmed.is_empty() {
-            target.name = trimmed.to_string();
-        }
-        let updated = target.clone();
-        self.storage.upsert_account_passkey(&acc.id, &updated)?;
-        Ok(updated)
-    }
-
-    pub fn account_passkey_delete(&self, id: &str) -> Result<(), CoreError> {
-        let guard = self.read_state()?;
-        let acc = guard
-            .account
-            .as_ref()
-            .ok_or_else(|| CoreError::InvalidState("请先登录".to_string()))?;
-        self.storage.delete_account_passkey(&acc.id, id)
     }
 
     pub fn account_update_profile(
@@ -4827,7 +4981,7 @@ impl AppCore {
             (acc, unlocked.usk.clone())
         };
 
-        if account.access_token.is_some() {
+        if self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             if let Ok(remote_sends) = self
@@ -4906,7 +5060,7 @@ impl AppCore {
             &usk,
         )?;
 
-        let dto = if account.access_token.is_some() {
+        let dto = if self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let p_clone = payload.clone();
@@ -5017,7 +5171,7 @@ impl AppCore {
             .and_then(|f| f.file_name.clone())
             .unwrap_or_else(|| clean_file_name.to_string());
 
-        let dto = if account.access_token.is_some() {
+        let dto = if self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let p_clone = payload.clone();
@@ -5144,7 +5298,7 @@ impl AppCore {
         )?;
         payload.file_length = None;
 
-        let dto = if account.access_token.is_some() {
+        let dto = if self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -5210,7 +5364,7 @@ impl AppCore {
             (acc, unlocked.usk.clone(), dto)
         };
 
-        let dto = if account.access_token.is_some() {
+        let dto = if self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -5253,7 +5407,7 @@ impl AppCore {
             acc
         };
 
-        if account.access_token.is_some() {
+        if self.has_online_session() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -5333,7 +5487,7 @@ impl AppCore {
             (acc, c, org_usk)
         };
 
-        if account.access_token.is_none() {
+        if !self.has_online_session() {
             return Err(CoreError::InvalidState(
                 "Sharing to an organization requires server connectivity".to_string(),
             ));
@@ -5417,7 +5571,7 @@ impl AppCore {
                 .and_then(|g| {
                     g.unlocked
                         .as_ref()
-                        .and_then(|u| u.usk.decrypt_string(&masked_email.api_key).ok())
+                        .and_then(|u| u.usk.decrypt_string_authenticated(&masked_email.api_key).ok())
                         .map(|z| z.to_string())
                 })
                 .unwrap_or_default();
@@ -5438,8 +5592,8 @@ impl AppCore {
             .unwrap_or(true);
         let ssh_agent_enabled = raw
             .get("ssh_agent_enabled")
-            .map(|s| s != "false")
-            .unwrap_or(true);
+            .map(|s| s == "true")
+            .unwrap_or(false);
         let snapshot_interval_days = raw
             .get("snapshot_interval_days")
             .and_then(|s| s.parse::<u32>().ok())

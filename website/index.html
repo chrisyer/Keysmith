@@ -358,7 +358,7 @@
 
             <div class="editorial-block">
               <span class="section-eyebrow" data-i18n="arch.eyebrow">安全架构</span>
-              <h3 data-i18n="arch.title">密码只在你的内存里短暂停留，磁盘零明文</h3>
+              <h3 data-i18n="arch.title">密码只在你的内存里短暂停留，磁盘仅存加密负载</h3>
               <p data-i18n="arch.body">
                 无论在线还是离线，Keysmith 坚持纯本地加解密原则：主密码通过 Argon2id 或 PBKDF2-SHA256 在本地派生主密钥，绝不上传至任何服务器；锁定或系统休眠瞬间立即触发 Zeroize 内存清零并撤销浮窗凭证。
               </p>
@@ -414,7 +414,7 @@
               <!-- Step 3 -->
               <rect x="558" y="34" width="186" height="142" rx="16" fill="var(--bg-card-alt)" stroke="var(--border-strong)" />
               <text x="651" y="72" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="700" data-i18n="arch.svgStep3Eyebrow">ENCRYPTED CACHE</text>
-              <text x="651" y="102" text-anchor="middle" fill="var(--text-primary)" font-size="16" font-weight="700" data-i18n="arch.svgStep3Title">零明文 SQLite</text>
+              <text x="651" y="102" text-anchor="middle" fill="var(--text-primary)" font-size="16" font-weight="700" data-i18n="arch.svgStep3Title">加密存储 SQLite</text>
               <text x="651" y="130" text-anchor="middle" fill="var(--text-secondary)" font-size="12" data-i18n="arch.svgStep3Sub">离线可用 · 变更队列</text>
               <text x="651" y="150" text-anchor="middle" fill="var(--text-muted)" font-size="11" data-i18n="arch.svgStep3Sub2">自动定时加密快照</text>
 
@@ -459,14 +459,14 @@
                   <span>zsh — Keysmith CLI &amp; SSH Agent</span>
                   <button type="button" class="code-copy-btn" data-copy-target="dev-cli-snippet" data-i18n="common.copy">复制</button>
                 </div>
-                <pre><code id="dev-cli-snippet"># Run any command with secrets injected into env (no plaintext on disk)
-ks run -- npm run deploy
+                <pre><code id="dev-cli-snippet"># Inject ks:// secrets via .env or environment variables (avoid passing ks:// in CLI argv)
+ks run --env-file .env.ks -- npm run deploy
 
 # Inspect vault sync &amp; status from terminal
 ks status &amp;&amp; ks list --query "github"
 
-# Built-in Ed25519 SSH Agent socket for ssh &amp; git commit signing
-export SSH_AUTH_SOCK="$HOME/.keysmith/ssh-agent.sock"
+# Built-in Ed25519 SSH Agent socket for ssh &amp; git commit signing (enable SSH Agent in Settings first)
+export SSH_AUTH_SOCK="$HOME/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock"
 ssh -T git@github.com</code></pre>
               </div>
             </div>
@@ -621,7 +621,7 @@ ssh -T git@github.com</code></pre>
                 <div class="tab-panel-card">
                   <h3 data-i18n="inst.p0Title">macOS Homebrew Cask（推荐 · 支持一键升级）</h3>
                   <p data-i18n="inst.p0Desc">
-                    请务必携带完整的 tap 前缀 chrisyer/keysmith/keysmith，避免与 Homebrew 官方源中同名应用冲突。安装脚本会自动清除隔离属性以顺畅打开。
+                    请务必携带完整的 tap 前缀 chrisyer/keysmith/keysmith，避免与 Homebrew 官方源中同名应用冲突。当前发布为本地 ad-hoc 签名，首次打开可在 macOS「隐私与安全性」中放行，或按提示手动执行 xattr -dr com.apple.quarantine /Applications/Keysmith.app。
                   </p>
                   <div class="terminal-card">
                     <div class="terminal-head">
@@ -648,7 +648,7 @@ brew upgrade --cask chrisyer/keysmith/keysmith</code></pre>
                       <span>Terminal (macOS)</span>
                       <button type="button" class="code-copy-btn" data-copy-target="code-script" data-i18n="common.copy">复制</button>
                     </div>
-                    <pre><code id="code-script">curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/main/install.sh | sh</code></pre>
+                    <pre><code id="code-script">curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/v0.1.4/install.sh | sh</code></pre>
                   </div>
                 </div>
               </div>

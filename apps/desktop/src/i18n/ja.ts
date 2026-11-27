@@ -62,6 +62,11 @@ export const ja = {
     demoHint: 'デモ用マスターパスワード：{pw}',
     savedAccountsQuickSwitch: '保存済みアカウント',
     cancelAddAccount: 'キャンセル',
+    insecureHttpWarning: 'ローカル以外のサーバーで暗号化されない HTTP 接続が指定されています。HTTPS を使用しない場合、認証情報やトークンがネットワーク上で傍受される恐れがあります。',
+    insecureHttpConfirm: 'リスクを理解した上で、このサーバーでの暗号化なし HTTP を許可する',
+    insecureHttpRequired: '続行する前に暗号化なし HTTP のリスク確認にチェックを入れるか、https:// に切り替えてください。',
+    weakKdfWarning: '弱い KDF 設定が検出されました（PBKDF2 {iterations} 回 < 推奨 600,000 回）。サーバー側で KDF 設定を引き上げることを推奨します。',
+    masterPasswordTooWeak: 'マスターパスワードは 12 文字以上で、英大文字・英小文字・数字・記号のうち 2 種類以上を含める必要があります。',
   },
   lock: {
     unlockPlaceholder: 'マスターパスワードを入力',

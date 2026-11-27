@@ -5,9 +5,38 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
-use crate::domain::{AccountPasskey, DEFAULT_QUICK_ACCESS_SHORTCUT};
+use crate::domain::DEFAULT_QUICK_ACCESS_SHORTCUT;
 use crate::error::CoreError;
 use crate::protocol::{CipherDto, CollectionDto, FolderDto, OrganizationDto, SendDto};
+
+/// Restrict a directory to owner-only (`0700`) on Unix.
+pub fn harden_dir_permissions(dir: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+}
+
+/// Restrict a file to owner read/write (`0600`) on Unix.
+pub fn harden_file_permissions(path: &Path) {
+    #[cfg(unix)]
+    if path.exists() {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+fn harden_sqlite_sidecars(db_path: &Path) {
+    harden_file_permissions(db_path);
+    let raw = db_path.to_string_lossy();
+    harden_file_permissions(Path::new(&format!("{raw}-wal")));
+    harden_file_permissions(Path::new(&format!("{raw}-shm")));
+}
 
 #[derive(Debug, Clone)]
 pub struct StoredAccount {
@@ -88,7 +117,7 @@ impl StoredAccount {
             last_master_password_unlock_at: None,
             travel_mode: false,
             trash_auto_purge_days: 30,
-            ssh_biometric_confirm: false,
+            ssh_biometric_confirm: true,
         }
     }
 }
@@ -264,6 +293,7 @@ impl Storage {
         };
         std::fs::create_dir_all(&dir)
             .map_err(|e| CoreError::Storage(format!("创建数据目录失败: {e}")))?;
+        harden_dir_permissions(&dir);
         Ok(dir.join("keysmith.db"))
     }
 
@@ -277,15 +307,18 @@ impl Storage {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)
                     .map_err(|e| CoreError::Storage(format!("创建数据库目录失败: {e}")))?;
+                harden_dir_permissions(parent);
             }
         }
         let conn = Connection::open(path)
             .map_err(|e| CoreError::Storage(format!("打开 SQLite 数据库失败: {e}")))?;
+        harden_sqlite_sidecars(path);
         let storage = Self {
             conn: Arc::new(Mutex::new(conn)),
             db_path: Some(path.to_path_buf()),
         };
         storage.migrate()?;
+        harden_sqlite_sidecars(path);
         Ok(storage)
     }
 
@@ -361,7 +394,7 @@ impl Storage {
                 last_master_password_unlock_at TEXT,
                 travel_mode INTEGER NOT NULL DEFAULT 0,
                 trash_auto_purge_days INTEGER NOT NULL DEFAULT 30,
-                ssh_biometric_confirm INTEGER NOT NULL DEFAULT 0
+                ssh_biometric_confirm INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS vaults (
@@ -1110,63 +1143,6 @@ impl Storage {
         Ok((c_cnt + v_cnt) as usize)
     }
 
-    pub fn list_account_passkeys(&self, account_id: &str) -> Result<Vec<AccountPasskey>, CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
-        let mut stmt = conn
-            .prepare("SELECT json_data FROM account_passkeys WHERE account_id = ?1")
-            .map_err(|e| CoreError::Storage(e.to_string()))?;
-        let rows = stmt
-            .query_map(params![account_id], |row| row.get::<_, String>(0))
-            .map_err(|e| CoreError::Storage(e.to_string()))?;
-        let mut out = Vec::new();
-        for r in rows {
-            let raw = r.map_err(|e| CoreError::Storage(e.to_string()))?;
-            let pk: AccountPasskey = serde_json::from_str(&raw)
-                .map_err(|e| CoreError::Storage(format!("解析账户通行密钥失败: {e}")))?;
-            out.push(pk);
-        }
-        Ok(out)
-    }
-
-    pub fn upsert_account_passkey(
-        &self,
-        account_id: &str,
-        pk: &AccountPasskey,
-    ) -> Result<(), CoreError> {
-        let json = serde_json::to_string(pk)
-            .map_err(|e| CoreError::Storage(format!("序列化账户通行密钥失败: {e}")))?;
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
-        conn.execute(
-            r#"
-            INSERT INTO account_passkeys (id, account_id, json_data)
-            VALUES (?1, ?2, ?3)
-            ON CONFLICT(id) DO UPDATE SET json_data = excluded.json_data
-            "#,
-            params![pk.id, account_id, json],
-        )
-        .map_err(|e| CoreError::Storage(format!("保存账户通行密钥失败: {e}")))?;
-        Ok(())
-    }
-
-    pub fn delete_account_passkey(&self, account_id: &str, id: &str) -> Result<(), CoreError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
-        conn.execute(
-            "DELETE FROM account_passkeys WHERE account_id = ?1 AND id = ?2",
-            params![account_id, id],
-        )
-        .map_err(|e| CoreError::Storage(format!("删除账户通行密钥失败: {e}")))?;
-        Ok(())
-    }
-
     // --- Generator History (encrypted) ---
 
     pub fn insert_generator_history(
@@ -1579,7 +1555,10 @@ impl Storage {
         if let Some(dir) = self.db_dir() {
             let snap_dir = dir.join("snapshots");
             if std::fs::create_dir_all(&snap_dir).is_ok() {
-                let _ = std::fs::write(snap_dir.join(&snap.file_name), snap.payload_enc.as_bytes());
+                harden_dir_permissions(&snap_dir);
+                let snap_path = snap_dir.join(&snap.file_name);
+                let _ = std::fs::write(&snap_path, snap.payload_enc.as_bytes());
+                harden_file_permissions(&snap_path);
                 // Prune older snapshot files on disk matching active DB rows
                 if let Ok(active) = self.list_snapshots(&snap.account_id) {
                     let active_names: std::collections::HashSet<&str> =
@@ -1694,6 +1673,9 @@ impl Storage {
             .map_err(|_| CoreError::Storage("数据库锁已损坏".to_string()))?;
         conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
             .map_err(|e| CoreError::Storage(format!("同步数据库日志失败: {e}")))?;
+        if let Some(ref p) = self.db_path {
+            harden_sqlite_sidecars(p);
+        }
         Ok(())
     }
 }

@@ -468,7 +468,6 @@
       postToContent({
         type,
         nonce,
-        origin: window.location.origin,
         options: serializedOptions
       });
     });
@@ -552,7 +551,6 @@
       postToContent({
         type: 'PASSKEY_CONDITIONAL_START',
         nonce,
-        origin: window.location.origin,
         options: serialized
       });
 

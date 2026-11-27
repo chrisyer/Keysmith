@@ -79,6 +79,14 @@ impl BiometricKeyStore for MockBiometricStore {
         self.keys.lock().unwrap().remove(account_id);
         Ok(())
     }
+
+    fn verify_user(&self, _reason: &str) -> Result<(), CoreError> {
+        if self.available {
+            Ok(())
+        } else {
+            Err(CoreError::Biometric("Biometric unavailable".to_string()))
+        }
+    }
 }
 
 fn make_test_account(
@@ -119,7 +127,7 @@ fn crypto_kdf_hkdf_and_encstring_roundtrip_and_tamper_detection() {
 
     let pbkdf_cfg = KdfConfig {
         kdf: 0,
-        kdf_iterations: 1000,
+        kdf_iterations: 5_000,
         kdf_memory: None,
         kdf_parallelism: None,
     };
@@ -431,7 +439,7 @@ async fn app_core_offline_unlock_lock_zeroize_and_crud() {
     let storage = Storage::open_in_memory().unwrap();
     let kdf = KdfConfig {
         kdf: 0,
-        kdf_iterations: 1000,
+        kdf_iterations: 5_000,
         kdf_memory: None,
         kdf_parallelism: None,
     };
@@ -454,7 +462,8 @@ async fn app_core_offline_unlock_lock_zeroize_and_crud() {
         ..Default::default()
     });
     let clip = Arc::new(NoopClipboardManager);
-    let core = AppCore::with_storage(storage, bio, clip).unwrap();
+    let bio_trait: Arc<dyn BiometricKeyStore> = bio.clone();
+    let core = AppCore::with_storage(storage, bio_trait, clip).unwrap();
 
     assert_eq!(core.session_get_state().status, AuthStatus::Locked);
     assert!(core.vault_list().is_err());
@@ -543,7 +552,7 @@ async fn app_core_vaults_trash_passkeys_and_disk_zero_plaintext() {
 
     let kdf = KdfConfig {
         kdf: 0,
-        kdf_iterations: 1000,
+        kdf_iterations: 5_000,
         kdf_memory: None,
         kdf_parallelism: None,
     };
@@ -566,7 +575,8 @@ async fn app_core_vaults_trash_passkeys_and_disk_zero_plaintext() {
         ..Default::default()
     });
     let clip = Arc::new(NoopClipboardManager);
-    let core = AppCore::with_storage(storage, bio, clip).unwrap();
+    let bio_trait: Arc<dyn BiometricKeyStore> = bio.clone();
+    let core = AppCore::with_storage(storage, bio_trait, clip).unwrap();
     core.session_unlock_password("VaultPass#2026")
         .await
         .unwrap();
@@ -655,24 +665,6 @@ async fn app_core_vaults_trash_passkeys_and_disk_zero_plaintext() {
     core.vault_delete(&v.id).await.unwrap();
     let moved = core.item_get(&item.id).unwrap().unwrap();
     assert_eq!(moved.vault_id, DEFAULT_PERSONAL_VAULT_ID);
-
-    let pk = core
-        .account_passkey_register("MacBook Touch ID", "multiDevice")
-        .unwrap();
-    let pk_renamed = core.account_passkey_rename(&pk.id, "Work Mac").unwrap();
-    assert_eq!(pk_renamed.name, "Work Mac");
-    assert_eq!(core.account_passkey_list().unwrap().credentials.len(), 1);
-
-    core.session_lock("manual").unwrap();
-    let passkey_unlocked = core.auth_passkey_login(Some(&pk.id)).await.unwrap();
-    assert_eq!(passkey_unlocked.status, AuthStatus::Unlocked);
-    assert_eq!(
-        core.account_passkey_list().unwrap().credentials[0].counter,
-        1
-    );
-
-    core.account_passkey_delete(&pk.id).unwrap();
-    assert_eq!(core.account_passkey_list().unwrap().credentials.len(), 0);
 
     let _ = std::fs::remove_dir_all(&tmp_dir);
 }
@@ -784,7 +776,7 @@ async fn token_refresh_automatically_retries_after_401() {
     let storage = Storage::open_in_memory().unwrap();
     let kdf = KdfConfig {
         kdf: 0,
-        kdf_iterations: 1000,
+        kdf_iterations: 5_000,
         kdf_memory: None,
         kdf_parallelism: None,
     };
@@ -809,8 +801,14 @@ async fn token_refresh_automatically_retries_after_401() {
     assert_eq!(sync_status.pending_count, 0);
 
     let saved = storage.load_account_by_id("acc-refresh").unwrap().unwrap();
-    assert_eq!(saved.access_token.as_deref(), Some("fresh-tok"));
-    assert_eq!(saved.refresh_token.as_deref(), Some("rt-new"));
+    let enc_access = saved.access_token.as_deref().unwrap();
+    let enc_refresh = saved.refresh_token.as_deref().unwrap();
+    assert!(enc_access.starts_with("2."));
+    assert!(enc_refresh.starts_with("2."));
+    assert_ne!(enc_access, "fresh-tok");
+    assert_ne!(enc_refresh, "rt-new");
+    assert_eq!(usk.decrypt_string(enc_access).unwrap().as_str(), "fresh-tok");
+    assert_eq!(usk.decrypt_string(enc_refresh).unwrap().as_str(), "rt-new");
 
     server_task.await.unwrap();
 }
@@ -820,7 +818,7 @@ async fn phase2_categories_archive_duplicate_batch_and_multi_account() {
     let storage = Storage::open_in_memory().unwrap();
     let kdf = KdfConfig {
         kdf: 0,
-        kdf_iterations: 1000,
+        kdf_iterations: 5_000,
         kdf_memory: None,
         kdf_parallelism: None,
     };
@@ -963,7 +961,7 @@ async fn ssh_keygen_sign_qr_decode_and_import_export() {
     let storage = Storage::open_in_memory().unwrap();
     let kdf = KdfConfig {
         kdf: 0,
-        kdf_iterations: 1000,
+        kdf_iterations: 5_000,
         kdf_memory: None,
         kdf_parallelism: None,
     };
@@ -1295,7 +1293,7 @@ async fn app_settings_and_account_persist_across_reopen() {
         let storage = Storage::open(&db_path).unwrap();
         let kdf = KdfConfig {
             kdf: 0,
-            kdf_iterations: 1000,
+            kdf_iterations: 5_000,
             kdf_memory: None,
             kdf_parallelism: None,
         };
@@ -2051,7 +2049,7 @@ async fn semver_compare_rsa_org_key_and_offline_revision_preservation() {
     let storage = Storage::open_in_memory().unwrap();
     let kdf = keysmith_core::crypto::KdfConfig {
         kdf: 0,
-        kdf_iterations: 1000,
+        kdf_iterations: 5_000,
         kdf_memory: None,
         kdf_parallelism: None,
     };
@@ -2425,7 +2423,7 @@ async fn roadmap_watchtower_emergency_kit_snapshots_travel_mode_secret_ref_and_s
     let storage = Storage::open_in_memory().unwrap();
     let kdf = KdfConfig {
         kdf: 0,
-        kdf_iterations: 1000,
+        kdf_iterations: 5_000,
         kdf_memory: None,
         kdf_parallelism: None,
     };
@@ -2777,7 +2775,7 @@ async fn auto_sync_revision_detection_manual_mode_and_offline_flush() {
 
     let kdf = KdfConfig {
         kdf: 0,
-        kdf_iterations: 1000,
+        kdf_iterations: 5_000,
         kdf_memory: None,
         kdf_parallelism: None,
     };
@@ -3029,7 +3027,7 @@ async fn sync_heals_missing_remote_delete_and_update_and_surfaces_push_error() {
 
     let kdf = KdfConfig {
         kdf: 0,
-        kdf_iterations: 1000,
+        kdf_iterations: 5_000,
         kdf_memory: None,
         kdf_parallelism: None,
     };
@@ -3319,4 +3317,203 @@ async fn sync_heals_missing_remote_delete_and_update_and_surfaces_push_error() {
     assert!(!core.check_and_sync_if_changed(false).await.unwrap());
 
     server_task.abort();
+}
+
+#[tokio::test]
+async fn security_kdf_bounds_and_registration_password_floor() {
+    assert!(KdfConfig {
+        kdf: 0,
+        kdf_iterations: 4_999,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    }
+    .validate()
+    .is_err());
+    assert!(KdfConfig {
+        kdf: 0,
+        kdf_iterations: 2_000_001,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    }
+    .validate()
+    .is_err());
+    assert!(KdfConfig {
+        kdf: 1,
+        kdf_iterations: 1,
+        kdf_memory: Some(64),
+        kdf_parallelism: Some(1),
+    }
+    .validate()
+    .is_err());
+    assert!(KdfConfig {
+        kdf: 0,
+        kdf_iterations: 100_000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    }
+    .validate_for_registration()
+    .is_err());
+    assert!(KdfConfig {
+        kdf: 0,
+        kdf_iterations: 600_000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    }
+    .validate_for_registration()
+    .is_ok());
+
+    let core = AppCore::with_storage(
+        Storage::open_in_memory().unwrap(),
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    // Short password and single-class 12-char password both rejected before network call
+    assert!(core
+        .auth_register_with_policy(
+            "https://vault.example.com",
+            "user@example.com",
+            "User",
+            "short123",
+            None,
+            false,
+        )
+        .await
+        .is_err());
+    assert!(core
+        .auth_register_with_policy(
+            "https://vault.example.com",
+            "user@example.com",
+            "User",
+            "alllowercasepw",
+            None,
+            false,
+        )
+        .await
+        .is_err());
+}
+
+#[test]
+fn security_encstring_rejects_unauthenticated_type0_for_critical_secrets() {
+    let kdf = KdfConfig::default();
+    let mk = derive_master_key("MasterPass#2026!", "user@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let unauth_blob = format!(
+        "0.{}|{}",
+        B64.encode([7u8; 16]),
+        B64.encode([9u8; 80])
+    );
+    assert!(unprotect_user_symmetric_key(&unauth_blob, &smk).is_err());
+    assert!(decrypt_keysmith_export(&unauth_blob, None, Some(&usk)).is_err());
+}
+
+#[test]
+fn security_remote_http_policy_and_signalr_no_query_token() {
+    use keysmith_core::protocol::signalr::build_hub_url;
+    use keysmith_core::protocol::VaultwardenClient;
+
+    assert!(VaultwardenClient::normalize_base_url("http://vault.example.com").is_err());
+    assert!(VaultwardenClient::normalize_base_url("http://127.0.0.1:8080").is_ok());
+    assert!(VaultwardenClient::normalize_base_url("http://localhost:8080").is_ok());
+    assert!(VaultwardenClient::normalize_base_url_with_policy("http://vault.example.com", true).is_ok());
+
+    let hub_url = build_hub_url("https://vault.example.com", "secret-token").unwrap();
+    assert!(!hub_url.contains("access_token="));
+    assert!(hub_url.starts_with("wss://"));
+}
+
+#[test]
+fn security_favicon_ssrf_validator_blocks_private_and_local_targets() {
+    use keysmith_core::protocol::validate_favicon_host;
+
+    for blocked in [
+        "",
+        "localhost",
+        "localhost:8080",
+        "127.0.0.1",
+        "169.254.169.254",
+        "10.0.0.1",
+        "192.168.1.50",
+        "[::1]",
+        "printer.local",
+        "user@github.com",
+        "https://127.0.0.1/evil",
+    ] {
+        assert!(
+            validate_favicon_host(blocked).is_none(),
+            "expected favicon host '{blocked}' to be rejected"
+        );
+    }
+    assert_eq!(
+        validate_favicon_host("GitHub.com").as_deref(),
+        Some("github.com")
+    );
+    assert_eq!(
+        validate_favicon_host("https://GitHub.com/login").as_deref(),
+        Some("github.com")
+    );
+}
+
+#[tokio::test]
+async fn security_ssh_defaults_and_user_presence_fail_closed() {
+    let storage = Storage::open_in_memory().unwrap();
+    let kdf = KdfConfig::default();
+    let mk = derive_master_key("MasterPass#2026!", "ssh@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let acc = StoredAccount::default_prefs(
+        "acc-ssh-sec".to_string(),
+        "https://vault.example.com".to_string(),
+        "ssh@example.com".to_string(),
+        "ssh".to_string(),
+        kdf.kdf,
+        kdf.kdf_iterations,
+        kdf.kdf_memory,
+        kdf.kdf_parallelism,
+        protect_user_symmetric_key(&usk, &smk).unwrap(),
+        "dev-acc-ssh-sec".to_string(),
+    );
+    assert!(!acc.biometric_enabled);
+    assert!(acc.ssh_biometric_confirm);
+    storage.upsert_account(&acc).unwrap();
+
+    // Unavailable biometric hardware must fail closed even after vault unlock
+    let core_no_bio = AppCore::with_storage(
+        storage.clone(),
+        Arc::new(MockBiometricStore {
+            available: false,
+            ..Default::default()
+        }),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    assert!(!core_no_bio.app_settings_get().unwrap().ssh_agent_enabled);
+    core_no_bio
+        .session_unlock_password("MasterPass#2026!")
+        .await
+        .unwrap();
+    assert!(core_no_bio
+        .session_verify_user_presence(Some("SSH sign"))
+        .await
+        .is_err());
+
+    // Available biometric hardware succeeds after unlock
+    let core_with_bio = AppCore::with_storage(
+        storage,
+        Arc::new(MockBiometricStore {
+            available: true,
+            ..Default::default()
+        }),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    core_with_bio
+        .session_unlock_password("MasterPass#2026!")
+        .await
+        .unwrap();
+    assert!(core_with_bio
+        .session_verify_user_presence(Some("SSH sign"))
+        .await
+        .is_ok());
 }

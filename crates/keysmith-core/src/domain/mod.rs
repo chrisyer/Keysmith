@@ -790,6 +790,10 @@ pub struct LocalSnapshotInfo {
     pub vault_count: usize,
 }
 
+fn default_false_val() -> bool {
+    false
+}
+
 fn default_true_val() -> bool {
     true
 }
@@ -823,7 +827,7 @@ pub struct AppSettings {
     pub disabled_autofill_domains: Vec<String>,
     #[serde(default = "default_true_val")]
     pub auto_copy_totp_on_fill: bool,
-    #[serde(default = "default_true_val")]
+    #[serde(default = "default_false_val")]
     pub ssh_agent_enabled: bool,
     #[serde(default = "default_snapshot_interval")]
     pub snapshot_interval_days: u32,
@@ -844,7 +848,7 @@ impl Default for AppSettings {
             custom_equivalent_domains: Vec::new(),
             disabled_autofill_domains: Vec::new(),
             auto_copy_totp_on_fill: true,
-            ssh_agent_enabled: true,
+            ssh_agent_enabled: false,
             snapshot_interval_days: 1,
             snapshot_keep_count: 5,
             sync_mode: "auto".to_string(),

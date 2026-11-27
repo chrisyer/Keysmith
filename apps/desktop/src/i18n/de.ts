@@ -62,6 +62,11 @@ export const de = {
     demoHint: 'Demo-Master-Passwort: {pw}',
     savedAccountsQuickSwitch: 'Gespeicherte Konten',
     cancelAddAccount: 'Abbrechen',
+    insecureHttpWarning: 'Unsichere HTTP-Verbindung für einen nicht-lokalen Server erkannt. Zugangsdaten und Tokens könnten im Netzwerk abgefangen werden, sofern kein HTTPS verwendet wird.',
+    insecureHttpConfirm: 'Ich verstehe das Risiko und erlaube unverschlüsseltes HTTP für diesen Server',
+    insecureHttpRequired: 'Bitte bestätigen Sie die Warnung zu unverschlüsseltem HTTP oder wechseln Sie zu https://.',
+    weakKdfWarning: 'Schwache KDF-Einstellung erkannt (PBKDF2 {iterations} Iterationen < 600.000). Es wird empfohlen, KDF auf dem Server zu erhöhen.',
+    masterPasswordTooWeak: 'Das Master-Passwort muss mindestens 12 Zeichen lang sein und mindestens 2 Zeichenklassen (Groß-, Kleinbuchstaben, Ziffern, Symbole) enthalten.',
   },
   lock: {
     unlockPlaceholder: 'Master-Passwort eingeben',

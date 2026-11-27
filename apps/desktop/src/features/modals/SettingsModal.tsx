@@ -826,19 +826,19 @@ export function SettingsModal() {
                           </span>
                           <span
                             className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                              (appSettings.sshAgentEnabled ?? true)
+                              (appSettings.sshAgentEnabled ?? false)
                                 ? 'bg-[var(--status-success)]/12 text-[var(--status-success)]'
                                 : 'bg-[var(--bg-detail)] text-[var(--text-muted)] border border-[var(--border-subtle)]'
                             }`}
                           >
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${
-                                (appSettings.sshAgentEnabled ?? true)
+                                (appSettings.sshAgentEnabled ?? false)
                                   ? 'bg-[var(--status-success)]'
                                   : 'bg-[var(--text-muted)]'
                               }`}
                             />
-                            {(appSettings.sshAgentEnabled ?? true)
+                            {(appSettings.sshAgentEnabled ?? false)
                               ? fmt(dict.settings.sshSection.statusActive, {
                                   count: sshStatus?.loadedKeyCount ?? 0,
                                 })
@@ -852,7 +852,7 @@ export function SettingsModal() {
                     </div>
                     <input
                       type="checkbox"
-                      checked={appSettings.sshAgentEnabled ?? true}
+                      checked={appSettings.sshAgentEnabled ?? false}
                       onChange={async (e) => {
                         const next = e.target.checked;
                         await updateAppSettings({ sshAgentEnabled: next });
@@ -983,7 +983,7 @@ export function SettingsModal() {
                         onClick={async () => {
                           setSshBusy(true);
                           try {
-                            if (appSettings.sshAgentEnabled === false) {
+                            if (!appSettings.sshAgentEnabled) {
                               await updateAppSettings({ sshAgentEnabled: true });
                             }
                             const next = await tauriClient.sshAgentConfigureSshConfig(true);

@@ -40,18 +40,29 @@ struct SignalRFrame {
     arguments: Vec<Value>,
 }
 
-/// Convert HTTP(S) Vaultwarden base URL to WebSocket SignalR hub URL.
+/// Convert HTTP(S) Vaultwarden base URL to WebSocket SignalR hub URL without embedding tokens in URL query strings.
 pub fn build_hub_url(server_url: &str, access_token: &str) -> Result<String, CoreError> {
     build_hub_url_with_connection_token(server_url, access_token, None)
 }
 
 /// Convert HTTP(S) Vaultwarden base URL to WebSocket SignalR hub URL with optional negotiated connection token.
+/// Uses `Authorization: Bearer` headers on the WebSocket upgrade request instead of `?access_token=`.
 pub fn build_hub_url_with_connection_token(
     server_url: &str,
     access_token: &str,
     connection_token: Option<&str>,
 ) -> Result<String, CoreError> {
-    let base = VaultwardenClient::normalize_base_url(server_url)?;
+    build_hub_url_with_policy(server_url, access_token, connection_token, false)
+}
+
+/// Policy-aware SignalR hub URL builder (allows non-loopback `ws://` only when user explicitly opted in).
+pub fn build_hub_url_with_policy(
+    server_url: &str,
+    _access_token: &str,
+    connection_token: Option<&str>,
+    allow_insecure_http: bool,
+) -> Result<String, CoreError> {
+    let base = VaultwardenClient::normalize_base_url_with_policy(server_url, allow_insecure_http)?;
     let ws_base = if let Some(rest) = base.strip_prefix("https://") {
         format!("wss://{rest}")
     } else if let Some(rest) = base.strip_prefix("http://") {
@@ -59,13 +70,11 @@ pub fn build_hub_url_with_connection_token(
     } else {
         return Err(CoreError::Validation("无效的服务器协议".to_string()));
     };
-    let encoded_token: String =
-        url::form_urlencoded::byte_serialize(access_token.as_bytes()).collect();
-    let mut url = format!("{ws_base}/notifications/hub?access_token={encoded_token}");
+    let mut url = format!("{ws_base}/notifications/hub");
     if let Some(conn_tok) = connection_token.map(str::trim).filter(|s| !s.is_empty()) {
         let encoded_id: String =
             url::form_urlencoded::byte_serialize(conn_tok.as_bytes()).collect();
-        url.push_str(&format!("&id={encoded_id}"));
+        url.push_str(&format!("?id={encoded_id}"));
     }
     Ok(url)
 }
@@ -440,8 +449,9 @@ fn map_receive_message(msg: &Value) -> Option<SignalREvent> {
 async fn negotiate_connection_token(
     server_url: &str,
     access_token: &str,
+    allow_insecure_http: bool,
 ) -> Result<Option<String>, CoreError> {
-    let base = VaultwardenClient::normalize_base_url(server_url)?;
+    let base = VaultwardenClient::normalize_base_url_with_policy(server_url, allow_insecure_http)?;
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
@@ -555,11 +565,27 @@ pub async fn run_signalr_session(
     server_url: &str,
     access_token: &str,
     event_tx: mpsc::Sender<SignalREvent>,
+    shutdown_rx: watch::Receiver<bool>,
+) -> Result<(), CoreError> {
+    run_signalr_session_with_policy(server_url, access_token, false, event_tx, shutdown_rx).await
+}
+
+/// Run the SignalR WebSocket loop with an explicit HTTP opt-in policy for self-hosted LAN servers.
+pub async fn run_signalr_session_with_policy(
+    server_url: &str,
+    access_token: &str,
+    allow_insecure_http: bool,
+    event_tx: mpsc::Sender<SignalREvent>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> Result<(), CoreError> {
-    let conn_token = negotiate_connection_token(server_url, access_token).await?;
-    let hub_url =
-        build_hub_url_with_connection_token(server_url, access_token, conn_token.as_deref())?;
+    let conn_token =
+        negotiate_connection_token(server_url, access_token, allow_insecure_http).await?;
+    let hub_url = build_hub_url_with_policy(
+        server_url,
+        access_token,
+        conn_token.as_deref(),
+        allow_insecure_http,
+    )?;
 
     let (mut use_msgpack, (mut write, mut read)) =
         match connect_and_handshake(&hub_url, access_token, true).await {

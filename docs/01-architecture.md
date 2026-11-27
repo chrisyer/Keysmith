@@ -162,15 +162,19 @@ stateDiagram-v2
    * Master Password、Master Key、Stretched Master Key、User Symmetric Key 仅在 Rust Core 内部流转，全部使用 `Zeroizing<[u8; N]>` 包装；
    * 前端 React **永远拿不到任何加密密钥**，只能按需请求已解密的 `ItemView` 展示数据；
    * 锁屏时立即对内存中解密后的 `HashMap<Uuid, KeysmithItem>`、搜索索引和对称密钥执行 `zeroize` 擦除并释放。
-2. **磁盘零明文（Zero Plaintext on Disk）**
-   * 本地 SQLite（`keysmith.db`）仅存储 Vaultwarden 返回的原始 `EncString` 密文（如 `2.<iv>|<ct>|<mac>`）以及非敏感结构元数据（`cipher_id`、`folder_id`、`favorite`、`deleted_date`、`revision_date`）。
-   * 未解锁状态下，即使攻击者拷贝整个磁盘文件，也无法读取任何条目标题、网址、用户名或密码。
+2. **加密存储与最小化元数据（Encrypted Vault Data at Rest）**
+   * 本地 SQLite（`keysmith.db`）仅存储 Vaultwarden 返回的原始 `EncString` 密文（如 `2.<iv>|<ct>|<mac>`）、加密附件索引、EncString Type 2 加密后的会话令牌（`AccessToken` / `RefreshToken`）以及非敏感结构元数据（`account_id`、`email`、`server_url`、`cipher_id`、`folder_id`、`favorite`、`deleted_date`、`revision_date`）。
+   * 未解锁状态下，即使攻击者拷贝整个磁盘文件，也无法读取任何条目标题、网址、用户名、密码、私钥或明文会话令牌；Unix 目录/数据库与令牌文件权限设为 `0700`/`0600`，Windows 设为仅当前用户 DACL。
 3. **验证先于解密（Verify-Then-Decrypt）**
    * 所有 `EncString` 解密前必须先用 `mac_key` 计算 `HMAC-SHA256(iv || ct)` 并执行常量时间比对（`subtle::ConstantTimeEq`），防止 Padding Oracle 攻击。
 
-### 4.3 macOS Touch ID 与自动锁定
+### 4.3 生物识别绑定与自动锁定
 
-* **Touch ID 绑定策略**：开启生物识别解锁时，将 64 字节 `UserSymmetricKey`（非主密码本身）存入 macOS Keychain，ACL 设置为 `kSecAccessControlBiometryCurrentSet`（指纹变更自动失效）。
+* **Touch ID / Windows Hello 绑定策略**：开启生物识别解锁时，将 64 字节 `UserSymmetricKey`（非主密码本身）绑定至系统受保护存储——macOS 签名版使用 Data Protection Keychain + `kSecAccessControlBiometryCurrentSet` ACL（ad-hoc 签名返回 `-34018` 时显式告警并回退至 `LAContext` 门控登录钥匙串）；Windows 使用 CNG `Microsoft Passport Key Storage Provider` RSA-2048 封装（`.whkey`），拒绝静默 DPAPI 回退。
+
+### 4.4 防截屏保护与桌面安全护栏
+
+* 设置中提供 `screen_capture_protected` 选项以阻断外部录屏与截图采集；TOTP 二维码屏幕扫描将临时 PNG 隔离于 `0700` `tmp-qr/` 并在读取后立即零覆写清除。
 * **兜底机制**：系统重启后首次打开、或连续生物识别失败 3 次、或距离上次主密码验证超过用户设定的周期（如 7 天）时，强制回退主密码解锁，验证通过后重新核验加密密钥哈希。
 * **自动锁定触发源**：
   * 应用内无操作计时器（默认 15 分钟，可配 1/5/15/30/60 分钟或永不）；
@@ -255,10 +259,10 @@ Keysmith 在两层完整支持 Passkey（FIDO2 / WebAuthn），打通「**用 Pa
 由于所有业务规则均封装在 `keysmith-core` 中，Phase 3 扩展其他客户端无需重写核心逻辑：
 
 1. **浏览器扩展（Manifest V3）**：
-   * **首选模式（桌面端联动，复刻 1Password 8）**：扩展通过 Chrome/Safari Native Messaging 连接本机极简 Native Host（与桌面端通过本地受权限保护的 Unix Domain Socket `/tmp/keysmith-<uid>.sock` 通信）。桌面端 Touch ID 解锁一次，浏览器扩展即自动获得域名匹配查询与内联填充能力，零重复输入主密码。
+   * **首选模式（桌面端联动，复刻 1Password 8）**：扩展通过 Chrome/Safari Native Messaging 连接本机极简 Native Host，与桌面端通过权限隔离的 IPC 端点通信（macOS/Linux 为 `~/Library/Application Support/dev.keysmith.desktop/keysmith.sock` 或 `$XDG_DATA_HOME/dev.keysmith.desktop/keysmith.sock`，`0700` 目录/`0600` socket + `peer_cred().uid()` 校验；Windows 为拒绝远程访问的仅当前用户 DACL Named Pipe `\\.\pipe\dev.keysmith.desktop`），并按客户端角色校验独立的 256-bit `ipc-nmh.token` / `ipc-cli.token` 与 RPC 方法白名单。桌面端解锁一次，浏览器扩展即自动获得域名匹配查询与内联填充能力，零重复输入主密码。
    * **备用独立模式**：将 `keysmith-core` 剥离 SQLite/网络层后编译为 `wasm32-unknown-unknown`，供脱离桌面端时直接直连 Vaultwarden。
-2. **CLI & SSH Agent**：
-   * 在 `apps/cli` 中直接依赖 `keysmith-core` crate。
-   * 实现 `ks run -- <cmd>`（将 `op://vault/item/field` 注入子进程环境变量）以及 `keysmith-ssh-agent`（直接从 `SshKey` 模板读取私钥签名，私钥不落地）。
+2. **CLI & SSH Agent（Phase 3）**
+   * 在 `crates/keysmith-cli` 中构建 `ks` CLI。
+   * 实现 `ks run --env-file ... -- <cmd>`（将 `ks://vault/item/field` 注入子进程环境变量，避免命令行参数直接暴露 `ks://`）以及嵌入式 `ssh-agent`（默认关闭、默认开启生物/用户存在性确认与 60s 审批缓存；Unix socket 与主 IPC 同位于应用数据目录 `ssh-agent.sock`）。
 3. **移动端（iOS / Android）**：
    * 可直接复用 Tauri v2 Mobile，或为 `keysmith-core` 增加 `uniffi` 导出层生成 Swift / Kotlin 原生绑定，UI 采用原生 SwiftUI / Jetpack Compose，底层共用同一套密码学、同步引擎与 `KeysmithItem Schema v1`。

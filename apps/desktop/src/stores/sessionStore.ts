@@ -27,9 +27,15 @@ interface SessionStore extends SessionState {
     email: string;
     masterPassword: string;
     twoFactorCode?: string;
+    allowInsecureHttp?: boolean;
   }) => Promise<void>;
-  loginWithPasskey: (credentialId?: string) => Promise<void>;
-  register: (params: { serverUrl: string; email: string; name: string; masterPassword: string }) => Promise<void>;
+  register: (params: {
+    serverUrl: string;
+    email: string;
+    name: string;
+    masterPassword: string;
+    allowInsecureHttp?: boolean;
+  }) => Promise<void>;
   logout: (clearLocalCache?: boolean) => Promise<void>;
   unlockWithPassword: (masterPassword: string) => Promise<void>;
   unlockWithBiometric: () => Promise<void>;
@@ -52,7 +58,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   email: '',
   displayName: '',
   serverUrl: '',
-  biometricEnabled: true,
+  biometricEnabled: false,
   autoLockMinutes: 15,
   clipboardClearSeconds: 30,
   lastSyncAt: new Date().toISOString(),
@@ -67,7 +73,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   launchAtLogin: false,
   travelMode: false,
   trashAutoPurgeDays: 30,
-  sshBiometricConfirm: false,
+  sshBiometricConfirm: true,
 
   init: async () => {
     try {
@@ -135,11 +141,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       addingAccount: false,
       initError: null,
     });
-  },
-
-  loginWithPasskey: async (credentialId) => {
-    const next = await tauriClient.authPasskeyLogin(credentialId);
-    set({ ...next, addingAccount: false, initError: null });
   },
 
   register: async (params) => {

@@ -2,7 +2,7 @@
 
 use std::ffi::c_void;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Arc;
@@ -16,10 +16,23 @@ use windows::Security::Credentials::UI::{
     UserConsentVerificationResult, UserConsentVerifier, UserConsentVerifierAvailability,
 };
 use windows_sys::Win32::Foundation::{
-    GetLastError, GlobalFree, LocalFree, HLOCAL, HWND, LPARAM, LRESULT, WPARAM,
+    CloseHandle, GetLastError, GlobalFree, LocalFree, BOOL, HANDLE, HLOCAL, HWND, LPARAM,
+    LRESULT, WPARAM,
+};
+use windows_sys::Win32::Security::Authorization::{
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+    SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
 };
 use windows_sys::Win32::Security::Cryptography::{
-    CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+    NCryptCreatePersistedKey, NCryptDecrypt, NCryptDeleteKey, NCryptEncrypt, NCryptFinalizeKey,
+    NCryptFreeObject, NCryptOpenKey, NCryptOpenStorageProvider, NCryptSetProperty,
+    BCRYPT_OAEP_PADDING_INFO, NCRYPT_KEY_HANDLE, NCRYPT_OVERWRITE_KEY_FLAG, NCRYPT_PAD_OAEP_FLAG,
+    NCRYPT_PROV_HANDLE,
+};
+use windows_sys::Win32::Security::{
+    GetSecurityDescriptorDacl, GetTokenInformation, TokenUser, ACL, DACL_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR, PROTECTED_DACL_SECURITY_INFORMATION, SECURITY_ATTRIBUTES, TOKEN_QUERY,
+    TOKEN_USER,
 };
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
@@ -28,6 +41,7 @@ use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, 
 use windows_sys::Win32::System::RemoteDesktop::{
     WTSRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
 };
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
     VK_RETURN, VK_TAB,
@@ -256,7 +270,152 @@ pub fn biometry_authenticate(reason: &str) -> Result<(), CoreError> {
     }
 }
 
-fn dpapi_key_path(account_id: &str) -> Result<PathBuf, CoreError> {
+struct CurrentUserSecurityDescriptor {
+    sd: PSECURITY_DESCRIPTOR,
+}
+
+impl Drop for CurrentUserSecurityDescriptor {
+    fn drop(&mut self) {
+        if !self.sd.is_null() {
+            unsafe {
+                LocalFree(self.sd as HLOCAL);
+            }
+        }
+    }
+}
+
+fn current_user_sid_string() -> Result<String, CoreError> {
+    let mut token: HANDLE = null_mut();
+    let ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
+    if ok == 0 || token.is_null() {
+        return Err(CoreError::Biometric(format!(
+            "Win32 OpenProcessToken failed ({})",
+            unsafe { GetLastError() }
+        )));
+    }
+    let mut len: u32 = 0;
+    unsafe { GetTokenInformation(token, TokenUser, null_mut(), 0, &mut len) };
+    if len == 0 {
+        unsafe { CloseHandle(token) };
+        return Err(CoreError::Biometric(format!(
+            "Win32 GetTokenInformation size query failed ({})",
+            unsafe { GetLastError() }
+        )));
+    }
+    let mut buf = vec![0u8; len as usize];
+    let ok = unsafe {
+        GetTokenInformation(
+            token,
+            TokenUser,
+            buf.as_mut_ptr() as *mut c_void,
+            len,
+            &mut len,
+        )
+    };
+    unsafe { CloseHandle(token) };
+    if ok == 0 {
+        return Err(CoreError::Biometric(format!(
+            "Win32 GetTokenInformation(TokenUser) failed ({})",
+            unsafe { GetLastError() }
+        )));
+    }
+    let user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+    let mut sid_wide: *mut u16 = null_mut();
+    let ok = unsafe { ConvertSidToStringSidW(user.User.Sid, &mut sid_wide) };
+    if ok == 0 || sid_wide.is_null() {
+        return Err(CoreError::Biometric(format!(
+            "Win32 ConvertSidToStringSidW failed ({})",
+            unsafe { GetLastError() }
+        )));
+    }
+    let mut slen = 0usize;
+    unsafe {
+        while *sid_wide.add(slen) != 0 {
+            slen += 1;
+        }
+        let sid_str = String::from_utf16_lossy(std::slice::from_raw_parts(sid_wide, slen));
+        LocalFree(sid_wide as HLOCAL);
+        Ok(sid_str)
+    }
+}
+
+impl CurrentUserSecurityDescriptor {
+    fn new() -> Result<Self, CoreError> {
+        let sid = current_user_sid_string()?;
+        let sddl = format!("D:P(A;;GA;;;{sid})(A;;GA;;;SY)");
+        let sddl_wide = encode_wide_null(&sddl);
+        let mut sd: PSECURITY_DESCRIPTOR = null_mut();
+        let ok = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl_wide.as_ptr(),
+                SDDL_REVISION_1,
+                &mut sd,
+                null_mut(),
+            )
+        };
+        if ok == 0 || sd.is_null() {
+            return Err(CoreError::Biometric(format!(
+                "ConvertStringSecurityDescriptorToSecurityDescriptorW failed ({})",
+                unsafe { GetLastError() }
+            )));
+        }
+        Ok(Self { sd })
+    }
+}
+
+pub fn harden_path_current_user_only(path: &Path) -> Result<(), CoreError> {
+    let holder = CurrentUserSecurityDescriptor::new()?;
+    let mut dacl_present: BOOL = 0;
+    let mut dacl_defaulted: BOOL = 0;
+    let mut p_dacl: *mut ACL = null_mut();
+    let ok = unsafe {
+        GetSecurityDescriptorDacl(holder.sd, &mut dacl_present, &mut p_dacl, &mut dacl_defaulted)
+    };
+    if ok == 0 || dacl_present == 0 || p_dacl.is_null() {
+        return Err(CoreError::Biometric(format!(
+            "GetSecurityDescriptorDacl failed ({})",
+            unsafe { GetLastError() }
+        )));
+    }
+    let path_wide = encode_wide_null(&path.to_string_lossy());
+    let status = unsafe {
+        SetNamedSecurityInfoW(
+            path_wide.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            p_dacl,
+            null_mut(),
+        )
+    };
+    if status != 0 {
+        return Err(CoreError::Biometric(format!(
+            "SetNamedSecurityInfoW failed ({status})"
+        )));
+    }
+    Ok(())
+}
+
+pub fn with_current_user_security_attributes<F, R>(f: F) -> Result<R, String>
+where
+    F: FnOnce(*mut c_void) -> R,
+{
+    let holder = CurrentUserSecurityDescriptor::new().map_err(|e| e.to_string())?;
+    let mut sa = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: holder.sd,
+        bInheritHandle: 0,
+    };
+    Ok(f(&mut sa as *mut SECURITY_ATTRIBUTES as *mut c_void))
+}
+
+fn account_hash_hex(account_id: &str) -> String {
+    let hash = Sha256::digest(account_id.as_bytes());
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn biometric_dir() -> Result<PathBuf, CoreError> {
     let base = std::env::var_os("APPDATA")
         .or_else(|| std::env::var_os("LOCALAPPDATA"))
         .map(PathBuf::from)
@@ -265,83 +424,227 @@ fn dpapi_key_path(account_id: &str) -> Result<PathBuf, CoreError> {
         })?;
     let dir = base.join("dev.keysmith.desktop").join("biometric");
     fs::create_dir_all(&dir)
-        .map_err(|e| CoreError::Biometric(format!("Failed to create DPAPI key directory: {e}")))?;
-    let hash = Sha256::digest(account_id.as_bytes());
-    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(dir.join(format!("{hex}.dpapi")))
+        .map_err(|e| CoreError::Biometric(format!("Failed to create biometric directory: {e}")))?;
+    let _ = harden_path_current_user_only(&dir);
+    Ok(dir)
 }
 
-pub fn keychain_save(account_id: &str, key: &[u8]) -> Result<(), CoreError> {
-    let path = dpapi_key_path(account_id)?;
-    let in_blob = CRYPT_INTEGER_BLOB {
-        cbData: key.len() as u32,
-        pbData: key.as_ptr() as *mut u8,
-    };
-    let mut out_blob = CRYPT_INTEGER_BLOB {
-        cbData: 0,
-        pbData: null_mut(),
-    };
-    let ok = unsafe {
-        CryptProtectData(
-            &in_blob,
-            null(),
-            null(),
-            null_mut(),
-            null_mut(),
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut out_blob,
-        )
-    };
-    if ok == 0 || out_blob.pbData.is_null() {
+fn whkey_path(account_id: &str) -> Result<PathBuf, CoreError> {
+    Ok(biometric_dir()?.join(format!("{}.whkey", account_hash_hex(account_id))))
+}
+
+fn legacy_dpapi_path(account_id: &str) -> Result<PathBuf, CoreError> {
+    Ok(biometric_dir()?.join(format!("{}.dpapi", account_hash_hex(account_id))))
+}
+
+fn wh_key_container_name(account_id: &str) -> String {
+    format!("Keysmith-Unlock-{}", account_hash_hex(account_id))
+}
+
+struct NcryptHandle(usize);
+impl Drop for NcryptHandle {
+    fn drop(&mut self) {
+        if self.0 != 0 {
+            unsafe {
+                let _ = NCryptFreeObject(self.0);
+            }
+        }
+    }
+}
+
+fn open_passport_ksp() -> Result<NcHandleWrapper, CoreError> {
+    let mut prov: NCRYPT_PROV_HANDLE = 0;
+    let prov_name = encode_wide_null("Microsoft Passport Key Storage Provider");
+    let status = unsafe { NCryptOpenStorageProvider(&mut prov, prov_name.as_ptr(), 0) };
+    if status != 0 || prov == 0 {
         return Err(CoreError::Biometric(format!(
-            "Windows DPAPI CryptProtectData failed ({})",
-            unsafe { GetLastError() }
+            "Windows Hello CNG Microsoft Passport Key Storage Provider unavailable (0x{status:08x})"
         )));
     }
-    let slice = unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) };
-    let write_res = fs::write(&path, slice)
-        .map_err(|e| CoreError::Biometric(format!("Failed to save DPAPI key blob: {e}")));
-    unsafe {
-        LocalFree(out_blob.pbData as HLOCAL);
+    Ok(NcHandleWrapper(prov))
+}
+
+type NcHandleWrapper = NcryptHandle;
+
+pub fn keychain_save(account_id: &str, key: &[u8]) -> Result<(), CoreError> {
+    let prov = open_passport_ksp()?;
+    let container = encode_wide_null(&wh_key_container_name(account_id));
+
+    let mut old_key: NCRYPT_KEY_HANDLE = 0;
+    if unsafe { NCryptOpenKey(prov.0, &mut old_key, container.as_ptr(), 0, 0) } == 0 && old_key != 0
+    {
+        unsafe {
+            let _ = NCryptDeleteKey(old_key, 0);
+        }
     }
-    write_res
+
+    let alg_rsa = encode_wide_null("RSA");
+    let mut key_handle: NCRYPT_KEY_HANDLE = 0;
+    let status = unsafe {
+        NCryptCreatePersistedKey(
+            prov.0,
+            &mut key_handle,
+            alg_rsa.as_ptr(),
+            container.as_ptr(),
+            0,
+            NCRYPT_OVERWRITE_KEY_FLAG,
+        )
+    };
+    if status != 0 || key_handle == 0 {
+        return Err(CoreError::Biometric(format!(
+            "Windows Hello NCryptCreatePersistedKey failed (0x{status:08x})"
+        )));
+    }
+    let key_guard = NcryptHandle(key_handle);
+
+    let prop_len = encode_wide_null("Length");
+    let key_bits: u32 = 2048;
+    let status = unsafe {
+        NCryptSetProperty(
+            key_guard.0,
+            prop_len.as_ptr(),
+            &key_bits as *const u32 as *const u8,
+            std::mem::size_of::<u32>() as u32,
+            0,
+        )
+    };
+    if status != 0 {
+        return Err(CoreError::Biometric(format!(
+            "Windows Hello NCryptSetProperty(Length) failed (0x{status:08x})"
+        )));
+    }
+
+    let status = unsafe { NCryptFinalizeKey(key_guard.0, 0) };
+    if status != 0 {
+        return Err(CoreError::Biometric(format!(
+            "Windows Hello NCryptFinalizeKey failed (0x{status:08x})"
+        )));
+    }
+
+    let sha256_wide = encode_wide_null("SHA256");
+    let mut oaep = BCRYPT_OAEP_PADDING_INFO {
+        pszAlgId: sha256_wide.as_ptr(),
+        pbLabel: null_mut(),
+        cbLabel: 0,
+    };
+    let mut cipher_len: u32 = 0;
+    let status = unsafe {
+        NCryptEncrypt(
+            key_guard.0,
+            key.as_ptr(),
+            key.len() as u32,
+            &mut oaep as *mut BCRYPT_OAEP_PADDING_INFO as *mut c_void,
+            null_mut(),
+            0,
+            &mut cipher_len,
+            NCRYPT_PAD_OAEP_FLAG,
+        )
+    };
+    if status != 0 || cipher_len == 0 {
+        return Err(CoreError::Biometric(format!(
+            "Windows Hello NCryptEncrypt size query failed (0x{status:08x})"
+        )));
+    }
+
+    let mut cipher = vec![0u8; cipher_len as usize];
+    let status = unsafe {
+        NCryptEncrypt(
+            key_guard.0,
+            key.as_ptr(),
+            key.len() as u32,
+            &mut oaep as *mut BCRYPT_OAEP_PADDING_INFO as *mut c_void,
+            cipher.as_mut_ptr(),
+            cipher_len,
+            &mut cipher_len,
+            NCRYPT_PAD_OAEP_FLAG,
+        )
+    };
+    if status != 0 {
+        return Err(CoreError::Biometric(format!(
+            "Windows Hello NCryptEncrypt failed (0x{status:08x})"
+        )));
+    }
+    cipher.truncate(cipher_len as usize);
+
+    let path = whkey_path(account_id)?;
+    fs::write(&path, &cipher)
+        .map_err(|e| CoreError::Biometric(format!("Failed to save Windows Hello key blob: {e}")))?;
+    harden_path_current_user_only(&path)?;
+    if let Ok(legacy) = legacy_dpapi_path(account_id) {
+        let _ = fs::remove_file(legacy);
+    }
+    Ok(())
 }
 
 pub fn keychain_load(account_id: &str) -> Result<Zeroizing<Vec<u8>>, CoreError> {
-    let path = dpapi_key_path(account_id)?;
-    let encrypted = fs::read(&path)
-        .map_err(|e| CoreError::Biometric(format!("No Windows DPAPI key stored: {e}")))?;
-    let in_blob = CRYPT_INTEGER_BLOB {
-        cbData: encrypted.len() as u32,
-        pbData: encrypted.as_ptr() as *mut u8,
-    };
-    let mut out_blob = CRYPT_INTEGER_BLOB {
-        cbData: 0,
-        pbData: null_mut(),
-    };
-    let ok = unsafe {
-        CryptUnprotectData(
-            &in_blob,
-            null_mut(),
-            null(),
-            null_mut(),
-            null_mut(),
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut out_blob,
-        )
-    };
-    if ok == 0 || out_blob.pbData.is_null() {
+    let path = whkey_path(account_id)?;
+    let cipher = fs::read(&path).map_err(|e| {
+        if legacy_dpapi_path(account_id).map(|p| p.exists()).unwrap_or(false) {
+            CoreError::Biometric(
+                "Legacy Windows DPAPI biometric binding is disabled; please unlock once with your master password to re-bind Windows Hello hardware key."
+                    .to_string(),
+            )
+        } else {
+            CoreError::Biometric(format!("No Windows Hello hardware key stored: {e}"))
+        }
+    })?;
+
+    let prov = open_passport_ksp()?;
+    let container = encode_wide_null(&wh_key_container_name(account_id));
+    let mut key_handle: NCRYPT_KEY_HANDLE = 0;
+    let status = unsafe { NCryptOpenKey(prov.0, &mut key_handle, container.as_ptr(), 0, 0) };
+    if status != 0 || key_handle == 0 {
         return Err(CoreError::Biometric(format!(
-            "Windows DPAPI CryptUnprotectData failed ({})",
-            unsafe { GetLastError() }
+            "Windows Hello NCryptOpenKey failed (0x{status:08x})"
         )));
     }
-    let plain =
-        unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
-    unsafe {
-        LocalFree(out_blob.pbData as HLOCAL);
+    let key_guard = NcryptHandle(key_handle);
+
+    let sha256_wide = encode_wide_null("SHA256");
+    let mut oaep = BCRYPT_OAEP_PADDING_INFO {
+        pszAlgId: sha256_wide.as_ptr(),
+        pbLabel: null_mut(),
+        cbLabel: 0,
+    };
+    let mut plain_len: u32 = 0;
+    let status = unsafe {
+        NCryptDecrypt(
+            key_guard.0,
+            cipher.as_ptr(),
+            cipher.len() as u32,
+            &mut oaep as *mut BCRYPT_OAEP_PADDING_INFO as *mut c_void,
+            null_mut(),
+            0,
+            &mut plain_len,
+            NCRYPT_PAD_OAEP_FLAG,
+        )
+    };
+    if status != 0 || plain_len == 0 {
+        return Err(CoreError::Biometric(format!(
+            "Windows Hello NCryptDecrypt size query failed (0x{status:08x})"
+        )));
     }
-    Ok(Zeroizing::new(plain))
+
+    let mut plain = Zeroizing::new(vec![0u8; plain_len as usize]);
+    let status = unsafe {
+        NCryptDecrypt(
+            key_guard.0,
+            cipher.as_ptr(),
+            cipher.len() as u32,
+            &mut oaep as *mut BCRYPT_OAEP_PADDING_INFO as *mut c_void,
+            plain.as_mut_ptr(),
+            plain_len,
+            &mut plain_len,
+            NCRYPT_PAD_OAEP_FLAG,
+        )
+    };
+    if status != 0 {
+        return Err(CoreError::Biometric(format!(
+            "Windows Hello NCryptDecrypt failed (0x{status:08x})"
+        )));
+    }
+    plain.truncate(plain_len as usize);
+    Ok(plain)
 }
 
 static LAST_EXTERNAL_HWND: AtomicIsize = AtomicIsize::new(0);
@@ -464,11 +767,26 @@ pub fn auto_type_sequence(steps: &[crate::macos::AutoTypeStep]) -> Result<(), Co
 }
 
 pub fn keychain_delete(account_id: &str) -> Result<(), CoreError> {
-    let path = dpapi_key_path(account_id)?;
-    if path.exists() {
-        fs::remove_file(&path).map_err(|e| {
-            CoreError::Biometric(format!("Failed to remove Windows DPAPI key blob: {e}"))
-        })?;
+    if let Ok(prov) = open_passport_ksp() {
+        let container = encode_wide_null(&wh_key_container_name(account_id));
+        let mut key_handle: NCRYPT_KEY_HANDLE = 0;
+        if unsafe { NCryptOpenKey(prov.0, &mut key_handle, container.as_ptr(), 0, 0) } == 0
+            && key_handle != 0
+        {
+            unsafe {
+                let _ = NCryptDeleteKey(key_handle, 0);
+            }
+        }
+    }
+    if let Ok(wh) = whkey_path(account_id) {
+        if wh.exists() {
+            fs::remove_file(&wh).map_err(|e| {
+                CoreError::Biometric(format!("Failed to remove Windows Hello key blob: {e}"))
+            })?;
+        }
+    }
+    if let Ok(legacy) = legacy_dpapi_path(account_id) {
+        let _ = fs::remove_file(legacy);
     }
     Ok(())
 }

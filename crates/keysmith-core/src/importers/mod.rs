@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::crypto::{
-    decrypt_string, derive_master_key, encrypt_bytes, stretch_master_key, KdfConfig,
+    decrypt_string_authenticated, derive_master_key, encrypt_bytes, stretch_master_key, KdfConfig,
     UserSymmetricKey,
 };
 use crate::domain::{
@@ -1187,10 +1187,10 @@ pub fn decrypt_keysmith_export(
             .ok_or_else(|| CoreError::Validation("需要导出密码才能解密".to_string()))?;
         let mk = derive_master_key(pass, &salt, &kdf)?;
         let smk = stretch_master_key(&mk)?;
-        let pt = decrypt_string(&env.payload_enc, smk.enc_key(), smk.mac_key())?;
+        let pt = decrypt_string_authenticated(&env.payload_enc, smk.enc_key(), smk.mac_key())?;
         Ok(pt.to_string())
     } else if let Some(u) = usk {
-        let pt = u.decrypt_string(&env.payload_enc)?;
+        let pt = u.decrypt_string_authenticated(&env.payload_enc)?;
         Ok(pt.to_string())
     } else {
         Err(CoreError::InvalidState("缺少解密密钥".to_string()))

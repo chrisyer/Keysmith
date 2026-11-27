@@ -62,6 +62,11 @@ export const es = {
     demoHint: 'Contraseña maestra de demostración: {pw}',
     savedAccountsQuickSwitch: 'Cuentas guardadas',
     cancelAddAccount: 'Cancelar',
+    insecureHttpWarning: 'Se detectó una conexión HTTP insegura para un servidor remoto. Las credenciales y los tokens podrían ser interceptados en la red si no usas HTTPS.',
+    insecureHttpConfirm: 'Entiendo el riesgo y permito HTTP sin cifrar para este servidor',
+    insecureHttpRequired: 'Confirma la advertencia de riesgo HTTP sin cifrar antes de continuar o cambia a https://.',
+    weakKdfWarning: 'Se detectó una KDF débil (PBKDF2 con {iterations} iteraciones < 600 000). Se recomienda aumentar las iteraciones en el servidor.',
+    masterPasswordTooWeak: 'La contraseña maestra debe tener al menos 12 caracteres e incluir al menos 2 tipos de caracteres (mayúsculas, minúsculas, dígitos o símbolos).',
   },
   lock: {
     unlockPlaceholder: 'Introduce la contraseña maestra',

@@ -1,7 +1,11 @@
 pub mod signalr;
 
+use std::collections::HashSet;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::{Arc, RwLock};
+
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use reqwest::{multipart, Client, StatusCode};
+use reqwest::{multipart, redirect::Policy, Client, StatusCode};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
@@ -749,6 +753,7 @@ pub async fn check_github_latest_release(
 #[derive(Clone)]
 pub struct VaultwardenClient {
     http: Client,
+    allowed_insecure_origins: Arc<RwLock<HashSet<String>>>,
 }
 
 impl Default for VaultwardenClient {
@@ -757,26 +762,216 @@ impl Default for VaultwardenClient {
     }
 }
 
+/// Returns `true` if `host` is a local loopback address safe for plain HTTP dev/test traffic.
+pub fn is_loopback_host(host: &str) -> bool {
+    let trimmed = host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    if trimmed == "localhost" || trimmed.ends_with(".localhost") {
+        return true;
+    }
+    if let Ok(ip) = trimmed.parse::<IpAddr>() {
+        return match ip {
+            IpAddr::V4(v4) => v4.is_loopback(),
+            IpAddr::V6(v6) => {
+                v6.is_loopback() || v6.to_ipv4_mapped().map(|v4| v4.is_loopback()).unwrap_or(false)
+            }
+        };
+    }
+    false
+}
+
+/// Returns `true` only if `ip` is a globally routable public IP address (rejects loopback,
+/// private LAN, link-local / cloud metadata 169.254.0.0/16, CGNAT, ULA, multicast, etc.).
+pub fn is_public_ip(ip: IpAddr) -> bool {
+    fn is_public_v4(v4: Ipv4Addr) -> bool {
+        let [a, b, _, _] = v4.octets();
+        if v4.is_loopback()
+            || v4.is_private()
+            || v4.is_link_local()
+            || v4.is_broadcast()
+            || v4.is_unspecified()
+            || v4.is_multicast()
+            || v4.is_documentation()
+        {
+            return false;
+        }
+        if a == 0 {
+            return false;
+        }
+        if a == 100 && (64..=127).contains(&b) {
+            return false;
+        }
+        if a == 198 && (b == 18 || b == 19) {
+            return false;
+        }
+        if a >= 224 {
+            return false;
+        }
+        true
+    }
+
+    match ip {
+        IpAddr::V4(v4) => is_public_v4(v4),
+        IpAddr::V6(v6) => {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_public_v4(mapped);
+            }
+            if v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() {
+                return false;
+            }
+            let seg0 = v6.segments()[0];
+            if (seg0 & 0xfe00) == 0xfc00 {
+                return false;
+            }
+            if (seg0 & 0xffc0) == 0xfe80 {
+                return false;
+            }
+            if seg0 == 0x2001 && v6.segments()[1] == 0x0db8 {
+                return false;
+            }
+            let _ = Ipv6Addr::LOCALHOST;
+            true
+        }
+    }
+}
+
+/// Normalize and validate a candidate host for favicon fetching, rejecting localhost,
+/// private/internal domains, invalid characters, and non-public IP literals.
+pub fn validate_favicon_host(raw: &str) -> Option<String> {
+    let mut s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(rest) = s
+        .strip_prefix("https://")
+        .or_else(|| s.strip_prefix("http://"))
+    {
+        s = rest;
+    }
+    let authority = s.split('/').next()?.split('?').next()?.split('#').next()?;
+    if authority.contains('@') {
+        return None;
+    }
+    let host = if authority.starts_with('[') {
+        authority.split(']').next()?.trim_start_matches('[')
+    } else {
+        authority.split(':').next()?
+    };
+    let clean = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    if clean.is_empty()
+        || clean.len() > 253
+        || clean == "localhost"
+        || clean.ends_with(".localhost")
+        || clean.ends_with(".local")
+        || clean.ends_with(".internal")
+        || clean.ends_with(".lan")
+        || clean.ends_with(".arpa")
+        || clean.contains("..")
+    {
+        return None;
+    }
+    if let Ok(ip) = clean.parse::<IpAddr>() {
+        return if is_public_ip(ip) { Some(clean) } else { None };
+    }
+    if !clean.contains('.') {
+        return None;
+    }
+    let valid_chars = clean
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-');
+    if !valid_chars || clean.starts_with('-') || clean.ends_with('-') {
+        return None;
+    }
+    Some(clean)
+}
+
 impl VaultwardenClient {
     pub fn new() -> Self {
         let http = Client::builder()
-            .user_agent("Keysmith/0.1.0 (macOS; Tauri)")
+            .user_agent("Keysmith/0.1.4 (macOS; Tauri)")
             .timeout(std::time::Duration::from_secs(20))
             .build()
             .unwrap_or_else(|_| Client::new());
-        Self { http }
+        Self {
+            http,
+            allowed_insecure_origins: Arc::new(RwLock::new(HashSet::new())),
+        }
     }
 
+    fn origin_key(parsed: &url::Url) -> String {
+        format!(
+            "{}://{}{}",
+            parsed.scheme(),
+            parsed.host_str().unwrap_or_default().to_ascii_lowercase(),
+            parsed.port().map(|p| format!(":{p}")).unwrap_or_default()
+        )
+    }
+
+    pub fn allow_insecure_origin(&self, server_url: &str) {
+        if let Ok(parsed) = url::Url::parse(server_url.trim()) {
+            if parsed.scheme() == "http" {
+                let key = Self::origin_key(&parsed);
+                if let Ok(mut guard) = self.allowed_insecure_origins.write() {
+                    guard.insert(key);
+                }
+            }
+        }
+    }
+
+    pub fn is_insecure_origin_allowed(&self, server_url: &str) -> bool {
+        let Ok(parsed) = url::Url::parse(server_url.trim()) else {
+            return false;
+        };
+        if parsed.scheme() != "http" {
+            return false;
+        }
+        let key = Self::origin_key(&parsed);
+        self.allowed_insecure_origins
+            .read()
+            .map(|g| g.contains(&key))
+            .unwrap_or(false)
+    }
+
+    /// Strict URL normalization: allows `https://` everywhere and `http://` ONLY on loopback hosts.
     pub fn normalize_base_url(server_url: &str) -> Result<String, CoreError> {
+        Self::normalize_base_url_with_policy(server_url, false)
+    }
+
+    /// URL normalization allowing non-loopback `http://` only when the user explicitly opted in.
+    pub fn normalize_base_url_with_policy(
+        server_url: &str,
+        allow_insecure_http: bool,
+    ) -> Result<String, CoreError> {
         let trimmed = server_url.trim().trim_end_matches('/');
         let parsed = url::Url::parse(trimmed)
             .map_err(|_| CoreError::Validation("服务器地址格式无效".to_string()))?;
-        if parsed.scheme() != "http" && parsed.scheme() != "https" {
-            return Err(CoreError::Validation(
-                "服务器地址必须以 http:// 或 https:// 开头".to_string(),
-            ));
+        let host = parsed
+            .host_str()
+            .filter(|h| !h.trim().is_empty())
+            .ok_or_else(|| CoreError::Validation("服务器地址缺少主机名".to_string()))?;
+        match parsed.scheme() {
+            "https" => Ok(trimmed.to_string()),
+            "http" => {
+                if is_loopback_host(host) || allow_insecure_http {
+                    Ok(trimmed.to_string())
+                } else {
+                    Err(CoreError::Validation(
+                        "出于安全策略默认仅允许 HTTPS 服务器（或本机回环地址）。如确需连接内网明文 HTTP 服务器，请勾选「允许不安全的 HTTP 连接」。"
+                            .to_string(),
+                    ))
+                }
+            }
+            _ => Err(CoreError::Validation(
+                "服务器地址必须以 https:// 或受信任的 http:// 开头".to_string(),
+            )),
         }
-        Ok(trimmed.to_string())
+    }
+
+    fn normalize_request_url(&self, server_url: &str) -> Result<String, CoreError> {
+        Self::normalize_base_url_with_policy(server_url, self.is_insecure_origin_allowed(server_url))
     }
 
     fn summarize_http_error_body(body: &str) -> String {
@@ -892,7 +1087,15 @@ impl VaultwardenClient {
     }
 
     pub async fn check_server(&self, server_url: &str) -> Result<(String, bool), CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        self.check_server_with_policy(server_url, false).await
+    }
+
+    pub async fn check_server_with_policy(
+        &self,
+        server_url: &str,
+        allow_insecure_http: bool,
+    ) -> Result<(String, bool), CoreError> {
+        let base = Self::normalize_base_url_with_policy(server_url, allow_insecure_http)?;
         let resp = self
             .http
             .get(format!("{base}/api/config"))
@@ -922,7 +1125,16 @@ impl VaultwardenClient {
     }
 
     pub async fn prelogin(&self, server_url: &str, email: &str) -> Result<KdfConfig, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        self.prelogin_with_policy(server_url, email, false).await
+    }
+
+    pub async fn prelogin_with_policy(
+        &self,
+        server_url: &str,
+        email: &str,
+        allow_insecure_http: bool,
+    ) -> Result<KdfConfig, CoreError> {
+        let base = Self::normalize_base_url_with_policy(server_url, allow_insecure_http)?;
         let email = normalize_email(email);
         let resp = self
             .http
@@ -942,7 +1154,9 @@ impl VaultwardenClient {
             .json()
             .await
             .map_err(|e| CoreError::Network(format!("解析 Prelogin 响应失败: {e}")))?;
-        Ok(body.into())
+        let cfg: KdfConfig = body.into();
+        cfg.validate()?;
+        Ok(cfg)
     }
 
     pub async fn login_password(
@@ -953,7 +1167,27 @@ impl VaultwardenClient {
         device_identifier: &str,
         two_factor_code: Option<&str>,
     ) -> Result<TokenResponse, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        self.login_password_with_policy(
+            server_url,
+            email,
+            master_password_hash,
+            device_identifier,
+            two_factor_code,
+            false,
+        )
+        .await
+    }
+
+    pub async fn login_password_with_policy(
+        &self,
+        server_url: &str,
+        email: &str,
+        master_password_hash: &str,
+        device_identifier: &str,
+        two_factor_code: Option<&str>,
+        allow_insecure_http: bool,
+    ) -> Result<TokenResponse, CoreError> {
+        let base = Self::normalize_base_url_with_policy(server_url, allow_insecure_http)?;
         let normalized = normalize_email(email);
         let auth_email = URL_SAFE_NO_PAD.encode(normalized.as_bytes());
 
@@ -1028,7 +1262,7 @@ impl VaultwardenClient {
         server_url: &str,
         refresh_token: &str,
     ) -> Result<TokenResponse, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let form = [
             ("grant_type", "refresh_token"),
             ("client_id", "desktop"),
@@ -1056,9 +1290,18 @@ impl VaultwardenClient {
     pub async fn register(
         &self,
         server_url: &str,
-        mut payload: RegisterRequest,
+        payload: RegisterRequest,
     ) -> Result<(), CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        self.register_with_policy(server_url, payload, false).await
+    }
+
+    pub async fn register_with_policy(
+        &self,
+        server_url: &str,
+        mut payload: RegisterRequest,
+        allow_insecure_http: bool,
+    ) -> Result<(), CoreError> {
+        let base = Self::normalize_base_url_with_policy(server_url, allow_insecure_http)?;
 
         let verify_resp = self
             .http
@@ -1115,7 +1358,7 @@ impl VaultwardenClient {
     }
 
     pub async fn sync(&self, server_url: &str, access_token: &str) -> Result<SyncResponse, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .get(format!("{base}/api/sync?excludeDomains=true"))
@@ -1140,7 +1383,7 @@ impl VaultwardenClient {
         server_url: &str,
         access_token: &str,
     ) -> Result<String, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .get(format!("{base}/api/accounts/revision-date"))
@@ -1165,7 +1408,7 @@ impl VaultwardenClient {
         access_token: &str,
         name_enc: &str,
     ) -> Result<FolderDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .post(format!("{base}/api/folders"))
@@ -1191,7 +1434,7 @@ impl VaultwardenClient {
         id: &str,
         name_enc: &str,
     ) -> Result<FolderDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .put(format!("{base}/api/folders/{id}"))
@@ -1216,7 +1459,7 @@ impl VaultwardenClient {
         access_token: &str,
         id: &str,
     ) -> Result<(), CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .delete(format!("{base}/api/folders/{id}"))
@@ -1239,7 +1482,7 @@ impl VaultwardenClient {
         cipher: &CipherDto,
         encrypted_for: &str,
     ) -> Result<CipherDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let payload = CipherCreateUpdatePayload::from_cipher(cipher, Some(encrypted_for));
         let resp = self
             .http
@@ -1267,7 +1510,7 @@ impl VaultwardenClient {
         cipher: &CipherDto,
         encrypted_for: &str,
     ) -> Result<CipherDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let payload = CipherCreateUpdatePayload::from_cipher(cipher, Some(encrypted_for));
         let resp = self
             .http
@@ -1296,7 +1539,7 @@ impl VaultwardenClient {
         collection_ids: &[String],
         encrypted_for: &str,
     ) -> Result<CipherDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let payload = CipherSharePayload {
             cipher: CipherCreateUpdatePayload::from_cipher(cipher, Some(encrypted_for)),
             collection_ids: collection_ids.to_vec(),
@@ -1326,7 +1569,7 @@ impl VaultwardenClient {
         id: &str,
         collection_ids: &[String],
     ) -> Result<CipherDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let payload = CipherCollectionsPayload {
             collection_ids: collection_ids.to_vec(),
         };
@@ -1354,7 +1597,7 @@ impl VaultwardenClient {
         access_token: &str,
         id: &str,
     ) -> Result<(), CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .put(format!("{base}/api/ciphers/{id}/delete"))
@@ -1376,7 +1619,7 @@ impl VaultwardenClient {
         access_token: &str,
         id: &str,
     ) -> Result<CipherDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .put(format!("{base}/api/ciphers/{id}/restore"))
@@ -1400,7 +1643,7 @@ impl VaultwardenClient {
         access_token: &str,
         id: &str,
     ) -> Result<(), CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .delete(format!("{base}/api/ciphers/{id}"))
@@ -1425,7 +1668,7 @@ impl VaultwardenClient {
         key_enc: &str,
         encrypted_bytes: Vec<u8>,
     ) -> Result<CipherDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let part = multipart::Part::bytes(encrypted_bytes)
             .file_name(file_name_enc.to_string())
             .mime_str("application/octet-stream")
@@ -1459,7 +1702,7 @@ impl VaultwardenClient {
         cipher_id: &str,
         attachment_id: &str,
     ) -> Result<(), CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .delete(format!(
@@ -1489,11 +1732,11 @@ impl VaultwardenClient {
             if u.starts_with("http://") || u.starts_with("https://") {
                 u.to_string()
             } else {
-                let base = Self::normalize_base_url(server_url)?;
+                let base = self.normalize_request_url(server_url)?;
                 format!("{base}/{}", u.trim_start_matches('/'))
             }
         } else {
-            let base = Self::normalize_base_url(server_url)?;
+            let base = self.normalize_request_url(server_url)?;
             let meta_resp = self
                 .http
                 .get(format!(
@@ -1540,16 +1783,46 @@ impl VaultwardenClient {
             .map_err(|e| CoreError::Network(e.to_string()))
     }
 
-    pub async fn fetch_favicon_bytes(&self, url: &str, max_bytes: usize) -> Option<Vec<u8>> {
-        let resp = self
-            .http
-            .get(url)
-            .timeout(std::time::Duration::from_secs(4))
-            .send()
-            .await
-            .ok()?;
+    pub async fn fetch_favicon_bytes(
+        &self,
+        url: &str,
+        max_bytes: usize,
+        trusted_proxy: bool,
+    ) -> Option<Vec<u8>> {
+        let parsed = url::Url::parse(url).ok()?;
+        let mut builder = Client::builder()
+            .user_agent("Keysmith/0.1.4")
+            .redirect(Policy::none())
+            .timeout(std::time::Duration::from_secs(4));
+
+        if !trusted_proxy {
+            if parsed.scheme() != "https" {
+                return None;
+            }
+            let host = parsed.host_str()?;
+            let clean_host = validate_favicon_host(host)?;
+            let port = parsed.port_or_known_default().unwrap_or(443);
+            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((clean_host.as_str(), port))
+                .await
+                .ok()?
+                .collect();
+            if addrs.is_empty() || addrs.iter().any(|addr| !is_public_ip(addr.ip())) {
+                return None;
+            }
+            builder = builder.resolve(&clean_host, addrs[0]);
+        } else if !matches!(parsed.scheme(), "https" | "http") {
+            return None;
+        }
+
+        let client = builder.build().ok()?;
+        let resp = client.get(url).send().await.ok()?;
         if !resp.status().is_success() {
             return None;
+        }
+        if let Some(len) = resp.content_length() {
+            if len as usize > max_bytes {
+                return None;
+            }
         }
         let bytes = resp.bytes().await.ok()?;
         if bytes.is_empty() || bytes.len() > max_bytes {
@@ -1582,7 +1855,7 @@ impl VaultwardenClient {
         server_url: &str,
         access_token: &str,
     ) -> Result<Vec<SendDto>, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .get(format!("{base}/api/sends"))
@@ -1615,7 +1888,7 @@ impl VaultwardenClient {
         access_token: &str,
         payload: &SendCreateUpdatePayload,
     ) -> Result<SendDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .post(format!("{base}/api/sends"))
@@ -1642,7 +1915,7 @@ impl VaultwardenClient {
         encrypted_file_name: &str,
         encrypted_file_bytes: Vec<u8>,
     ) -> Result<SendDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         // 1. Try modern /api/sends/file/v2 two-step upload flow first
         let v2_resp = self
             .http
@@ -1749,7 +2022,7 @@ impl VaultwardenClient {
         id: &str,
         payload: &SendCreateUpdatePayload,
     ) -> Result<SendDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .put(format!("{base}/api/sends/{id}"))
@@ -1774,7 +2047,7 @@ impl VaultwardenClient {
         access_token: &str,
         id: &str,
     ) -> Result<SendDto, CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .put(format!("{base}/api/sends/{id}/remove-password"))
@@ -1798,7 +2071,7 @@ impl VaultwardenClient {
         access_token: &str,
         id: &str,
     ) -> Result<(), CoreError> {
-        let base = Self::normalize_base_url(server_url)?;
+        let base = self.normalize_request_url(server_url)?;
         let resp = self
             .http
             .delete(format!("{base}/api/sends/{id}"))

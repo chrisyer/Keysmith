@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
-  AccountPasskey,
   AccountSummary,
   AppSettings,
   AppSettingsPatch,
@@ -45,15 +44,9 @@ import { generateSecret } from './generator';
 import {
   DEMO_ACCOUNT_USER_ID,
   DEMO_RP_ID,
-  INITIAL_ACCOUNT_PASSKEYS,
   INITIAL_ITEMS,
   INITIAL_VAULTS,
 } from './mockData';
-import {
-  APPLE_TOUCH_ID_AAGUID,
-  YUBIKEY_5_AAGUID,
-  generatePasskeyKeypair,
-} from './passkey';
 import { scoreSearchQuery } from './search';
 import { computeTotp } from './totp';
 import { runWatchtowerAudit, sha1PrefixHex } from './watchtower';
@@ -112,13 +105,14 @@ type EventListener<K extends keyof TauriEventMap> = (payload: TauriEventMap[K]) 
 export interface KeysmithClient {
   onEvent<K extends keyof TauriEventMap>(event: K, listener: EventListener<K>): () => void;
 
-  authPrelogin(serverUrl: string, email: string): Promise<KdfConfig>;
-  authCheckServer(serverUrl: string): Promise<ServerCheckResult>;
+  authPrelogin(serverUrl: string, email: string, allowInsecureHttp?: boolean): Promise<KdfConfig>;
+  authCheckServer(serverUrl: string, allowInsecureHttp?: boolean): Promise<ServerCheckResult>;
   authLogin(params: {
     serverUrl: string;
     email: string;
     masterPassword: string;
     twoFactorCode?: string;
+    allowInsecureHttp?: boolean;
   }): Promise<SessionState>;
   authRegister(params: {
     serverUrl: string;
@@ -126,6 +120,7 @@ export interface KeysmithClient {
     name: string;
     masterPassword: string;
     kdfConfig?: KdfConfig;
+    allowInsecureHttp?: boolean;
   }): Promise<SessionState>;
   authLogout(clearLocalCache?: boolean): Promise<void>;
   sessionGetState(): Promise<SessionState>;
@@ -135,18 +130,6 @@ export interface KeysmithClient {
   sessionLock(reason?: string): Promise<void>;
   sessionTouchActivity(): Promise<void>;
 
-  authPasskeyLogin(credentialId?: string): Promise<SessionState>;
-  accountPasskeyList(): Promise<{
-    rpId: string;
-    userId: string;
-    credentials: AccountPasskey[];
-  }>;
-  accountPasskeyRegister(
-    name: string,
-    deviceType: 'multiDevice' | 'singleDevice',
-  ): Promise<AccountPasskey>;
-  accountPasskeyRename(id: string, name: string): Promise<AccountPasskey>;
-  accountPasskeyDelete(id: string): Promise<void>;
   accountUpdateProfile(displayName: string): Promise<{
     rpId: string;
     userId: string;
@@ -315,12 +298,12 @@ class KeysmithTauriClient implements KeysmithClient {
     };
   }
 
-  authPrelogin(serverUrl: string, email: string): Promise<KdfConfig> {
-    return invokeCore<KdfConfig>('auth_prelogin', { serverUrl, email });
+  authPrelogin(serverUrl: string, email: string, allowInsecureHttp = false): Promise<KdfConfig> {
+    return invokeCore<KdfConfig>('auth_prelogin', { serverUrl, email, allowInsecureHttp });
   }
 
-  authCheckServer(serverUrl: string): Promise<ServerCheckResult> {
-    return invokeCore<ServerCheckResult>('auth_check_server', { serverUrl });
+  authCheckServer(serverUrl: string, allowInsecureHttp = false): Promise<ServerCheckResult> {
+    return invokeCore<ServerCheckResult>('auth_check_server', { serverUrl, allowInsecureHttp });
   }
 
   authLogin(params: {
@@ -328,12 +311,14 @@ class KeysmithTauriClient implements KeysmithClient {
     email: string;
     masterPassword: string;
     twoFactorCode?: string;
+    allowInsecureHttp?: boolean;
   }): Promise<SessionState> {
     return invokeCore<SessionState>('auth_login', {
       serverUrl: params.serverUrl,
       email: params.email,
       masterPassword: params.masterPassword,
       twoFactorCode: params.twoFactorCode ?? null,
+      allowInsecureHttp: params.allowInsecureHttp ?? false,
     });
   }
 
@@ -343,6 +328,7 @@ class KeysmithTauriClient implements KeysmithClient {
     name: string;
     masterPassword: string;
     kdfConfig?: KdfConfig;
+    allowInsecureHttp?: boolean;
   }): Promise<SessionState> {
     return invokeCore<SessionState>('auth_register', {
       serverUrl: params.serverUrl,
@@ -350,6 +336,7 @@ class KeysmithTauriClient implements KeysmithClient {
       name: params.name,
       masterPassword: params.masterPassword,
       kdfConfig: params.kdfConfig ?? null,
+      allowInsecureHttp: params.allowInsecureHttp ?? false,
     });
   }
 
@@ -379,35 +366,6 @@ class KeysmithTauriClient implements KeysmithClient {
 
   sessionTouchActivity(): Promise<void> {
     return invokeCore<void>('session_touch_activity');
-  }
-
-  authPasskeyLogin(credentialId?: string): Promise<SessionState> {
-    return invokeCore<SessionState>('auth_passkey_login', {
-      credentialId: credentialId ?? null,
-    });
-  }
-
-  accountPasskeyList(): Promise<{
-    rpId: string;
-    userId: string;
-    credentials: AccountPasskey[];
-  }> {
-    return invokeCore('account_passkey_list');
-  }
-
-  accountPasskeyRegister(
-    name: string,
-    deviceType: 'multiDevice' | 'singleDevice',
-  ): Promise<AccountPasskey> {
-    return invokeCore<AccountPasskey>('account_passkey_register', { name, deviceType });
-  }
-
-  accountPasskeyRename(id: string, name: string): Promise<AccountPasskey> {
-    return invokeCore<AccountPasskey>('account_passkey_rename', { id, name });
-  }
-
-  accountPasskeyDelete(id: string): Promise<void> {
-    return invokeCore<void>('account_passkey_delete', { id });
   }
 
   accountUpdateProfile(displayName: string): Promise<{
@@ -825,7 +783,6 @@ class KeysmithPrototypeClient implements KeysmithClient {
     archived: Boolean(item.archived),
     attachments: item.attachments ?? [],
   }));
-  private accountPasskeys: AccountPasskey[] = structuredClone(INITIAL_ACCOUNT_PASSKEYS);
   private sends: SendItem[] = [
     {
       id: 'send-demo-1',
@@ -880,7 +837,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     customEquivalentDomains: [],
     disabledAutofillDomains: [],
     autoCopyTotpOnFill: true,
-    sshAgentEnabled: true,
+    sshAgentEnabled: false,
     snapshotIntervalDays: 1,
     snapshotKeepCount: 5,
     syncMode: 'auto',
@@ -892,7 +849,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     email: 'cherry@example.com',
     displayName: 'Cherry Wang',
     serverUrl: 'http://localhost:8080',
-    biometricEnabled: true,
+    biometricEnabled: false,
     autoLockMinutes: 15,
     clipboardClearSeconds: 30,
     lastSyncAt: new Date(Date.now() - 45_000).toISOString(),
@@ -907,7 +864,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     launchAtLogin: false,
     travelMode: false,
     trashAutoPurgeDays: 30,
-    sshBiometricConfirm: false,
+    sshBiometricConfirm: true,
   };
 
   private syncStatusState: SyncStatus = {
@@ -963,12 +920,19 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   // --- Auth & Session ---
 
-  async authPrelogin(_serverUrl: string, _email: string): Promise<KdfConfig> {
+  async authPrelogin(
+    _serverUrl: string,
+    _email: string,
+    _allowInsecureHttp?: boolean,
+  ): Promise<KdfConfig> {
     await new Promise((r) => setTimeout(r, 180));
     return { kdf: 1, kdfIterations: 3, kdfMemory: 64, kdfParallelism: 4 };
   }
 
-  async authCheckServer(serverUrl: string): Promise<ServerCheckResult> {
+  async authCheckServer(
+    serverUrl: string,
+    _allowInsecureHttp?: boolean,
+  ): Promise<ServerCheckResult> {
     await new Promise((r) => setTimeout(r, 240));
     const valid = /^https?:\/\/.+/.test(serverUrl.trim());
     return { ok: valid, version: 'Vaultwarden 1.32.5 (Local)', disableUserRegistration: false };
@@ -979,6 +943,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     email: string;
     masterPassword: string;
     twoFactorCode?: string;
+    allowInsecureHttp?: boolean;
   }): Promise<SessionState> {
     await new Promise((r) => setTimeout(r, 320));
     if (!params.email.trim() || !params.masterPassword) {
@@ -1003,10 +968,11 @@ class KeysmithPrototypeClient implements KeysmithClient {
     name: string;
     masterPassword: string;
     kdfConfig?: KdfConfig;
+    allowInsecureHttp?: boolean;
   }): Promise<SessionState> {
     await new Promise((r) => setTimeout(r, 380));
-    if (!params.email.trim() || params.masterPassword.length < 6) {
-      throw new Error('Please enter a valid email and master password (min 6 characters)');
+    if (!params.email.trim() || params.masterPassword.length < 12) {
+      throw new Error('Please enter a valid email and master password (min 12 characters)');
     }
     this.demoMasterPassword = params.masterPassword;
     this.session = {
@@ -1066,72 +1032,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     // No-op in prototype; resets Rust core inactivity timer in Tauri v2
   }
 
-  // --- Account Passkeys & Multi-Account ---
-
-  async authPasskeyLogin(credentialId?: string): Promise<SessionState> {
-    await new Promise((r) => setTimeout(r, 360));
-    const cred =
-      (credentialId ? this.accountPasskeys.find((c) => c.id === credentialId) : undefined) ??
-      this.accountPasskeys[0];
-    if (!cred) {
-      throw new Error('No account passkey found. Please sign in with your master password.');
-    }
-    cred.counter += 1;
-    cred.lastUsedAt = Date.now();
-    this.session = {
-      ...this.session,
-      status: 'Unlocked',
-      lastSyncAt: new Date().toISOString(),
-    };
-    this.emit('session:state_changed', { status: 'Unlocked', reason: 'passkey_prf' });
-    return { ...this.session };
-  }
-
-  async accountPasskeyList(): Promise<{
-    rpId: string;
-    userId: string;
-    credentials: AccountPasskey[];
-  }> {
-    return {
-      rpId: DEMO_RP_ID,
-      userId: DEMO_ACCOUNT_USER_ID,
-      credentials: structuredClone(this.accountPasskeys),
-    };
-  }
-
-  async accountPasskeyRegister(
-    name: string,
-    deviceType: 'multiDevice' | 'singleDevice',
-  ): Promise<AccountPasskey> {
-    const { credentialId, publicKeySpki } = await generatePasskeyKeypair();
-    const created: AccountPasskey = {
-      id: credentialId,
-      passkeyUserId: DEMO_ACCOUNT_USER_ID,
-      credentialPublicKey: publicKeySpki,
-      credentialType: 'public-key',
-      credentialDeviceType: deviceType,
-      credentialBackedUp: deviceType === 'multiDevice',
-      aaguid: deviceType === 'multiDevice' ? APPLE_TOUCH_ID_AAGUID : YUBIKEY_5_AAGUID,
-      name: name.trim() || (deviceType === 'multiDevice' ? 'New Platform Passkey' : 'Hardware Security Key'),
-      transports: deviceType === 'multiDevice' ? ['internal', 'hybrid'] : ['usb', 'nfc'],
-      registeredAt: Date.now(),
-      counter: 0,
-      prfSupported: true,
-    };
-    this.accountPasskeys.push(created);
-    return structuredClone(created);
-  }
-
-  async accountPasskeyRename(id: string, name: string): Promise<AccountPasskey> {
-    const target = this.accountPasskeys.find((c) => c.id === id);
-    if (!target) throw new Error('Passkey not found');
-    target.name = name.trim() || target.name;
-    return structuredClone(target);
-  }
-
-  async accountPasskeyDelete(id: string): Promise<void> {
-    this.accountPasskeys = this.accountPasskeys.filter((c) => c.id !== id);
-  }
+  // --- Account Profile ---
 
   async accountUpdateProfile(displayName: string): Promise<{
     rpId: string;
@@ -1987,7 +1888,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
   }
 
   async sshAgentGetStatus(): Promise<SshAgentStatus> {
-    const enabled = this.appSettings.sshAgentEnabled !== false;
+    const enabled = this.appSettings.sshAgentEnabled === true;
     const loadedKeyCount = enabled
       ? this.items.filter((i) => !i.deletedAt && !i.archived && i.category === 'ssh_key').length
       : 0;

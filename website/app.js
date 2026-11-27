@@ -100,11 +100,11 @@ const I18N = {
     },
     arch: {
       eyebrow: '安全架构',
-      title: '密码只在你的内存里短暂停留，磁盘零明文',
-      body: '无论在线还是离线，Keysmith 坚持纯本地加解密原则：主密码通过 Argon2id 或 PBKDF2-SHA256 在本地派生主密钥，绝不上传至任何服务器；锁定或系统休眠瞬间立即触发 Zeroize 内存清零并撤销浮窗凭证。',
-      li1: '支持 macOS 生物识别（Touch ID）与 Windows Hello 快速解锁，敏感操作可设主密码二次验证',
+      title: '密码只在你的内存里短暂停留，磁盘仅存加密负载',
+      body: '无论在线还是离线，Keysmith 坚持纯本地加解密原则：主密码通过 Argon2id 或 PBKDF2-SHA256 在本地派生主密钥，绝不上传至任何服务器；条目载荷、私钥与会话令牌在 SQLite 中加密落盘，锁定或休眠瞬间触发 Zeroize 内存清零。',
+      li1: '支持 macOS Touch ID（签名版使用 Data Protection Keychain ACL）与 Windows Hello CNG 硬件绑定解锁，敏感操作可设主密码二次验证',
       li2: 'macOS 剪贴板写入 ConcealedType / TransientType 隐私标记，防止剪贴板历史工具偷录',
-      li3: '可开启窗口防截屏保护（NSWindow SharingNone），并定期生成零知识本地加密快照',
+      li3: '可开启窗口防截屏保护（screen_capture_protected），并定期生成零知识本地加密快照',
       imgCaption: '密钥派生、EncString Type 2 认证解密与内存擦除全部在本地 Rust 安全核心完成',
       svgStep1Eyebrow: 'LOCAL AUTH',
       svgStep1Title: '主密码 + 生物识别',
@@ -114,7 +114,7 @@ const I18N = {
       svgStep2Sub2: 'Passkey · TOTP · SSH Agent',
       svgStep2Sub3: '共享跨平台内核（Desktop / Mobile）',
       svgStep3Eyebrow: 'ENCRYPTED CACHE',
-      svgStep3Title: '零明文 SQLite',
+      svgStep3Title: '加密存储 SQLite',
       svgStep3Sub: '离线可用 · 变更队列',
       svgStep3Sub2: '自动定时加密快照',
       svgStep4Eyebrow: 'CLOUD SYNC',
@@ -161,7 +161,7 @@ const I18N = {
       desc: 'v0.1.4 已就绪，提供 macOS / Windows 安装器、Homebrew Cask、命令行工具与浏览器扩展压缩包。',
       p0Title: 'macOS Homebrew Cask（推荐 · 支持一键升级）',
       p0Desc:
-        '请务必携带完整的 tap 前缀 chrisyer/keysmith/keysmith，避免与 Homebrew 官方源中同名应用冲突。安装脚本会自动清除隔离属性以顺畅打开。',
+        '请务必携带完整的 tap 前缀 chrisyer/keysmith/keysmith，避免与 Homebrew 官方源中同名应用冲突。当前发布为本地 ad-hoc 签名，首次打开可在 macOS「隐私与安全性」中放行，或按提示手动执行 xattr -dr com.apple.quarantine /Applications/Keysmith.app。',
       p1Title: 'macOS 一键安装脚本（自动校验 SHA-256）',
       p1Desc:
         '自动识别 Apple Silicon (arm64) 与 Intel (x64)，下载对应 DMG、校验 SHA-256 哈希并安装至 /Applications。',
@@ -279,9 +279,9 @@ const I18N = {
     },
     arch: {
       eyebrow: 'Security Architecture',
-      title: 'Secrets live briefly in memory—never as plaintext on disk',
-      body: 'Whether online or offline, Keysmith derives master keys strictly on-device via Argon2id or PBKDF2-SHA256. Master passwords never touch the wire, and locking or system sleep triggers immediate zeroize memory wiping.',
-      li1: 'Native Touch ID & Windows Hello unlock with configurable master-password reprompt intervals',
+      title: 'Secrets stay in memory briefly—encrypted payloads only on disk',
+      body: 'Whether online or offline, Keysmith derives master keys strictly on-device via Argon2id or PBKDF2-SHA256. Vault items, private keys, and session tokens are stored encrypted in SQLite (with non-sensitive sync/index metadata only), and locking triggers immediate zeroize wiping.',
+      li1: 'macOS Touch ID (Data Protection Keychain ACL on signed builds) & Windows Hello CNG hardware-backed unlock with configurable reprompt',
       li2: 'macOS NSPasteboard ConcealedType / TransientType markers keep secrets out of clipboard managers',
       li3: 'Optional screen-capture window protection and scheduled zero-knowledge encrypted local snapshots',
       imgCaption: 'Key derivation, EncString Type 2 decryption, and memory wiping run inside the local Rust core',
@@ -293,7 +293,7 @@ const I18N = {
       svgStep2Sub2: 'Passkey · TOTP · SSH Agent',
       svgStep2Sub3: 'Shared Core (Desktop & Mobile)',
       svgStep3Eyebrow: 'ENCRYPTED CACHE',
-      svgStep3Title: 'Zero-Plaintext SQLite',
+      svgStep3Title: 'Encrypted SQLite Cache',
       svgStep3Sub: 'Offline Queue · Local Index',
       svgStep3Sub2: 'Encrypted Local Snapshots',
       svgStep4Eyebrow: 'CLOUD SYNC',
@@ -337,10 +337,10 @@ const I18N = {
     inst: {
       eyebrow: 'Get Started',
       title: 'Choose your preferred installation method',
-      desc: 'v0.1.4 is live with signed bundles for macOS & Windows, Homebrew Cask, CLI binaries, and the Manifest V3 browser extension.',
+      desc: 'v0.1.4 is live with installers for macOS & Windows (ad-hoc signed builds), Homebrew Cask, CLI binaries, and the Manifest V3 browser extension.',
       p0Title: 'macOS Homebrew Cask (Recommended · Easy Upgrades)',
       p0Desc:
-        'Always include the full chrisyer/keysmith/keysmith tap prefix to avoid colliding with Homebrew’s unrelated official keysmith cask.',
+        'Always include the full chrisyer/keysmith/keysmith tap prefix to avoid colliding with Homebrew’s unrelated official keysmith cask. Builds are currently ad-hoc signed; approve via macOS Privacy & Security or manual xattr -dr com.apple.quarantine.',
       p1Title: 'macOS One-Line Installer (Auto SHA-256 Verification)',
       p1Desc:
         'Detects Apple Silicon (arm64) or Intel (x64), verifies the release SHA-256 checksum, and installs Keysmith.app into /Applications.',

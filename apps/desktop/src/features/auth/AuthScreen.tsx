@@ -1,4 +1,4 @@
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, Globe, KeyRound, Loader2, Server } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, Eye, EyeOff, Globe, KeyRound, Loader2, Server } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
 import { evaluatePasswordStrength } from '../../services/generator';
@@ -6,6 +6,28 @@ import { isTauriRuntime, KeysmithIpcError, tauriClient } from '../../services/ta
 import { useSessionStore } from '../../stores/sessionStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
+
+function isNonLoopbackHttpUrl(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!/^http:\/\//i.test(trimmed)) return false;
+  try {
+    const u = new URL(trimmed);
+    const host = u.hostname.toLowerCase();
+    return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '[::1]';
+  } catch {
+    return true;
+  }
+}
+
+function meetsRegistrationPasswordFloor(pw: string): boolean {
+  if (pw.length < 12) return false;
+  let classes = 0;
+  if (/[a-z]/.test(pw)) classes += 1;
+  if (/[A-Z]/.test(pw)) classes += 1;
+  if (/\d/.test(pw)) classes += 1;
+  if (/[^A-Za-z0-9]/.test(pw)) classes += 1;
+  return classes >= 2;
+}
 
 export function AuthScreen() {
   const inTauri = isTauriRuntime();
@@ -41,6 +63,10 @@ export function AuthScreen() {
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allowInsecureHttp, setAllowInsecureHttp] = useState(false);
+  const [weakKdfIterations, setWeakKdfIterations] = useState<number | null>(null);
+
+  const nonLoopbackHttp = isNonLoopbackHttpUrl(serverUrl);
 
   const canCancelBack = addingAccount || savedAccounts.length > 0;
 
@@ -63,12 +89,17 @@ export function AuthScreen() {
   }, [addingAccount, cancelAddingAccount]);
 
   const checkServer = useCallback(
-    async (targetUrl = serverUrl) => {
+    async (targetUrl = serverUrl, allowHttp = allowInsecureHttp) => {
       const cleanUrl = targetUrl.trim();
       if (!cleanUrl) return;
+      if (isNonLoopbackHttpUrl(cleanUrl) && !allowHttp) {
+        setServerOk('idle');
+        setServerVersion('');
+        return;
+      }
       setServerOk('checking');
       try {
-        const res = await tauriClient.authCheckServer(cleanUrl);
+        const res = await tauriClient.authCheckServer(cleanUrl, allowHttp);
         setServerOk(res.ok ? 'ok' : 'error');
         setServerVersion(res.version);
         const disabled = Boolean(res.disableUserRegistration);
@@ -81,15 +112,17 @@ export function AuthScreen() {
         setServerVersion('');
       }
     },
-    [serverUrl],
+    [serverUrl, allowInsecureHttp],
   );
 
   const probePrelogin = async () => {
     const cleanServer = serverUrl.trim();
     const cleanEmail = email.trim();
     if (!cleanServer || !cleanEmail || !cleanEmail.includes('@')) return;
+    if (isNonLoopbackHttpUrl(cleanServer) && !allowInsecureHttp) return;
     try {
-      await tauriClient.authPrelogin(cleanServer, cleanEmail);
+      const cfg = await tauriClient.authPrelogin(cleanServer, cleanEmail, allowInsecureHttp);
+      setWeakKdfIterations(cfg.kdf === 0 && cfg.kdfIterations < 600_000 ? cfg.kdfIterations : null);
     } catch {
       // Silent on blur; handleSubmit surfaces errors
     }
@@ -100,22 +133,40 @@ export function AuthScreen() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (tab === 'register' && masterPassword !== confirmPassword) {
-      setError(dict.auth.passwordMismatch);
+    if (nonLoopbackHttp && !allowInsecureHttp) {
+      setError(dict.auth.insecureHttpRequired);
       return;
+    }
+    if (tab === 'register') {
+      if (!meetsRegistrationPasswordFloor(masterPassword)) {
+        setError(dict.auth.masterPasswordTooWeak);
+        return;
+      }
+      if (masterPassword !== confirmPassword) {
+        setError(dict.auth.passwordMismatch);
+        return;
+      }
     }
     setLoading(true);
     try {
-      await tauriClient.authPrelogin(serverUrl, email);
+      const cfg = await tauriClient.authPrelogin(serverUrl, email, allowInsecureHttp);
+      setWeakKdfIterations(cfg.kdf === 0 && cfg.kdfIterations < 600_000 ? cfg.kdfIterations : null);
       if (tab === 'login') {
         await login({
           serverUrl,
           email,
           masterPassword,
           twoFactorCode: twoFactorCode.trim() || undefined,
+          allowInsecureHttp,
         });
       } else {
-        await register({ serverUrl, email, name, masterPassword });
+        await register({
+          serverUrl,
+          email,
+          name,
+          masterPassword,
+          allowInsecureHttp,
+        });
       }
       await refreshAll(getFilter());
     } catch (err) {
@@ -270,6 +321,8 @@ export function AuthScreen() {
                 onChange={(e) => {
                   setServerUrl(e.target.value);
                   setServerOk('idle');
+                  setAllowInsecureHttp(false);
+                  setWeakKdfIterations(null);
                 }}
                 onBlur={() => void checkServer()}
                 placeholder="https://vault.example.com"
@@ -281,6 +334,35 @@ export function AuthScreen() {
                 <CheckCircle2 size={12} className="text-[var(--status-success)]" />
                 {serverVersion}
               </p>
+            )}
+            {nonLoopbackHttp && (
+              <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-700 dark:text-amber-300 space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span>{dict.auth.insecureHttpWarning}</span>
+                </div>
+                <label className="flex items-start gap-2 cursor-pointer select-none font-medium">
+                  <input
+                    type="checkbox"
+                    checked={allowInsecureHttp}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setAllowInsecureHttp(next);
+                      if (next) {
+                        void checkServer(serverUrl, true);
+                      }
+                    }}
+                    className="mt-0.5 rounded border-amber-500/50"
+                  />
+                  <span>{dict.auth.insecureHttpConfirm}</span>
+                </label>
+              </div>
+            )}
+            {weakKdfIterations !== null && (
+              <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
+                <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                <span>{fmt(dict.auth.weakKdfWarning, { iterations: weakKdfIterations })}</span>
+              </div>
             )}
           </div>
 

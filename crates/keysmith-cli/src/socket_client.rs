@@ -12,29 +12,30 @@ use tokio::net::windows::named_pipe::ClientOptions;
 
 pub const APP_SUPPORT_DIR_NAME: &str = "dev.keysmith.desktop";
 pub const SOCKET_FILE_NAME: &str = "keysmith.sock";
+pub const NMH_TOKEN_FILE_NAME: &str = "ipc-nmh.token";
+pub const CLI_TOKEN_FILE_NAME: &str = "ipc-cli.token";
 #[cfg(windows)]
 pub const WINDOWS_PIPE_NAME: &str = r"\\.\pipe\dev.keysmith.desktop";
 
-/// Returns the default IPC endpoint path (Unix domain socket on Unix, Named Pipe on Windows).
-/// Respects `KEYSMITH_SOCKET` if set.
-pub fn default_socket_path() -> Result<PathBuf> {
-    if let Some(override_path) = std::env::var_os("KEYSMITH_SOCKET") {
-        if !override_path.is_empty() {
-            return Ok(PathBuf::from(override_path));
-        }
-    }
+pub fn default_app_data_dir() -> Result<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         let home = std::env::var_os("HOME").context("HOME environment variable is not set")?;
         return Ok(PathBuf::from(home)
             .join("Library")
             .join("Application Support")
-            .join(APP_SUPPORT_DIR_NAME)
-            .join(SOCKET_FILE_NAME));
+            .join(APP_SUPPORT_DIR_NAME));
     }
     #[cfg(target_os = "windows")]
     {
-        return Ok(PathBuf::from(WINDOWS_PIPE_NAME));
+        let appdata = std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("USERPROFILE")
+                    .map(|u| PathBuf::from(u).join("AppData").join("Roaming"))
+            })
+            .context("Neither APPDATA nor USERPROFILE environment variable is set")?;
+        return Ok(appdata.join(APP_SUPPORT_DIR_NAME));
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
@@ -44,14 +45,49 @@ pub fn default_socket_path() -> Result<PathBuf> {
                 std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share"))
             })
             .context("Neither XDG_DATA_HOME nor HOME environment variable is set")?;
-        Ok(base.join(APP_SUPPORT_DIR_NAME).join(SOCKET_FILE_NAME))
+        Ok(base.join(APP_SUPPORT_DIR_NAME))
     }
+}
+
+/// Returns the default IPC endpoint path (Unix domain socket on Unix, Named Pipe on Windows).
+/// Respects `KEYSMITH_SOCKET` if set.
+pub fn default_socket_path() -> Result<PathBuf> {
+    if let Some(override_path) = std::env::var_os("KEYSMITH_SOCKET") {
+        if !override_path.is_empty() {
+            return Ok(PathBuf::from(override_path));
+        }
+    }
+    #[cfg(windows)]
+    {
+        return Ok(PathBuf::from(WINDOWS_PIPE_NAME));
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(default_app_data_dir()?.join(SOCKET_FILE_NAME))
+    }
+}
+
+fn default_token_path(file_name: &str) -> Result<PathBuf> {
+    #[cfg(unix)]
+    if let Some(override_path) = std::env::var_os("KEYSMITH_SOCKET") {
+        if !override_path.is_empty() {
+            if let Some(parent) = PathBuf::from(override_path).parent() {
+                let candidate = parent.join(file_name);
+                if candidate.exists() {
+                    return Ok(candidate);
+                }
+            }
+        }
+    }
+    Ok(default_app_data_dir()?.join(file_name))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcRequest {
     pub id: u64,
     pub method: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "authToken")]
+    pub auth_token: Option<String>,
     #[serde(default)]
     pub params: Value,
 }
@@ -69,6 +105,7 @@ pub struct RpcResponse {
 /// Async client speaking newline-delimited JSON-RPC over `keysmith.sock`.
 pub struct SocketClient {
     socket_path: PathBuf,
+    token_path: Option<PathBuf>,
     next_id: AtomicU64,
 }
 
@@ -76,12 +113,22 @@ impl SocketClient {
     pub fn new(socket_path: PathBuf) -> Self {
         Self {
             socket_path,
+            token_path: None,
             next_id: AtomicU64::new(1),
         }
     }
 
+    pub fn with_token_path(mut self, token_path: PathBuf) -> Self {
+        self.token_path = Some(token_path);
+        self
+    }
+
     pub fn from_default_path() -> Result<Self> {
-        Ok(Self::new(default_socket_path()?))
+        Ok(Self::new(default_socket_path()?).with_token_path(default_token_path(CLI_TOKEN_FILE_NAME)?))
+    }
+
+    pub fn from_nmh_default_path() -> Result<Self> {
+        Ok(Self::new(default_socket_path()?).with_token_path(default_token_path(NMH_TOKEN_FILE_NAME)?))
     }
 
     pub fn socket_path(&self) -> &PathBuf {
@@ -94,6 +141,7 @@ impl SocketClient {
         let req = RpcRequest {
             id,
             method: method.to_string(),
+            auth_token: None,
             params,
         };
         let resp = self.send_raw_request(&req).await?;
@@ -145,8 +193,27 @@ impl SocketClient {
             }
         };
 
+        let mut owned_req = req.clone();
+        if let Some(ref token_path) = self.token_path {
+            let tok = std::fs::read_to_string(token_path).with_context(|| {
+                format!(
+                    "Failed to read Keysmith IPC auth token at {} (is Keysmith Desktop running?)",
+                    token_path.display()
+                )
+            })?;
+            let trimmed = tok.trim();
+            if trimmed.is_empty() {
+                return Err(anyhow!(
+                    "Keysmith IPC auth token file {} is empty",
+                    token_path.display()
+                ));
+            }
+            owned_req.auth_token = Some(trimmed.to_string());
+        }
+
         let (reader, mut writer) = tokio::io::split(stream);
-        let mut payload = serde_json::to_vec(req).context("Failed to serialize RPC request")?;
+        let mut payload =
+            serde_json::to_vec(&owned_req).context("Failed to serialize RPC request")?;
         payload.push(b'\n');
         writer
             .write_all(&payload)
@@ -181,9 +248,18 @@ impl SocketClient {
     }
 
     pub async fn get(&self, id_or_title: &str, field: Option<&str>) -> Result<Value> {
+        self.get_with_reveal(id_or_title, field, false).await
+    }
+
+    pub async fn get_with_reveal(
+        &self,
+        id_or_title: &str,
+        field: Option<&str>,
+        reveal: bool,
+    ) -> Result<Value> {
         self.call(
             "get",
-            json!({ "idOrTitle": id_or_title, "field": field }),
+            json!({ "idOrTitle": id_or_title, "field": field, "reveal": reveal }),
         )
         .await
     }

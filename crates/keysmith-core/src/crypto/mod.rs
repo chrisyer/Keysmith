@@ -26,6 +26,17 @@ type HmacSha256 = Hmac<Sha256>;
 pub const KDF_PBKDF2_SHA256: u8 = 0;
 pub const KDF_ARGON2ID: u8 = 1;
 
+pub const MIN_PBKDF2_ITERATIONS: u32 = 5_000;
+pub const RECOMMENDED_PBKDF2_ITERATIONS: u32 = 600_000;
+pub const MAX_PBKDF2_ITERATIONS: u32 = 2_000_000;
+
+pub const MIN_ARGON2_ITERATIONS: u32 = 2;
+pub const MAX_ARGON2_ITERATIONS: u32 = 20;
+pub const MIN_ARGON2_MEMORY_MIB: u32 = 15;
+pub const MAX_ARGON2_MEMORY_MIB: u32 = 1024;
+pub const MIN_ARGON2_PARALLELISM: u32 = 1;
+pub const MAX_ARGON2_PARALLELISM: u32 = 16;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KdfConfig {
@@ -70,20 +81,56 @@ impl KdfConfig {
     pub fn validate(&self) -> Result<(), CoreError> {
         match self.kdf {
             KDF_PBKDF2_SHA256 => {
-                if self.kdf_iterations < 1 {
-                    return Err(CoreError::Validation("PBKDF2 迭代次数必须大于 0".to_string()));
+                if self.kdf_iterations < MIN_PBKDF2_ITERATIONS
+                    || self.kdf_iterations > MAX_PBKDF2_ITERATIONS
+                {
+                    return Err(CoreError::Validation(format!(
+                        "PBKDF2 迭代次数必须位于 {MIN_PBKDF2_ITERATIONS} 到 {MAX_PBKDF2_ITERATIONS} 之间（当前为 {}）",
+                        self.kdf_iterations
+                    )));
                 }
             }
             KDF_ARGON2ID => {
                 let mem = self.kdf_memory.unwrap_or(64);
                 let par = self.kdf_parallelism.unwrap_or(4);
-                if self.kdf_iterations < 1 || mem < 1 || par < 1 {
-                    return Err(CoreError::Validation("Argon2id KDF 参数无效".to_string()));
+                if self.kdf_iterations < MIN_ARGON2_ITERATIONS
+                    || self.kdf_iterations > MAX_ARGON2_ITERATIONS
+                    || mem < MIN_ARGON2_MEMORY_MIB
+                    || mem > MAX_ARGON2_MEMORY_MIB
+                    || par < MIN_ARGON2_PARALLELISM
+                    || par > MAX_ARGON2_PARALLELISM
+                {
+                    return Err(CoreError::Validation(
+                        "Argon2id KDF 参数超出安全边界（需满足 iterations 2..=20, memory 15..=1024 MiB, parallelism 1..=16）".to_string(),
+                    ));
                 }
             }
             other => {
                 return Err(CoreError::Validation(format!("不支持的 KDF 类型: {other}")));
             }
+        }
+        Ok(())
+    }
+
+    pub fn validate_for_registration(&self) -> Result<(), CoreError> {
+        self.validate()?;
+        match self.kdf {
+            KDF_PBKDF2_SHA256 => {
+                if self.kdf_iterations < RECOMMENDED_PBKDF2_ITERATIONS {
+                    return Err(CoreError::Validation(format!(
+                        "新账户 PBKDF2 迭代次数至少为 {RECOMMENDED_PBKDF2_ITERATIONS}"
+                    )));
+                }
+            }
+            KDF_ARGON2ID => {
+                let mem = self.kdf_memory.unwrap_or(64);
+                if self.kdf_iterations < 3 || mem < 64 {
+                    return Err(CoreError::Validation(
+                        "新账户 Argon2id 参数至少需要 3 轮迭代与 64 MiB 内存".to_string(),
+                    ));
+                }
+            }
+            _ => unreachable!("validated above"),
         }
         Ok(())
     }
@@ -172,6 +219,10 @@ impl UserSymmetricKey {
 
     pub fn decrypt_string(&self, enc_str: &str) -> Result<Zeroizing<String>, CoreError> {
         decrypt_string(enc_str, &self.enc_key, &self.mac_key)
+    }
+
+    pub fn decrypt_string_authenticated(&self, enc_str: &str) -> Result<Zeroizing<String>, CoreError> {
+        decrypt_string_authenticated(enc_str, &self.enc_key, &self.mac_key)
     }
 }
 
@@ -335,13 +386,12 @@ pub fn encrypt_bytes(
     ))
 }
 
-/// Verify-then-decrypt Bitwarden EncString (Type 2 constant-time HMAC check, plus Type 0 read support).
-pub fn decrypt_bytes(
-    enc_str: &str,
+fn decrypt_parsed_enc_string(
+    parsed: EncString,
     enc_key: &[u8; 32],
     mac_key: &[u8; 32],
+    allow_legacy_type0: bool,
 ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
-    let parsed = EncString::parse(enc_str)?;
     match parsed {
         EncString::AesCbc256HmacSha256 { iv, ct, mac } => {
             let mut hmac = <HmacSha256 as Mac>::new_from_slice(mac_key)
@@ -361,6 +411,11 @@ pub fn decrypt_bytes(
             Ok(Zeroizing::new(pt))
         }
         EncString::AesCbc256 { iv, ct } => {
+            if !allow_legacy_type0 {
+                return Err(CoreError::Crypto(
+                    "出于安全策略已拒绝未携带 HMAC 完整性校验的 Type 0 EncString".to_string(),
+                ));
+            }
             let pt = Aes256CbcDec::new_from_slices(enc_key, &iv)
                 .map_err(|e| CoreError::Crypto(format!("AES-CBC 初始化失败: {e}")))?
                 .decrypt_padded_vec_mut::<Pkcs7>(&ct)
@@ -370,15 +425,57 @@ pub fn decrypt_bytes(
     }
 }
 
+/// Verify-then-decrypt Bitwarden EncString (strict Type 2 HMAC-verified only).
+/// Rejects unauthenticated Type 0 EncStrings and must be used for keys and sensitive local secrets.
+pub fn decrypt_bytes_authenticated(
+    enc_str: &str,
+    enc_key: &[u8; 32],
+    mac_key: &[u8; 32],
+) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+    let parsed = EncString::parse(enc_str)?;
+    decrypt_parsed_enc_string(parsed, enc_key, mac_key, false)
+}
+
+/// Legacy-compatible Bitwarden EncString decryption (Type 2 verify-then-decrypt, plus legacy Type 0
+/// read support strictly for migrating old Bitwarden vault cipher fields).
+pub fn decrypt_bytes(
+    enc_str: &str,
+    enc_key: &[u8; 32],
+    mac_key: &[u8; 32],
+) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+    let parsed = EncString::parse(enc_str)?;
+    decrypt_parsed_enc_string(parsed, enc_key, mac_key, true)
+}
+
+fn zeroizing_bytes_to_string(mut bytes: Zeroizing<Vec<u8>>) -> Result<Zeroizing<String>, CoreError> {
+    let raw = std::mem::take(&mut *bytes);
+    match String::from_utf8(raw) {
+        Ok(s) => Ok(Zeroizing::new(s)),
+        Err(e) => {
+            let msg = e.utf8_error().to_string();
+            let mut invalid = e.into_bytes();
+            invalid.zeroize();
+            Err(CoreError::Crypto(format!("解密明文 UTF-8 解析失败: {msg}")))
+        }
+    }
+}
+
+pub fn decrypt_string_authenticated(
+    enc_str: &str,
+    enc_key: &[u8; 32],
+    mac_key: &[u8; 32],
+) -> Result<Zeroizing<String>, CoreError> {
+    let bytes = decrypt_bytes_authenticated(enc_str, enc_key, mac_key)?;
+    zeroizing_bytes_to_string(bytes)
+}
+
 pub fn decrypt_string(
     enc_str: &str,
     enc_key: &[u8; 32],
     mac_key: &[u8; 32],
 ) -> Result<Zeroizing<String>, CoreError> {
     let bytes = decrypt_bytes(enc_str, enc_key, mac_key)?;
-    let s = String::from_utf8(bytes.to_vec())
-        .map_err(|e| CoreError::Crypto(format!("解密明文 UTF-8 解析失败: {e}")))?;
-    Ok(Zeroizing::new(s))
+    zeroizing_bytes_to_string(bytes)
 }
 
 /// Encrypt the 64-byte UserSymmetricKey with the 64-byte StretchedMasterKey.
@@ -390,12 +487,12 @@ pub fn protect_user_symmetric_key(
     encrypt_bytes(&*raw, smk.enc_key(), smk.mac_key())
 }
 
-/// Decrypt the 64-byte UserSymmetricKey using StretchedMasterKey.
+/// Decrypt the 64-byte UserSymmetricKey using StretchedMasterKey (strictly Type 2 authenticated).
 pub fn unprotect_user_symmetric_key(
     protected_key_enc: &str,
     smk: &StretchedMasterKey,
 ) -> Result<UserSymmetricKey, CoreError> {
-    let pt = decrypt_bytes(protected_key_enc, smk.enc_key(), smk.mac_key())?;
+    let pt = decrypt_bytes_authenticated(protected_key_enc, smk.enc_key(), smk.mac_key())?;
     UserSymmetricKey::from_bytes(&pt)
 }
 
@@ -408,14 +505,15 @@ pub fn generate_rsa_keypair(usk: &UserSymmetricKey) -> Result<(String, String), 
         .to_public_key()
         .to_public_key_der()
         .map_err(|e| CoreError::Crypto(format!("RSA 公钥导出失败: {e}")))?;
-    let mut private_der = private_key
+    let private_der = private_key
         .to_pkcs8_der()
         .map_err(|e| CoreError::Crypto(format!("RSA 私钥导出失败: {e}")))?;
 
     let public_b64 = B64.encode(public_der.as_bytes());
     let encrypted_priv = encrypt_bytes(private_der.as_bytes(), usk.enc_key(), usk.mac_key())?;
-    // Zeroize private key bytes buffer if mutable
-    let _ = &mut private_der;
+    // `pkcs8::SecretDocument` automatically zeroizes its buffer on drop.
+    drop(private_der);
+    drop(private_key);
     Ok((public_b64, encrypted_priv))
 }
 
@@ -459,7 +557,7 @@ pub fn decrypt_org_symmetric_key(
     encrypted_private_key: &str,
     usk: &UserSymmetricKey,
 ) -> Result<UserSymmetricKey, CoreError> {
-    let priv_der = decrypt_bytes(encrypted_private_key, usk.enc_key(), usk.mac_key())?;
+    let priv_der = decrypt_bytes_authenticated(encrypted_private_key, usk.enc_key(), usk.mac_key())?;
     let org_key_bytes = decrypt_rsa_oaep(org_key_enc, &priv_der)?;
     UserSymmetricKey::from_bytes(&org_key_bytes)
 }

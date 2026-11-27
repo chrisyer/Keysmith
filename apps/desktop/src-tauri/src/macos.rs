@@ -193,8 +193,7 @@ impl BiometricKeyStore for MacosBiometricKeyStore {
         account_id: &str,
         reason: &str,
     ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
-        macos_impl::biometry_authenticate(reason)?;
-        macos_impl::keychain_load(account_id)
+        macos_impl::keychain_load_with_reason(account_id, reason)
     }
 
     fn delete_unlock_key(&self, account_id: &str) -> Result<(), CoreError> {
@@ -261,6 +260,10 @@ pub fn scan_screen_totp_qr() -> Result<Option<String>, CoreError> {
     macos_impl::scan_screen_totp_qr()
 }
 
+pub fn cleanup_stale_qr_temp_files() {
+    macos_impl::cleanup_stale_qr_temp_files();
+}
+
 #[cfg(target_os = "macos")]
 mod macos_impl {
     use std::ffi::c_void;
@@ -287,9 +290,26 @@ mod macos_impl {
         NSNotification, NSString,
     };
     use objc2_local_authentication::{LAContext, LAPolicy};
+    use core_foundation_sys::base::{kCFAllocatorDefault, CFTypeRef};
+    use core_foundation_sys::data::{CFDataCreate, CFDataGetBytePtr, CFDataGetLength, CFDataRef};
+    use core_foundation_sys::dictionary::{
+        kCFTypeDictionaryKeyCallBacks, kCFTypeDictionaryValueCallBacks, CFDictionaryCreate,
+    };
+    use core_foundation_sys::number::kCFBooleanTrue;
+    use core_foundation_sys::string::{kCFStringEncodingUTF8, CFStringCreateWithBytes, CFStringRef};
     use security_framework::passwords::{
         delete_generic_password, get_generic_password, set_generic_password,
     };
+    use security_framework_sys::access_control::{
+        kSecAccessControlBiometryCurrentSet, kSecAccessControlUserPresence,
+        kSecAttrAccessibleWhenUnlockedThisDeviceOnly, SecAccessControlCreateWithFlags,
+    };
+    use security_framework_sys::item::{
+        kSecAttrAccessControl, kSecAttrAccount, kSecAttrService, kSecClass,
+        kSecClassGenericPassword, kSecMatchLimit, kSecReturnData, kSecUseAuthenticationContext,
+        kSecValueData,
+    };
+    use security_framework_sys::keychain_item::{SecItemAdd, SecItemCopyMatching, SecItemDelete};
     use sha2::{Digest, Sha256};
     use tauri::{AppHandle, WebviewWindow};
     use window_vibrancy::{
@@ -583,7 +603,9 @@ mod macos_impl {
         }
     }
 
-    pub fn biometry_authenticate(reason: &str) -> Result<(), CoreError> {
+    fn biometry_authenticate_context(
+        reason: &str,
+    ) -> Result<objc2::rc::Retained<LAContext>, CoreError> {
         let ctx = unsafe { LAContext::new() };
         let policy = unsafe {
             if ctx
@@ -627,18 +649,193 @@ mod macos_impl {
         }
 
         match rx.recv_timeout(Duration::from_secs(60)) {
-            Ok(Ok(())) => Ok(()),
+            Ok(Ok(())) => Ok(ctx),
             Ok(Err(msg)) => Err(CoreError::Biometric(format!("Touch ID 验证失败: {msg}"))),
             Err(_) => Err(CoreError::Biometric("Touch ID 验证超时".to_string())),
         }
     }
 
+    pub fn biometry_authenticate(reason: &str) -> Result<(), CoreError> {
+        biometry_authenticate_context(reason).map(|_| ())
+    }
+
+    #[link(name = "Security", kind = "framework")]
+    extern "C" {
+        static kSecMatchLimitOne: CFStringRef;
+        static kSecUseDataProtectionKeychain: CFStringRef;
+    }
+
+    struct CfOwned(*const c_void);
+    impl Drop for CfOwned {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { core_foundation_sys::base::CFRelease(self.0) };
+            }
+        }
+    }
+
+    fn make_cf_string(s: &str) -> Result<CfOwned, CoreError> {
+        let ptr = unsafe {
+            CFStringCreateWithBytes(
+                kCFAllocatorDefault,
+                s.as_ptr(),
+                s.len() as isize,
+                kCFStringEncodingUTF8,
+                0,
+            )
+        };
+        if ptr.is_null() {
+            return Err(CoreError::Biometric("创建 CFString 失败".to_string()));
+        }
+        Ok(CfOwned(ptr as *const c_void))
+    }
+
+    fn make_cf_dict(pairs: &[(*const c_void, *const c_void)]) -> Result<CfOwned, CoreError> {
+        let mut keys: Vec<*const c_void> = pairs.iter().map(|(k, _)| *k).collect();
+        let mut vals: Vec<*const c_void> = pairs.iter().map(|(_, v)| *v).collect();
+        let dict = unsafe {
+            CFDictionaryCreate(
+                kCFAllocatorDefault,
+                keys.as_mut_ptr(),
+                vals.as_mut_ptr(),
+                pairs.len() as isize,
+                &kCFTypeDictionaryKeyCallBacks,
+                &kCFTypeDictionaryValueCallBacks,
+            )
+        };
+        if dict.is_null() {
+            return Err(CoreError::Biometric("创建 CFDictionary 失败".to_string()));
+        }
+        Ok(CfOwned(dict as *const c_void))
+    }
+
+    const ERR_SEC_SUCCESS: i32 = 0;
+    const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+    const ERR_SEC_MISSING_ENTITLEMENT: i32 = -34018;
+
+    fn dp_delete_status(account_id: &str) -> Result<i32, CoreError> {
+        let cf_service = make_cf_string(KEYCHAIN_SERVICE)?;
+        let cf_account = make_cf_string(account_id)?;
+        let query = unsafe {
+            make_cf_dict(&[
+                (kSecClass as *const c_void, kSecClassGenericPassword as *const c_void),
+                (kSecAttrService as *const c_void, cf_service.0),
+                (kSecAttrAccount as *const c_void, cf_account.0),
+                (
+                    kSecUseDataProtectionKeychain as *const c_void,
+                    kCFBooleanTrue as *const c_void,
+                ),
+            ])?
+        };
+        Ok(unsafe { SecItemDelete(query.0 as _) })
+    }
+
     pub fn keychain_save(account_id: &str, key: &[u8]) -> Result<(), CoreError> {
+        let _ = dp_delete_status(account_id);
+
+        let mut acl = unsafe {
+            SecAccessControlCreateWithFlags(
+                kCFAllocatorDefault,
+                kSecAttrAccessibleWhenUnlockedThisDeviceOnly as CFTypeRef,
+                kSecAccessControlBiometryCurrentSet,
+                std::ptr::null_mut(),
+            )
+        };
+        if acl.is_null() {
+            acl = unsafe {
+                SecAccessControlCreateWithFlags(
+                    kCFAllocatorDefault,
+                    kSecAttrAccessibleWhenUnlockedThisDeviceOnly as CFTypeRef,
+                    kSecAccessControlUserPresence,
+                    std::ptr::null_mut(),
+                )
+            };
+        }
+        if !acl.is_null() {
+            let _acl_guard = CfOwned(acl as *const c_void);
+            let cf_service = make_cf_string(KEYCHAIN_SERVICE)?;
+            let cf_account = make_cf_string(account_id)?;
+            let cf_data = CfOwned(unsafe {
+                CFDataCreate(kCFAllocatorDefault, key.as_ptr(), key.len() as isize)
+            } as *const c_void);
+            if !cf_data.0.is_null() {
+                let attrs = unsafe {
+                    make_cf_dict(&[
+                        (kSecClass as *const c_void, kSecClassGenericPassword as *const c_void),
+                        (kSecAttrService as *const c_void, cf_service.0),
+                        (kSecAttrAccount as *const c_void, cf_account.0),
+                        (kSecValueData as *const c_void, cf_data.0),
+                        (
+                            kSecUseDataProtectionKeychain as *const c_void,
+                            kCFBooleanTrue as *const c_void,
+                        ),
+                        (kSecAttrAccessControl as *const c_void, acl as *const c_void),
+                    ])?
+                };
+                let status = unsafe { SecItemAdd(attrs.0 as _, std::ptr::null_mut()) };
+                if status == ERR_SEC_SUCCESS {
+                    let _ = delete_generic_password(KEYCHAIN_SERVICE, account_id);
+                    return Ok(());
+                }
+                if status != ERR_SEC_MISSING_ENTITLEMENT {
+                    return Err(CoreError::Biometric(format!(
+                        "写入 macOS Data Protection Keychain 失败 (OSStatus={status})"
+                    )));
+                }
+                eprintln!(
+                    "[keysmith] Data Protection Keychain 不可用 (OSStatus=-34018，通常为 ad-hoc 签名)，已回退到 LAContext 保护的登录钥匙串"
+                );
+            }
+        }
+
         set_generic_password(KEYCHAIN_SERVICE, account_id, key)
             .map_err(|e| CoreError::Biometric(format!("写入 macOS Keychain 失败: {e}")))
     }
 
-    pub fn keychain_load(account_id: &str) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+    pub fn keychain_load_with_reason(
+        account_id: &str,
+        reason: &str,
+    ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+        let ctx = biometry_authenticate_context(reason)?;
+        let cf_service = make_cf_string(KEYCHAIN_SERVICE)?;
+        let cf_account = make_cf_string(account_id)?;
+        let ctx_ptr = objc2::rc::Retained::as_ptr(&ctx) as *const c_void;
+        let query = unsafe {
+            make_cf_dict(&[
+                (kSecClass as *const c_void, kSecClassGenericPassword as *const c_void),
+                (kSecAttrService as *const c_void, cf_service.0),
+                (kSecAttrAccount as *const c_void, cf_account.0),
+                (
+                    kSecUseDataProtectionKeychain as *const c_void,
+                    kCFBooleanTrue as *const c_void,
+                ),
+                (kSecUseAuthenticationContext as *const c_void, ctx_ptr),
+                (kSecReturnData as *const c_void, kCFBooleanTrue as *const c_void),
+                (kSecMatchLimit as *const c_void, kSecMatchLimitOne as *const c_void),
+            ])?
+        };
+        let mut result: CFTypeRef = std::ptr::null();
+        let status = unsafe { SecItemCopyMatching(query.0 as _, &mut result) };
+        if status == ERR_SEC_SUCCESS && !result.is_null() {
+            let data_guard = CfOwned(result as *const c_void);
+            let data_ref = data_guard.0 as CFDataRef;
+            let len = unsafe { CFDataGetLength(data_ref) }.max(0) as usize;
+            let ptr = unsafe { CFDataGetBytePtr(data_ref) };
+            if ptr.is_null() || len == 0 {
+                return Err(CoreError::Biometric(
+                    "macOS Keychain 返回了空的解锁密钥".to_string(),
+                ));
+            }
+            let bytes = unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec();
+            return Ok(Zeroizing::new(bytes));
+        }
+
+        if status != ERR_SEC_MISSING_ENTITLEMENT && status != ERR_SEC_ITEM_NOT_FOUND {
+            return Err(CoreError::Biometric(format!(
+                "从 macOS Data Protection Keychain 读取解锁密钥失败 (OSStatus={status})"
+            )));
+        }
+
         let bytes = get_generic_password(KEYCHAIN_SERVICE, account_id).map_err(|e| {
             CoreError::Biometric(format!(
                 "未能从 macOS Keychain 读取解锁密钥（请先用主密码解锁一次以绑定）: {e}"
@@ -648,10 +845,20 @@ mod macos_impl {
     }
 
     pub fn keychain_delete(account_id: &str) -> Result<(), CoreError> {
+        if let Ok(dp_status) = dp_delete_status(account_id) {
+            if dp_status != ERR_SEC_SUCCESS
+                && dp_status != ERR_SEC_ITEM_NOT_FOUND
+                && dp_status != ERR_SEC_MISSING_ENTITLEMENT
+            {
+                return Err(CoreError::Biometric(format!(
+                    "删除 macOS Data Protection Keychain 密钥失败 (OSStatus={dp_status})"
+                )));
+            }
+        }
         match delete_generic_password(KEYCHAIN_SERVICE, account_id) {
             Ok(()) => Ok(()),
             Err(e) => {
-                if e.code() == -25300 {
+                if e.code() == ERR_SEC_ITEM_NOT_FOUND {
                     Ok(())
                 } else {
                     Err(CoreError::Biometric(format!(
@@ -787,6 +994,29 @@ mod macos_impl {
         Ok(())
     }
 
+    fn qr_temp_dir() -> PathBuf {
+        let dir = crate::ipc_socket::resolve_app_data_dir()
+            .map(|d| d.join("tmp-qr"))
+            .unwrap_or_else(|| std::env::temp_dir().join("keysmith-qr"));
+        let _ = std::fs::create_dir_all(&dir);
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        dir
+    }
+
+    pub fn cleanup_stale_qr_temp_files() {
+        let dir = qr_temp_dir();
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
+
     pub fn scan_screen_totp_qr() -> Result<Option<String>, CoreError> {
         #[link(name = "CoreGraphics", kind = "framework")]
         extern "C" {
@@ -797,6 +1027,24 @@ mod macos_impl {
         struct TempFileGuard(std::path::PathBuf);
         impl Drop for TempFileGuard {
             fn drop(&mut self) {
+                if let Ok(meta) = std::fs::metadata(&self.0) {
+                    let len = meta.len() as usize;
+                    if len > 0 {
+                        if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(&self.0) {
+                            use std::io::Write;
+                            let zeros = vec![0u8; len.min(1024 * 1024)];
+                            let mut rem = len;
+                            while rem > 0 {
+                                let chunk = rem.min(zeros.len());
+                                if f.write_all(&zeros[..chunk]).is_err() {
+                                    break;
+                                }
+                                rem -= chunk;
+                            }
+                            let _ = f.flush();
+                        }
+                    }
+                }
                 let _ = std::fs::remove_file(&self.0);
             }
         }
@@ -806,8 +1054,9 @@ mod macos_impl {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos())
                 .unwrap_or(0);
-            std::env::temp_dir().join(format!(
-                "keysmith-qr-{}-{}-{tag}.png",
+            let nonce: u64 = rand::random();
+            qr_temp_dir().join(format!(
+                "qr-{}-{}-{nonce:016x}-{tag}.png",
                 std::process::id(),
                 nanos
             ))
@@ -828,7 +1077,7 @@ mod macos_impl {
                 if !output.status.success() || !path.exists() {
                     break;
                 }
-                let Ok(bytes) = std::fs::read(&path) else {
+                let Ok(bytes) = std::fs::read(&path).map(Zeroizing::new) else {
                     continue;
                 };
                 drop(guard);
@@ -858,8 +1107,10 @@ mod macos_impl {
             return Ok(None);
         }
 
-        let bytes = std::fs::read(&path)
-            .map_err(|e| CoreError::Internal(format!("读取屏幕截图失败: {e}")))?;
+        let bytes = Zeroizing::new(
+            std::fs::read(&path)
+                .map_err(|e| CoreError::Internal(format!("读取屏幕截图失败: {e}")))?,
+        );
         drop(guard);
         if bytes.is_empty() {
             return Ok(None);
@@ -1047,19 +1298,25 @@ mod macos_impl {
         }
     }
 
-    pub fn keychain_load(account_id: &str) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+    pub fn keychain_load_with_reason(
+        account_id: &str,
+        reason: &str,
+    ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
         #[cfg(target_os = "windows")]
         {
+            biometry_authenticate(reason)?;
             return crate::windows_native::keychain_load(account_id);
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = account_id;
+            let _ = (account_id, reason);
             Err(CoreError::Biometric(
                 "Biometric keychain is not supported on this platform".to_string(),
             ))
         }
     }
+
+    pub fn cleanup_stale_qr_temp_files() {}
 
     pub fn keychain_delete(account_id: &str) -> Result<(), CoreError> {
         #[cfg(target_os = "windows")]

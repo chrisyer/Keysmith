@@ -2106,7 +2106,6 @@
     const req = activeConditionalPasskey;
     const res = await sendMsg({
       type: 'PASSKEY_ASSERT',
-      origin: req.origin,
       itemId: pk.itemId,
       credentialId: pk.credentialId,
       verifyBiometric: Boolean(pk.reprompt),
@@ -2211,7 +2210,15 @@
     bannerContainer.appendChild(card);
   }
 
-  function showPasskeyLockedModal(modalKind, options, origin, listPayload, biometricEnabled) {
+  function showPasskeyLockedModal(
+    modalKind,
+    options,
+    origin,
+    listPayload,
+    biometricEnabled,
+    relayToken = null,
+    tabUrl = ''
+  ) {
     return new Promise((resolve) => {
       if (!ensureOverlay() || !modalContainer) {
         resolve({ handled: false, fallback: true });
@@ -2230,7 +2237,11 @@
 
       const checkUnlocked = async () => {
         if (done) return;
-        const res = await sendMsg({ type: 'PASSKEY_LIST_FOR_RP', ...listPayload });
+        const res = await sendMsg({
+          type: 'PASSKEY_LIST_FOR_RP',
+          ...listPayload,
+          ...(relayToken ? { relayToken } : {})
+        });
         if (!done && res && res.connected && res.ok && res.result && !res.result.locked) {
           finish({ unlocked: true, info: res.result });
         }
@@ -2248,12 +2259,13 @@
       title.appendChild(titleText);
 
       const rpId = resolveDisplayRpId(options?.rpId || options?.rp?.id, origin);
+      const sourceHost = formatTabDisplaySource(tabUrl, origin, rpId);
       const sub = document.createElement('div');
       sub.className = 'ks-modal-sub';
       sub.textContent =
         modalKind === 'create-locked'
-          ? t('pkModalSubSiteAccount', { rpId, user: options?.user?.name || 'Passkey User' })
-          : t('pkSelectModalSub', { rpId });
+          ? t('pkModalSubSiteAccount', { rpId: sourceHost, user: options?.user?.name || 'Passkey User' })
+          : t('pkSelectModalSub', { rpId: sourceHost });
       modal.append(title, sub);
 
       const lockNote = document.createElement('div');
@@ -2327,8 +2339,22 @@
     });
   }
 
+  function formatTabDisplaySource(tabUrl, origin, rpId) {
+    let tabOrigin = '';
+    try {
+      if (tabUrl) tabOrigin = new URL(tabUrl).origin;
+    } catch {
+      tabOrigin = '';
+    }
+    const base = tabOrigin || origin || rpId;
+    if (origin && tabOrigin && origin !== tabOrigin) {
+      return `${base} (iframe: ${origin} · RP: ${rpId})`;
+    }
+    return rpId && !base.includes(rpId) ? `${base} (RP: ${rpId})` : base;
+  }
+
   async function presentPasskeyModal(modalKind, payload) {
-    if (window !== window.top) {
+    if (window !== window.top && !payload.relayToken) {
       const relayReply = await sendMsg({
         type: 'PASSKEY_SHOW_TOP_MODAL',
         modalKind,
@@ -2348,16 +2374,30 @@
         payload.options,
         payload.origin,
         payload.listPayload,
-        Boolean(payload.info?.biometricEnabled)
+        Boolean(payload.info?.biometricEnabled),
+        payload.relayToken || null,
+        payload.tabUrl || ''
       );
     }
     if (modalKind === 'create') {
-      return showPasskeyCreateModal(payload.options, payload.origin, payload.info);
+      return showPasskeyCreateModal(
+        payload.options,
+        payload.origin,
+        payload.info,
+        payload.relayToken || null,
+        payload.tabUrl || ''
+      );
     }
-    return showPasskeySelectModal(payload.options, payload.origin, payload.passkeys);
+    return showPasskeySelectModal(
+      payload.options,
+      payload.origin,
+      payload.passkeys,
+      payload.relayToken || null,
+      payload.tabUrl || ''
+    );
   }
 
-  function showPasskeyCreateModal(options, origin, listInfo) {
+  function showPasskeyCreateModal(options, origin, listInfo, relayToken = null, tabUrl = '') {
     return new Promise((resolve) => {
       if (!ensureOverlay() || !modalContainer) {
         resolve({ handled: false, fallback: true });
@@ -2375,11 +2415,12 @@
       title.appendChild(titleText);
 
       const rpId = resolveDisplayRpId(options?.rp?.id, origin);
+      const sourceHost = formatTabDisplaySource(tabUrl, origin, rpId);
       const userName = options?.user?.name || options?.user?.displayName || 'Passkey User';
 
       const sub = document.createElement('div');
       sub.className = 'ks-modal-sub';
-      sub.textContent = t('pkModalSubSiteAccount', { rpId, user: userName });
+      sub.textContent = t('pkModalSubSiteAccount', { rpId: sourceHost, user: userName });
       modal.append(title, sub);
 
       if (listInfo.locked) {
@@ -2485,7 +2526,7 @@
         errBox.textContent = '';
         const res = await sendMsg({
           type: 'PASSKEY_CREATE',
-          origin,
+          ...(relayToken ? { relayToken } : {}),
           itemId: select.value || undefined,
           title: itemTitleInput.value.trim() || undefined,
           options
@@ -2538,7 +2579,7 @@
     });
   }
 
-  function showPasskeySelectModal(options, origin, passkeys) {
+  function showPasskeySelectModal(options, origin, passkeys, relayToken = null, tabUrl = '') {
     return new Promise((resolve) => {
       if (!ensureOverlay() || !modalContainer) {
         resolve({ handled: false, fallback: true });
@@ -2556,9 +2597,10 @@
       title.appendChild(titleText);
 
       const rpId = resolveDisplayRpId(options?.rpId, origin);
+      const sourceHost = formatTabDisplaySource(tabUrl, origin, rpId);
       const sub = document.createElement('div');
       sub.className = 'ks-modal-sub';
-      sub.textContent = t('pkSelectModalSub', { rpId });
+      sub.textContent = t('pkSelectModalSub', { rpId: sourceHost });
       modal.append(title, sub);
 
       const listEl = document.createElement('div');
@@ -2590,7 +2632,7 @@
           pill.textContent = t('pkPillSigning');
           const res = await sendMsg({
             type: 'PASSKEY_ASSERT',
-            origin,
+            ...(relayToken ? { relayToken } : {}),
             itemId: pk.itemId,
             credentialId: pk.credentialId,
             verifyBiometric: Boolean(pk.reprompt),
@@ -2656,11 +2698,9 @@
     }
 
     if (data.type === 'PASSKEY_CONDITIONAL_START') {
-      const origin = data.origin || window.location.origin;
       const listPayload = {
         rpId: data.options?.rpId || window.location.hostname,
         rpIdExplicit: data.options?.rpIdExplicit !== false,
-        origin,
         allowCredentials: (data.options?.allowCredentials || []).map((c) => c.id),
         excludeCredentials: []
       };
@@ -2686,7 +2726,7 @@
         }
         activeConditionalPasskey = {
           nonce: data.nonce,
-          origin,
+          origin: window.location.origin,
           options: data.options,
           passkeys
         };
@@ -2721,7 +2761,6 @@
     };
 
     try {
-      const origin = data.origin || window.location.origin;
       const rpId =
         data.type === 'PASSKEY_CREATE_REQUEST'
           ? data.options?.rp?.id || window.location.hostname
@@ -2730,7 +2769,6 @@
         rpId,
         rpIdExplicit:
           data.type === 'PASSKEY_CREATE_REQUEST' ? true : data.options?.rpIdExplicit !== false,
-        origin,
         allowCredentials: (data.options?.allowCredentials || []).map((c) => c.id),
         excludeCredentials: (data.options?.excludeCredentials || []).map((c) => c.id)
       };
@@ -2749,6 +2787,7 @@
       }
 
       let info = listRes.result || {};
+      const trustedOrigin = info.origin || window.location.origin;
       if (data.type === 'PASSKEY_CREATE_REQUEST') {
         if (info.excluded) {
           reply({
@@ -2761,7 +2800,8 @@
         if (info.locked && !info.signedOut) {
           const lockReply = await presentPasskeyModal('create-locked', {
             options: data.options,
-            origin,
+            origin: trustedOrigin,
+            tabUrl: info.tabUrl || '',
             listPayload,
             info
           });
@@ -2781,7 +2821,8 @@
         }
         const modalReply = await presentPasskeyModal('create', {
           options: data.options,
-          origin,
+          origin: info.origin || trustedOrigin,
+          tabUrl: info.tabUrl || '',
           info
         });
         reply(modalReply);
@@ -2792,7 +2833,8 @@
       if (info.locked && !info.signedOut) {
         const lockReply = await presentPasskeyModal('get-locked', {
           options: data.options,
-          origin,
+          origin: trustedOrigin,
+          tabUrl: info.tabUrl || '',
           listPayload,
           info
         });
@@ -2811,7 +2853,8 @@
 
       const modalReply = await presentPasskeyModal('get-select', {
         options: data.options,
-        origin,
+        origin: info.origin || trustedOrigin,
+        tabUrl: info.tabUrl || '',
         passkeys
       });
       reply(modalReply);

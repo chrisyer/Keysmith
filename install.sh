@@ -55,19 +55,25 @@ trap cleanup EXIT INT TERM
 echo "Downloading Keysmith v${VERSION} (${ARCH})..."
 curl -fL --progress-bar "$BASE_URL/$DMG_NAME" -o "$DMG_PATH"
 
-if curl -fsSL "$BASE_URL/SHA256SUMS.txt" -o "$SUMS_PATH" 2>/dev/null; then
-  EXPECTED_SHA="$(awk -v name="$DMG_NAME" '$2 == name { print $1 }' "$SUMS_PATH" | head -n 1)"
-  if [ -n "$EXPECTED_SHA" ]; then
-    ACTUAL_SHA="$(shasum -a 256 "$DMG_PATH" | awk '{ print $1 }')"
-    if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
-      echo "Error: SHA-256 mismatch for $DMG_NAME" >&2
-      echo "  expected: $EXPECTED_SHA" >&2
-      echo "  actual:   $ACTUAL_SHA" >&2
-      exit 1
-    fi
-    echo "Verified SHA-256: $ACTUAL_SHA"
-  fi
+if ! curl -fsSL "$BASE_URL/SHA256SUMS.txt" -o "$SUMS_PATH"; then
+  echo "Error: Failed to download SHA256SUMS.txt from $BASE_URL/SHA256SUMS.txt" >&2
+  exit 1
 fi
+
+EXPECTED_SHA="$(awk -v name="$DMG_NAME" '$2 == name { print $1 }' "$SUMS_PATH" | head -n 1)"
+if [ -z "$EXPECTED_SHA" ]; then
+  echo "Error: SHA-256 entry for $DMG_NAME not found in SHA256SUMS.txt" >&2
+  exit 1
+fi
+
+ACTUAL_SHA="$(shasum -a 256 "$DMG_PATH" | awk '{ print $1 }')"
+if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+  echo "Error: SHA-256 mismatch for $DMG_NAME" >&2
+  echo "  expected: $EXPECTED_SHA" >&2
+  echo "  actual:   $ACTUAL_SHA" >&2
+  exit 1
+fi
+echo "Verified SHA-256: $ACTUAL_SHA"
 
 mkdir -p "$MOUNT_DIR"
 hdiutil attach "$DMG_PATH" -nobrowse -quiet -mountpoint "$MOUNT_DIR"
@@ -80,7 +86,12 @@ fi
 pkill -x keysmith-desktop 2>/dev/null || true
 rm -rf "$DEST_DIR/$APP_NAME"
 ditto "$MOUNT_DIR/$APP_NAME" "$DEST_DIR/$APP_NAME"
-xattr -cr "$DEST_DIR/$APP_NAME"
 
 echo "Installed $APP_NAME to $DEST_DIR/$APP_NAME"
-open -a "$DEST_DIR/$APP_NAME"
+echo ""
+echo "Note: Keysmith builds are currently ad-hoc signed without Apple Developer notarization."
+echo "If macOS Gatekeeper blocks first launch, approve it via:"
+echo "  System Settings -> Privacy & Security -> Open Anyway"
+echo "Or manually clear the quarantine attribute after verifying the release checksum:"
+echo "  xattr -dr com.apple.quarantine \"$DEST_DIR/$APP_NAME\""
+open -a "$DEST_DIR/$APP_NAME" || true

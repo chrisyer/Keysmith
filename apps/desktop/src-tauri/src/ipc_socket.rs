@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
@@ -18,8 +18,11 @@ use keysmith_core::passkey::{
 };
 use keysmith_core::session::localized_biometric_reason;
 use keysmith_core::AppCore;
+use rand::rngs::OsRng;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use subtle::ConstantTimeEq;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 #[cfg(unix)]
@@ -27,6 +30,7 @@ use tokio::net::UnixListener;
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::ServerOptions;
 use url::Url;
+use zeroize::Zeroizing;
 
 use crate::commands::{
     apply_window_preferences, emit_data_changed, emit_session_state, emit_sync_status_and_poke,
@@ -36,13 +40,164 @@ use crate::events::{UiFocusItemPayload, EVENT_UI_FOCUS_ITEM};
 
 pub const APP_SUPPORT_DIR_NAME: &str = "dev.keysmith.desktop";
 const SOCKET_FILE_NAME: &str = "keysmith.sock";
+const NMH_TOKEN_FILE_NAME: &str = "ipc-nmh.token";
+const CLI_TOKEN_FILE_NAME: &str = "ipc-cli.token";
 #[cfg(windows)]
 const WINDOWS_PIPE_NAME: &str = r"\\.\pipe\dev.keysmith.desktop";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClientRole {
+    BrowserExtension,
+    Cli,
+}
+
+#[derive(Clone)]
+struct IpcAuthTokens {
+    nmh: Zeroizing<String>,
+    cli: Zeroizing<String>,
+}
+
+static IPC_AUTH_TOKENS: OnceLock<RwLock<Option<IpcAuthTokens>>> = OnceLock::new();
+static LAST_IPC_BIOMETRIC_ATTEMPT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+
+fn ipc_tokens_slot() -> &'static RwLock<Option<IpcAuthTokens>> {
+    IPC_AUTH_TOKENS.get_or_init(|| RwLock::new(None))
+}
+
+fn generate_hex_token_256() -> Zeroizing<String> {
+    let mut raw = [0u8; 32];
+    OsRng.fill_bytes(&mut raw);
+    let mut out = String::with_capacity(64);
+    for b in raw {
+        use std::fmt::Write;
+        let _ = write!(out, "{b:02x}");
+    }
+    Zeroizing::new(out)
+}
+
+fn write_ipc_token_file(dir: &Path, name: &str, token: &str) -> Result<(), String> {
+    let path = dir.join(name);
+    std::fs::write(&path, token.as_bytes())
+        .map_err(|e| format!("Failed to write IPC token {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to chmod IPC token {}: {e}", path.display()))?;
+    }
+    #[cfg(windows)]
+    {
+        crate::windows_native::harden_path_current_user_only(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn init_ipc_tokens(dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir)
+        .map_err(|e| format!("Failed to create IPC data dir {}: {e}", dir.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("Failed to chmod IPC data dir {}: {e}", dir.display()))?;
+    }
+    #[cfg(windows)]
+    {
+        crate::windows_native::harden_path_current_user_only(dir).map_err(|e| e.to_string())?;
+    }
+    let tokens = IpcAuthTokens {
+        nmh: generate_hex_token_256(),
+        cli: generate_hex_token_256(),
+    };
+    write_ipc_token_file(dir, NMH_TOKEN_FILE_NAME, &tokens.nmh)?;
+    write_ipc_token_file(dir, CLI_TOKEN_FILE_NAME, &tokens.cli)?;
+    let mut guard = ipc_tokens_slot().write().unwrap_or_else(|e| e.into_inner());
+    *guard = Some(tokens);
+    Ok(())
+}
+
+pub fn cleanup_ipc_tokens() {
+    if let Some(dir) = resolve_app_data_dir() {
+        let _ = std::fs::remove_file(dir.join(NMH_TOKEN_FILE_NAME));
+        let _ = std::fs::remove_file(dir.join(CLI_TOKEN_FILE_NAME));
+    }
+    if let Ok(mut guard) = ipc_tokens_slot().write() {
+        *guard = None;
+    }
+}
+
+fn ct_eq_str(a: &str, b: &str) -> bool {
+    a.len() == b.len() && bool::from(a.as_bytes().ct_eq(b.as_bytes()))
+}
+
+fn authenticate_ipc_token(provided: Option<&str>) -> Option<ClientRole> {
+    let raw = provided?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let guard = ipc_tokens_slot().read().ok()?;
+    let tokens = guard.as_ref()?;
+    if ct_eq_str(raw, &tokens.nmh) {
+        Some(ClientRole::BrowserExtension)
+    } else if ct_eq_str(raw, &tokens.cli) {
+        Some(ClientRole::Cli)
+    } else {
+        None
+    }
+}
+
+fn is_method_allowed(role: ClientRole, method: &str) -> bool {
+    match role {
+        ClientRole::BrowserExtension => matches!(
+            method,
+            "status"
+                | "list"
+                | "search"
+                | "get"
+                | "item_get"
+                | "totp"
+                | "item_update_quick"
+                | "item_trash"
+                | "generate"
+                | "generate_masked_email"
+                | "clipboard_copy"
+                | "url_match"
+                | "cards_and_identities"
+                | "check_login_save"
+                | "save_or_update_login"
+                | "check_sso_save"
+                | "save_sso_login"
+                | "passkey_list_for_rp"
+                | "passkey_create"
+                | "passkey_assert"
+                | "passkey_match"
+                | "open_desktop"
+                | "unlock_biometric"
+                | "focus_item"
+        ),
+        ClientRole::Cli => matches!(
+            method,
+            "status"
+                | "list"
+                | "search"
+                | "get"
+                | "item_get"
+                | "totp"
+                | "generate"
+                | "resolve_secret_ref"
+                | "ssh_list_keys"
+                | "ssh_sign_ed25519"
+                | "open_desktop"
+        ),
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct RpcRequest {
     id: u64,
     method: String,
+    #[serde(default, rename = "authToken")]
+    auth_token: Option<String>,
     #[serde(default)]
     params: Value,
 }
@@ -108,6 +263,12 @@ pub fn spawn_ipc_socket_server(app: AppHandle, core: Arc<AppCore>) {
         return;
     };
 
+    if let Some(data_dir) = resolve_app_data_dir() {
+        if let Err(err) = init_ipc_tokens(&data_dir) {
+            eprintln!("[keysmith] failed to initialize IPC auth tokens: {err}");
+        }
+    }
+
     #[cfg(unix)]
     {
         if let Some(dir) = resolve_app_data_dir() {
@@ -126,6 +287,8 @@ pub fn spawn_ipc_socket_server(app: AppHandle, core: Arc<AppCore>) {
                 eprintln!("[keysmith] failed to create IPC socket dir: {err}");
                 return;
             }
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
         }
         if sock_path.exists() {
             let _ = std::fs::remove_file(&sock_path);
@@ -147,7 +310,16 @@ pub fn spawn_ipc_socket_server(app: AppHandle, core: Arc<AppCore>) {
             let _ = std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600));
         }
 
+        let expected_uid = unsafe { libc::geteuid() };
         while let Ok((stream, _)) = listener.accept().await {
+            let peer_uid_ok = stream
+                .peer_cred()
+                .map(|c| c.uid() == expected_uid)
+                .unwrap_or(false);
+            if !peer_uid_ok {
+                eprintln!("[security] rejected keysmith.sock connection from foreign peer UID");
+                continue;
+            }
             let a = app.clone();
             let c = Arc::clone(&core);
             tokio::spawn(handle_connection(stream, a, c));
@@ -157,10 +329,16 @@ pub fn spawn_ipc_socket_server(app: AppHandle, core: Arc<AppCore>) {
     #[cfg(windows)]
     tauri::async_runtime::spawn(async move {
         let pipe_name = sock_path.to_string_lossy().to_string();
-        let mut server = match ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(&pipe_name)
-        {
+        let create_pipe_instance = |first: bool| -> Result<tokio::net::windows::named_pipe::NamedPipeServer, String> {
+            let mut opts = ServerOptions::new();
+            opts.first_pipe_instance(first);
+            opts.reject_remote_clients(true);
+            crate::windows_native::with_current_user_security_attributes(|sa| unsafe {
+                opts.create_with_security_attributes_raw(&pipe_name, sa)
+            })?
+            .map_err(|e| e.to_string())
+        };
+        let mut server = match create_pipe_instance(true) {
             Ok(s) => s,
             Err(err) => {
                 eprintln!("[keysmith] failed to create Windows named pipe {pipe_name}: {err}");
@@ -179,7 +357,7 @@ pub fn spawn_ipc_socket_server(app: AppHandle, core: Arc<AppCore>) {
             let c = Arc::clone(&core);
             tokio::spawn(handle_connection(connected, a, c));
 
-            server = match ServerOptions::new().create(&pipe_name) {
+            server = match create_pipe_instance(false) {
                 Ok(s) => s,
                 Err(err) => {
                     eprintln!("[keysmith] failed to create next pipe instance: {err}");
@@ -205,18 +383,39 @@ where
         let resp = match serde_json::from_str::<RpcRequest>(trimmed) {
             Ok(req) => {
                 let id = req.id;
-                match dispatch_rpc(&app, &core, &req.method, &req.params).await {
-                    Ok(val) => RpcResponse {
-                        id,
-                        ok: true,
-                        result: Some(val),
-                        error: None,
-                    },
-                    Err(err) => RpcResponse {
+                match authenticate_ipc_token(req.auth_token.as_deref()) {
+                    Some(role) if is_method_allowed(role, &req.method) => {
+                        match dispatch_rpc(&app, &core, role, &req.method, &req.params).await {
+                            Ok(val) => RpcResponse {
+                                id,
+                                ok: true,
+                                result: Some(val),
+                                error: None,
+                            },
+                            Err(err) => RpcResponse {
+                                id,
+                                ok: false,
+                                result: None,
+                                error: Some(err),
+                            },
+                        }
+                    }
+                    Some(_) => RpcResponse {
                         id,
                         ok: false,
                         result: None,
-                        error: Some(err),
+                        error: Some(format!(
+                            "Forbidden RPC method '{}' for this IPC client role",
+                            req.method
+                        )),
+                    },
+                    None => RpcResponse {
+                        id,
+                        ok: false,
+                        result: None,
+                        error: Some(
+                            "Unauthorized IPC client: missing or invalid authToken".to_string(),
+                        ),
                     },
                 }
             }
@@ -241,6 +440,7 @@ where
 async fn dispatch_rpc(
     app: &AppHandle,
     core: &Arc<AppCore>,
+    role: ClientRole,
     method: &str,
     params: &Value,
 ) -> Result<Value, String> {
@@ -278,7 +478,7 @@ async fn dispatch_rpc(
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(items).map_err(|e| e.to_string())
         }
-        "get" | "item_get" => rpc_get(core, params).await,
+        "get" | "item_get" => rpc_get(core, role, params).await,
         "totp" => rpc_totp(core, params).await,
         "item_update_quick" => rpc_item_update_quick(app, core, params).await,
         "item_trash" => rpc_item_trash(app, core, params).await,
@@ -309,6 +509,18 @@ async fn dispatch_rpc(
             }
             if !st.biometric_enabled {
                 return Err("未启用 Touch ID / 生物识别解锁".to_string());
+            }
+            {
+                let mut guard = LAST_IPC_BIOMETRIC_ATTEMPT
+                    .get_or_init(|| Mutex::new(None))
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if let Some(prev) = *guard {
+                    if prev.elapsed() < Duration::from_secs(5) {
+                        return Err("生物识别解锁请求过于频繁，请稍后重试".to_string());
+                    }
+                }
+                *guard = Some(Instant::now());
             }
             let session = core
                 .session_unlock_biometric()
@@ -344,7 +556,7 @@ async fn dispatch_rpc(
             if !core
                 .app_settings_get()
                 .map(|s| s.ssh_agent_enabled)
-                .unwrap_or(true)
+                .unwrap_or(false)
             {
                 return Ok(json!({ "keys": [] }));
             }
@@ -551,13 +763,80 @@ fn extract_credentials(item: &ItemDetail) -> (Option<String>, Option<String>, Op
     (username, password, totp)
 }
 
-async fn rpc_get(core: &AppCore, params: &Value) -> Result<Value, String> {
+fn sanitize_rpc_item_value(val: &mut Value, role: ClientRole, reveal_cli: bool) {
+    let Some(obj) = val.as_object_mut() else {
+        return;
+    };
+    let redact_all_sensitive = role == ClientRole::Cli && !reveal_cli;
+    if redact_all_sensitive {
+        if obj.get("password").and_then(|v| v.as_str()).is_some() {
+            obj.insert("password".to_string(), Value::String("[REDACTED]".to_string()));
+        }
+        if obj.get("totp").and_then(|v| v.as_str()).is_some() {
+            obj.insert("totp".to_string(), Value::String("[REDACTED]".to_string()));
+        }
+        obj.insert("redacted".to_string(), Value::Bool(true));
+    }
+
+    if let Some(payload) = obj.get_mut("payload").and_then(|v| v.as_object_mut()) {
+        if let Some(passkeys) = payload.get_mut("passkeys").and_then(|v| v.as_array_mut()) {
+            for pk in passkeys {
+                if let Some(pk_obj) = pk.as_object_mut() {
+                    pk_obj.remove("privateKeyPkcs8");
+                }
+            }
+        }
+        if let Some(history) = payload
+            .get_mut("passwordHistory")
+            .and_then(|v| v.as_array_mut())
+        {
+            for entry in history {
+                if let Some(e_obj) = entry.as_object_mut() {
+                    if e_obj.get("password").and_then(|v| v.as_str()).is_some() {
+                        e_obj.insert("password".to_string(), Value::String("[REDACTED]".to_string()));
+                    }
+                }
+            }
+        }
+        if let Some(sections) = payload.get_mut("sections").and_then(|v| v.as_array_mut()) {
+            for sec in sections {
+                let Some(fields) = sec.get_mut("fields").and_then(|v| v.as_array_mut()) else {
+                    continue;
+                };
+                for f in fields {
+                    let Some(f_obj) = f.as_object_mut() else {
+                        continue;
+                    };
+                    let ftype = f_obj.get("fieldType").and_then(|v| v.as_str()).unwrap_or("");
+                    let is_ssh_priv = ftype == "SshPrivateKey";
+                    let is_sensitive_field = f_obj
+                        .get("sensitive")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                        || matches!(
+                            ftype,
+                            "Password" | "Totp" | "SshPrivateKey"
+                        );
+                    if is_ssh_priv || (redact_all_sensitive && is_sensitive_field) {
+                        f_obj.insert("value".to_string(), Value::String("[REDACTED]".to_string()));
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn rpc_get(core: &AppCore, role: ClientRole, params: &Value) -> Result<Value, String> {
     let id_or_title = params
         .get("idOrTitle")
         .or_else(|| params.get("itemId"))
         .and_then(|v| v.as_str())
         .ok_or_else(|| "缺少 idOrTitle 参数".to_string())?;
     let item = find_item_by_id_or_title(core, id_or_title)?;
+    let reveal_cli = params
+        .get("reveal")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     if item.payload.reprompt {
         let verify_bio = params
@@ -612,11 +891,31 @@ async fn rpc_get(core: &AppCore, params: &Value) -> Result<Value, String> {
                     .unwrap_or(false);
                 let label_match = f.label.to_lowercase() == target_lower;
                 if purpose_match || type_match || label_match {
+                    if role == ClientRole::BrowserExtension
+                        && f.field_type == FieldType::SshPrivateKey
+                    {
+                        return Err("Browser extension cannot access SSH private keys".to_string());
+                    }
+                    let redacted = role == ClientRole::Cli
+                        && !reveal_cli
+                        && (f.sensitive
+                            || matches!(
+                                f.field_type,
+                                FieldType::Password
+                                    | FieldType::Totp
+                                    | FieldType::SshPrivateKey
+                            ));
+                    let value = if redacted {
+                        "[REDACTED]".to_string()
+                    } else {
+                        f.value.clone()
+                    };
                     return Ok(json!({
                         "id": item.id,
                         "title": item.title,
                         "field": field_name,
-                        "value": f.value,
+                        "value": value,
+                        "redacted": redacted,
                     }));
                 }
             }
@@ -641,6 +940,7 @@ async fn rpc_get(core: &AppCore, params: &Value) -> Result<Value, String> {
             obj.insert("totp".to_string(), Value::String(t));
         }
     }
+    sanitize_rpc_item_value(&mut val, role, reveal_cli);
     Ok(val)
 }
 
@@ -1708,6 +2008,11 @@ fn rpc_passkey_list_for_rp(core: &AppCore, params: &Value) -> Result<Value, Stri
         .and_then(|v| v.as_str())
         .map(str::trim)
         .unwrap_or("");
+    let tab_url = params
+        .get("tabUrl")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
 
     let resolved_rp_id = if rp_id_raw.is_empty() {
         parse_url_host(origin)
@@ -1716,6 +2021,10 @@ fn rpc_passkey_list_for_rp(core: &AppCore, params: &Value) -> Result<Value, Stri
     } else {
         rp_id_raw
     };
+    eprintln!(
+        "[audit] passkey_list_for_rp rp_id={} origin={} tab_url={}",
+        resolved_rp_id, origin, tab_url
+    );
 
     let state = core.session_get_state();
     if state.status != AuthStatus::Unlocked {
@@ -1836,6 +2145,32 @@ fn rpc_passkey_list_for_rp(core: &AppCore, params: &Value) -> Result<Value, Stri
     }))
 }
 
+fn validate_passkey_origin_and_tab(
+    origin: &str,
+    tab_url: &str,
+    cross_origin: bool,
+) -> Result<(), String> {
+    let parsed_orig = Url::parse(origin)
+        .map_err(|_| format!("非法的 Passkey 来源 origin: {origin}"))?;
+    if !matches!(parsed_orig.scheme(), "http" | "https") {
+        return Err(format!("不支持的 Passkey origin 协议: {origin}"));
+    }
+    if !cross_origin && !tab_url.is_empty() {
+        if let Ok(parsed_tab) = Url::parse(tab_url) {
+            if matches!(parsed_tab.scheme(), "http" | "https")
+                && parsed_tab.origin().ascii_serialization()
+                    != parsed_orig.origin().ascii_serialization()
+            {
+                return Err(format!(
+                    "非跨源 Passkey 请求的标签页来源 ({}) 与 frame origin ({origin}) 不一致",
+                    parsed_tab.origin().ascii_serialization()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn rpc_passkey_create(
     app: &AppHandle,
     core: &Arc<AppCore>,
@@ -1850,9 +2185,20 @@ async fn rpc_passkey_create(
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "缺少 origin 参数".to_string())?
         .to_string();
+    let tab_url = params
+        .get("tabUrl")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
     let options = params
         .get("options")
         .ok_or_else(|| "缺少 WebAuthn options 参数".to_string())?;
+    let cross_origin_flag = params
+        .get("crossOrigin")
+        .and_then(|v| v.as_bool())
+        .or_else(|| options.get("crossOrigin").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    validate_passkey_origin_and_tab(&origin, tab_url, cross_origin_flag)?;
 
     let rp_id = options
         .get("rp")
@@ -1862,6 +2208,10 @@ async fn rpc_passkey_create(
         .filter(|s| !s.is_empty())
         .or_else(|| parse_url_host(&origin).map(|(_, h)| normalize_rp_id(&h)))
         .ok_or_else(|| "无法解析 WebAuthn RP ID".to_string())?;
+    eprintln!(
+        "[audit] passkey_create rp_id={} origin={} tab_url={}",
+        rp_id, origin, tab_url
+    );
 
     let custom_equiv = core
         .app_settings_get()
@@ -1964,11 +2314,7 @@ async fn rpc_passkey_create(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    let cross_origin = params
-        .get("crossOrigin")
-        .and_then(|v| v.as_bool())
-        .or_else(|| options.get("crossOrigin").and_then(|v| v.as_bool()))
-        .unwrap_or(false);
+    let cross_origin = cross_origin_flag;
 
     let prf_ext_in = options.get("extensions").and_then(|e| e.get("prf"));
     let prf_requested = prf_ext_in.is_some();
@@ -2118,6 +2464,11 @@ async fn rpc_passkey_assert(
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "缺少 origin 参数".to_string())?
         .to_string();
+    let tab_url = params
+        .get("tabUrl")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
     let item_id = params
         .get("itemId")
         .and_then(|v| v.as_str())
@@ -2188,6 +2539,11 @@ async fn rpc_passkey_assert(
         .and_then(|v| v.as_bool())
         .or_else(|| options.get("crossOrigin").and_then(|v| v.as_bool()))
         .unwrap_or(false);
+    validate_passkey_origin_and_tab(&origin, tab_url, cross_origin)?;
+    eprintln!(
+        "[audit] passkey_assert rp_id={} origin={} tab_url={}",
+        rp_id, origin, tab_url
+    );
 
     let custom_equiv = core
         .app_settings_get()
@@ -2249,11 +2605,17 @@ fn ssh_approval_cache() -> &'static Mutex<HashMap<String, Instant>> {
     SSH_BIO_APPROVAL_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+pub fn clear_ssh_approval_cache() {
+    if let Ok(mut map) = ssh_approval_cache().lock() {
+        map.clear();
+    }
+}
+
 async fn rpc_ssh_sign_ed25519(core: &Arc<AppCore>, params: &Value) -> Result<Value, String> {
     if !core
         .app_settings_get()
         .map(|s| s.ssh_agent_enabled)
-        .unwrap_or(true)
+        .unwrap_or(false)
     {
         return Err("Keysmith SSH Agent 已在设置中关闭".to_string());
     }
@@ -2313,14 +2675,14 @@ async fn rpc_ssh_sign_ed25519(core: &Arc<AppCore>, params: &Value) -> Result<Val
             .map(|f| f.value.clone())
             .ok_or_else(|| format!("SSH 密钥「{}」缺少私钥内容", item.title))?;
 
-        let needs_bio = session.ssh_biometric_confirm || item.payload.reprompt;
-        if needs_bio && session.biometric_enabled {
+        let needs_confirm = session.ssh_biometric_confirm || item.payload.reprompt;
+        if needs_confirm {
             let cache_key = format!("{}:{target_blob}", session.account_id);
             let cached_valid = {
                 let mut map = ssh_approval_cache()
                     .lock()
                     .unwrap_or_else(|e| e.into_inner());
-                map.retain(|_, ts| ts.elapsed() < Duration::from_secs(300));
+                map.retain(|_, ts| ts.elapsed() < Duration::from_secs(60));
                 map.contains_key(&cache_key)
             };
             if !cached_valid {
@@ -2333,7 +2695,7 @@ async fn rpc_ssh_sign_ed25519(core: &Arc<AppCore>, params: &Value) -> Result<Val
                     localized_biometric_reason(&lang, "ssh"),
                     item.title
                 );
-                core.session_verify_biometric_reprompt(Some(&reason))
+                core.session_verify_user_presence(Some(&reason))
                     .await
                     .map_err(|e| e.to_string())?;
                 if let Ok(mut map) = ssh_approval_cache().lock() {
@@ -2355,6 +2717,8 @@ async fn rpc_ssh_sign_ed25519(core: &Arc<AppCore>, params: &Value) -> Result<Val
 async fn spawn_embedded_ssh_agent(sock_path: PathBuf, core: Arc<AppCore>) {
     if let Some(parent) = sock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
     }
     if sock_path.exists() {
         let _ = std::fs::remove_file(&sock_path);
@@ -2366,7 +2730,16 @@ async fn spawn_embedded_ssh_agent(sock_path: PathBuf, core: Arc<AppCore>) {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600));
     }
+    let expected_uid = unsafe { libc::geteuid() };
     while let Ok((stream, _)) = listener.accept().await {
+        let peer_uid_ok = stream
+            .peer_cred()
+            .map(|c| c.uid() == expected_uid)
+            .unwrap_or(false);
+        if !peer_uid_ok {
+            eprintln!("[security] rejected ssh-agent.sock connection from foreign peer UID");
+            continue;
+        }
         let c = Arc::clone(&core);
         tokio::spawn(handle_ssh_agent_client(stream, c));
     }
@@ -2422,7 +2795,7 @@ async fn handle_ssh_agent_client(mut stream: tokio::net::UnixStream, core: Arc<A
                 let agent_enabled = core
                     .app_settings_get()
                     .map(|s| s.ssh_agent_enabled)
-                    .unwrap_or(true);
+                    .unwrap_or(false);
                 if !agent_enabled {
                     let mut out = vec![SSH_AGENT_IDENTITIES_ANSWER];
                     out.extend_from_slice(&0u32.to_be_bytes());
@@ -2566,4 +2939,137 @@ fn rpc_passkey_match(core: &AppCore, params: &Value) -> Result<Value, String> {
         "fallback": true,
         "matchedCount": matched_count,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ipc_token_auth_and_role_allowlist_work() {
+        let dir =
+            std::env::temp_dir().join(format!("keysmith_ipc_tok_test_{}", new_uuid()));
+        init_ipc_tokens(&dir).expect("init_ipc_tokens");
+
+        let nmh_tok = std::fs::read_to_string(dir.join(NMH_TOKEN_FILE_NAME)).expect("read nmh");
+        let cli_tok = std::fs::read_to_string(dir.join(CLI_TOKEN_FILE_NAME)).expect("read cli");
+        assert_eq!(nmh_tok.len(), 64);
+        assert_eq!(cli_tok.len(), 64);
+        assert_ne!(nmh_tok, cli_tok);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let dir_mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+            let nmh_mode = std::fs::metadata(dir.join(NMH_TOKEN_FILE_NAME))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(dir_mode, 0o700);
+            assert_eq!(nmh_mode, 0o600);
+        }
+
+        assert_eq!(authenticate_ipc_token(None), None);
+        assert_eq!(authenticate_ipc_token(Some("")), None);
+        assert_eq!(authenticate_ipc_token(Some("wrong-token")), None);
+        assert_eq!(
+            authenticate_ipc_token(Some(&nmh_tok)),
+            Some(ClientRole::BrowserExtension)
+        );
+        assert_eq!(
+            authenticate_ipc_token(Some(&cli_tok)),
+            Some(ClientRole::Cli)
+        );
+
+        assert!(is_method_allowed(ClientRole::BrowserExtension, "passkey_assert"));
+        assert!(is_method_allowed(ClientRole::BrowserExtension, "unlock_biometric"));
+        assert!(!is_method_allowed(ClientRole::BrowserExtension, "ssh_sign_ed25519"));
+        assert!(!is_method_allowed(ClientRole::BrowserExtension, "resolve_secret_ref"));
+
+        assert!(is_method_allowed(ClientRole::Cli, "ssh_sign_ed25519"));
+        assert!(is_method_allowed(ClientRole::Cli, "resolve_secret_ref"));
+        assert!(!is_method_allowed(ClientRole::Cli, "passkey_assert"));
+        assert!(!is_method_allowed(ClientRole::Cli, "unlock_biometric"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn validate_passkey_origin_and_tab_enforces_non_cross_origin() {
+        assert!(validate_passkey_origin_and_tab(
+            "https://app.example.com",
+            "https://app.example.com/login",
+            false
+        )
+        .is_ok());
+        assert!(validate_passkey_origin_and_tab(
+            "https://evil.example.com",
+            "https://bank.example.com/login",
+            false
+        )
+        .is_err());
+        assert!(validate_passkey_origin_and_tab(
+            "https://idp.example.com",
+            "https://shop.example.com/checkout",
+            true
+        )
+        .is_ok());
+        assert!(validate_passkey_origin_and_tab("javascript:alert(1)", "", false).is_err());
+    }
+
+    #[test]
+    fn sanitize_rpc_item_value_redacts_secrets_per_role() {
+        let sample = json!({
+            "id": "item-1",
+            "username": "alice",
+            "password": "super-secret-password",
+            "totp": "JBSWY3DPEHPK3PXP",
+            "payload": {
+                "passkeys": [{
+                    "credentialId": "cred-1",
+                    "rpId": "example.com",
+                    "privateKeyPkcs8": "SECRET_PKCS8_KEY"
+                }],
+                "passwordHistory": [{
+                    "password": "old-password",
+                    "lastUsedDate": "2026-01-01T00:00:00Z"
+                }],
+                "sections": [{
+                    "id": "sec-1",
+                    "title": "Main",
+                    "fields": [
+                        { "fieldType": "Password", "sensitive": true, "value": "super-secret-password" },
+                        { "fieldType": "SshPrivateKey", "sensitive": true, "value": "-----BEGIN OPENSSH PRIVATE KEY-----" },
+                        { "fieldType": "Text", "sensitive": false, "value": "alice" }
+                    ]
+                }]
+            }
+        });
+
+        // BrowserExtension keeps login password for autofill but never sees passkey privateKeyPkcs8, SSH private key, or passwordHistory
+        let mut ext_val = sample.clone();
+        sanitize_rpc_item_value(&mut ext_val, ClientRole::BrowserExtension, false);
+        assert_eq!(ext_val["password"], "super-secret-password");
+        assert!(ext_val["payload"]["passkeys"][0].get("privateKeyPkcs8").is_none());
+        assert_eq!(ext_val["payload"]["passwordHistory"][0]["password"], "[REDACTED]");
+        assert_eq!(ext_val["payload"]["sections"][0]["fields"][1]["value"], "[REDACTED]");
+
+        // CLI defaults to redacted sensitive fields unless reveal=true
+        let mut cli_redacted = sample.clone();
+        sanitize_rpc_item_value(&mut cli_redacted, ClientRole::Cli, false);
+        assert_eq!(cli_redacted["redacted"], true);
+        assert_eq!(cli_redacted["password"], "[REDACTED]");
+        assert_eq!(cli_redacted["totp"], "[REDACTED]");
+        assert_eq!(cli_redacted["payload"]["sections"][0]["fields"][0]["value"], "[REDACTED]");
+        assert_eq!(cli_redacted["payload"]["sections"][0]["fields"][2]["value"], "alice");
+        assert!(cli_redacted["payload"]["passkeys"][0].get("privateKeyPkcs8").is_none());
+
+        // CLI with reveal=true exposes secrets while still never exposing raw passkey private keys
+        let mut cli_revealed = sample;
+        sanitize_rpc_item_value(&mut cli_revealed, ClientRole::Cli, true);
+        assert_eq!(cli_revealed["password"], "super-secret-password");
+        assert_eq!(cli_revealed["payload"]["sections"][0]["fields"][0]["value"], "super-secret-password");
+        assert!(cli_revealed["payload"]["passkeys"][0].get("privateKeyPkcs8").is_none());
+    }
 }

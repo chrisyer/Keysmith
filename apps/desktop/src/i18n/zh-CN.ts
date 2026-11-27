@@ -62,6 +62,11 @@ export const zhCN = {
     demoHint: '演示主密码：{pw}',
     savedAccountsQuickSwitch: '已有账户',
     cancelAddAccount: '取消并返回',
+    insecureHttpWarning: '检测到非本地服务器使用明文 HTTP 连接。除非改用 HTTPS，否则凭据和令牌可能在网络中被窃听。',
+    insecureHttpConfirm: '我了解风险，允许对此服务器使用明文 HTTP 连接',
+    insecureHttpRequired: '请先勾选确认明文 HTTP 风险提示后再继续，或改用 https:// 地址。',
+    weakKdfWarning: '检测到较弱的 KDF 配置（PBKDF2 仅 {iterations} 次迭代，低于建议值 600,000），建议在服务端提高 KDF 强度。',
+    masterPasswordTooWeak: '主密码至少需要 12 个字符，且包含至少两类字符（大写字母、小写字母、数字或符号）。',
   },
   lock: {
     unlockPlaceholder: '输入主密码',

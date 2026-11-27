@@ -14,11 +14,13 @@ cask "keysmith" do
 
   app "Keysmith.app"
 
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-cr", "#{appdir}/Keysmith.app"],
-                   sudo: false
-  end
+  caveats <<~EOS
+    Keysmith releases are currently ad-hoc signed without Apple Developer notarization.
+    If macOS Gatekeeper blocks first launch, approve it in:
+      System Settings -> Privacy & Security -> Open Anyway
+    Or run manually after verifying the checksum:
+      xattr -dr com.apple.quarantine "#{appdir}/Keysmith.app"
+  EOS
 
   zap trash: [
     "~/Library/Application Support/dev.keysmith.desktop",

@@ -1,41 +1,8 @@
-import type { AccountPasskey, ItemDetail, PasskeyCredential, Vault } from '../types/domain';
-import { APPLE_TOUCH_ID_AAGUID, KEYSMITH_AAGUID, YUBIKEY_5_AAGUID } from './passkey';
+import type { ItemDetail, PasskeyCredential, Vault } from '../types/domain';
+import { KEYSMITH_AAGUID } from './passkey';
 
 export const DEMO_RP_ID = 'vault.keysmith.local';
 export const DEMO_ACCOUNT_USER_ID = 'Y2hlcnJ5LWtleXNtaXRoLXVpZC0wMQ';
-
-export const INITIAL_ACCOUNT_PASSKEYS: AccountPasskey[] = [
-  {
-    id: 'bWFjYm9vay1wcm8tdG91Y2hpZC0wMQ',
-    passkeyUserId: DEMO_ACCOUNT_USER_ID,
-    credentialPublicKey: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKeysmithDemoTouchIDPubKey001',
-    credentialType: 'public-key',
-    credentialDeviceType: 'multiDevice',
-    credentialBackedUp: true,
-    aaguid: APPLE_TOUCH_ID_AAGUID,
-    name: 'MacBook Pro · Touch ID',
-    transports: ['internal', 'hybrid'],
-    registeredAt: Date.parse('2026-06-10T09:00:00Z'),
-    lastUsedAt: Date.parse('2026-11-25T14:20:00Z'),
-    counter: 28,
-    prfSupported: true,
-  },
-  {
-    id: 'eXViaWtleS01Yy1uZmMtMDI',
-    passkeyUserId: DEMO_ACCOUNT_USER_ID,
-    credentialPublicKey: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKeysmithDemoYubiKeyPubKey002',
-    credentialType: 'public-key',
-    credentialDeviceType: 'singleDevice',
-    credentialBackedUp: false,
-    aaguid: YUBIKEY_5_AAGUID,
-    name: 'YubiKey 5C NFC',
-    transports: ['usb', 'nfc'],
-    registeredAt: Date.parse('2026-07-02T11:30:00Z'),
-    lastUsedAt: Date.parse('2026-11-18T18:05:00Z'),
-    counter: 9,
-    prfSupported: true,
-  },
-];
 
 export const INITIAL_VAULTS: Omit<Vault, 'itemCount'>[] = [
   {

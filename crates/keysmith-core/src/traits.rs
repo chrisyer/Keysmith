@@ -2,7 +2,12 @@ use zeroize::Zeroizing;
 
 use crate::error::CoreError;
 
-/// Platform abstraction for biometric-protected key storage (e.g. macOS Keychain + Touch ID ACL).
+/// Platform abstraction for biometric-protected key storage.
+///
+/// On macOS, signed builds bind the unlock key to the Data Protection Keychain with
+/// `SecAccessControlCreateWithFlags` (`kSecAccessControlBiometryCurrentSet`) + `LAContext`
+/// (falling back on `-34018` under ad-hoc signing to `LAContext`-gated login Keychain).
+/// On Windows, keys are wrapped via CNG `Microsoft Passport Key Storage Provider` (Windows Hello).
 pub trait BiometricKeyStore: Send + Sync {
     fn is_available(&self) -> bool;
 

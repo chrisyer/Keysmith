@@ -62,6 +62,11 @@ export const fr = {
     demoHint: 'Mot de passe principal démo : {pw}',
     savedAccountsQuickSwitch: 'Comptes enregistrés',
     cancelAddAccount: 'Annuler',
+    insecureHttpWarning: 'Connexion HTTP non chiffrée détectée pour un serveur distant. Vos identifiants et jetons peuvent être interceptés sur le réseau sans HTTPS.',
+    insecureHttpConfirm: 'Je comprends le risque et j’autorise HTTP non chiffré pour ce serveur',
+    insecureHttpRequired: 'Veuillez confirmer l’avertissement HTTP non chiffré avant de continuer, ou passer en https://.',
+    weakKdfWarning: 'Configuration KDF faible détectée (PBKDF2 {iterations} itérations < 600 000). Il est recommandé d’augmenter le KDF sur votre serveur.',
+    masterPasswordTooWeak: 'Le mot de passe principal doit contenir au moins 12 caractères et au moins 2 catégories (majuscules, minuscules, chiffres, symboles).',
   },
   lock: {
     unlockPlaceholder: 'Saisir le mot de passe principal',

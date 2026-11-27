@@ -16,6 +16,42 @@ if (self.KeysmithI18n && typeof self.KeysmithI18n.onChange === 'function') {
 }
 
 let nextRpcId = 1;
+const PASSKEY_RELAY_TTL_MS = 120000;
+const pendingPasskeyRelays = new Map();
+
+function resolveTrustedSenderOrigin(sender) {
+  const candidates = [sender?.origin, sender?.url, sender?.tab?.url];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || !candidate.trim()) continue;
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        return parsed.origin;
+      }
+    } catch {
+      // Ignore malformed candidate URL
+    }
+  }
+  return '';
+}
+
+function computeCrossOriginFlag(senderOrigin, tabUrl) {
+  if (!senderOrigin || !tabUrl) return false;
+  try {
+    const tabOrigin = new URL(tabUrl).origin;
+    return Boolean(tabOrigin && tabOrigin !== senderOrigin);
+  } catch {
+    return false;
+  }
+}
+
+function pruneExpiredPasskeyRelays(now = Date.now()) {
+  for (const [token, entry] of pendingPasskeyRelays.entries()) {
+    if (!entry || now - entry.createdAt > PASSKEY_RELAY_TTL_MS) {
+      pendingPasskeyRelays.delete(token);
+    }
+  }
+}
 
 function rpcRaw(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
   return new Promise((resolve) => {
@@ -893,15 +929,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
       }
       case 'PASSKEY_LIST_FOR_RP': {
-        sendResponse(
-          await rpcRaw('passkey_list_for_rp', {
-            rpId: message.rpId || '',
-            rpIdExplicit: message.rpIdExplicit !== false,
-            origin: message.origin || '',
-            allowCredentials: message.allowCredentials || [],
-            excludeCredentials: message.excludeCredentials || []
-          })
-        );
+        const trustedOrigin = resolveTrustedSenderOrigin(sender);
+        if (!trustedOrigin) {
+          sendResponse({ connected: true, ok: false, error: 'Missing trusted sender origin' });
+          break;
+        }
+        const tabUrl = typeof sender?.tab?.url === 'string' ? sender.tab.url : '';
+        const listRes = await rpcRaw('passkey_list_for_rp', {
+          rpId: message.rpId || '',
+          rpIdExplicit: message.rpIdExplicit !== false,
+          origin: trustedOrigin,
+          tabUrl,
+          allowCredentials: message.allowCredentials || [],
+          excludeCredentials: message.excludeCredentials || []
+        });
+        if (listRes?.ok && listRes.result && typeof listRes.result === 'object') {
+          listRes.result.origin = trustedOrigin;
+          listRes.result.tabUrl = tabUrl;
+        }
+        sendResponse(listRes);
         break;
       }
       case 'PASSKEY_SHOW_TOP_MODAL': {
@@ -909,6 +955,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ handled: false, fallback: true, _relayFailed: true });
           break;
         }
+        const senderOrigin = resolveTrustedSenderOrigin(sender);
+        if (!senderOrigin) {
+          sendResponse({ handled: false, fallback: true, _relayFailed: true });
+          break;
+        }
+        const tabUrl = typeof sender?.tab?.url === 'string' ? sender.tab.url : '';
+        pruneExpiredPasskeyRelays();
+        const relayToken = crypto.randomUUID();
+        pendingPasskeyRelays.set(relayToken, {
+          tabId: sender.tab.id,
+          frameId: sender.frameId,
+          origin: senderOrigin,
+          tabUrl,
+          crossOrigin: computeCrossOriginFlag(senderOrigin, tabUrl),
+          createdAt: Date.now()
+        });
         try {
           const reply = await new Promise((resolve) => {
             chrome.tabs.sendMessage(
@@ -917,7 +979,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 type: 'PASSKEY_RENDER_MODAL',
                 modalKind: message.modalKind,
                 options: message.options,
-                origin: message.origin,
+                origin: senderOrigin,
+                tabUrl,
+                relayToken,
                 info: message.info,
                 passkeys: message.passkeys,
                 listPayload: message.listPayload
@@ -932,20 +996,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
             );
           });
+          if (!reply || reply._relayFailed) {
+            pendingPasskeyRelays.delete(relayToken);
+          }
           sendResponse(reply);
         } catch {
+          pendingPasskeyRelays.delete(relayToken);
           sendResponse({ handled: false, fallback: true, _relayFailed: true });
         }
         break;
       }
       case 'PASSKEY_CREATE': {
+        let trustedOrigin = '';
+        let tabUrl = '';
+        let crossOrigin = false;
+        if (message.relayToken) {
+          pruneExpiredPasskeyRelays();
+          const relay = pendingPasskeyRelays.get(message.relayToken);
+          if (!relay || relay.tabId !== sender?.tab?.id || sender?.frameId !== 0) {
+            sendResponse({ connected: true, ok: false, error: 'Invalid or expired Passkey relay token' });
+            break;
+          }
+          pendingPasskeyRelays.delete(message.relayToken);
+          trustedOrigin = relay.origin;
+          tabUrl = relay.tabUrl;
+          crossOrigin = relay.crossOrigin;
+        } else {
+          trustedOrigin = resolveTrustedSenderOrigin(sender);
+          if (!trustedOrigin) {
+            sendResponse({ connected: true, ok: false, error: 'Missing trusted sender origin' });
+            break;
+          }
+          tabUrl = typeof sender?.tab?.url === 'string' ? sender.tab.url : '';
+          crossOrigin = computeCrossOriginFlag(trustedOrigin, tabUrl);
+        }
+        const rawOptions =
+          message.options && typeof message.options === 'object' ? message.options : {};
         const res = await rpcRaw(
           'passkey_create',
           {
-            origin: message.origin || '',
+            origin: trustedOrigin,
+            tabUrl,
+            crossOrigin,
             itemId: message.itemId || undefined,
             title: message.title || undefined,
-            options: message.options || {}
+            options: { ...rawOptions, crossOrigin }
           },
           35000
         );
@@ -954,15 +1049,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
       }
       case 'PASSKEY_ASSERT': {
+        let trustedOrigin = '';
+        let tabUrl = '';
+        let crossOrigin = false;
+        if (message.relayToken) {
+          pruneExpiredPasskeyRelays();
+          const relay = pendingPasskeyRelays.get(message.relayToken);
+          if (!relay || relay.tabId !== sender?.tab?.id || sender?.frameId !== 0) {
+            sendResponse({ connected: true, ok: false, error: 'Invalid or expired Passkey relay token' });
+            break;
+          }
+          pendingPasskeyRelays.delete(message.relayToken);
+          trustedOrigin = relay.origin;
+          tabUrl = relay.tabUrl;
+          crossOrigin = relay.crossOrigin;
+        } else {
+          trustedOrigin = resolveTrustedSenderOrigin(sender);
+          if (!trustedOrigin) {
+            sendResponse({ connected: true, ok: false, error: 'Missing trusted sender origin' });
+            break;
+          }
+          tabUrl = typeof sender?.tab?.url === 'string' ? sender.tab.url : '';
+          crossOrigin = computeCrossOriginFlag(trustedOrigin, tabUrl);
+        }
+        const rawOptions =
+          message.options && typeof message.options === 'object' ? message.options : {};
         sendResponse(
           await rpcRaw(
             'passkey_assert',
             {
-              origin: message.origin || '',
+              origin: trustedOrigin,
+              tabUrl,
+              crossOrigin,
               itemId: message.itemId || '',
               credentialId: message.credentialId || '',
               verifyBiometric: Boolean(message.verifyBiometric),
-              options: message.options || {}
+              options: { ...rawOptions, crossOrigin }
             },
             35000
           )

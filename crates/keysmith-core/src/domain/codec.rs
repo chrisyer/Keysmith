@@ -4,8 +4,8 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::crypto::{
-    build_send_share_url, decrypt_bytes, derive_send_key, encrypt_bytes, hash_send_password,
-    UserSymmetricKey,
+    build_send_share_url, decrypt_bytes_authenticated, derive_send_key, encrypt_bytes,
+    hash_send_password, UserSymmetricKey,
 };
 use crate::domain::{
     extract_domain, format_size_bytes, FieldPurpose, FieldType, ItemAttachment, ItemCategory,
@@ -1275,7 +1275,7 @@ pub fn decode_send_dto(
         .as_deref()
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| CoreError::Crypto("Send 缺少密钥字段".to_string()))?;
-    let key_raw = decrypt_bytes(key_enc, usk.enc_key(), usk.mac_key())?;
+    let key_raw = decrypt_bytes_authenticated(key_enc, usk.enc_key(), usk.mac_key())?;
     let seed_arr: [u8; 16] = (*key_raw)
         .clone()
         .try_into()

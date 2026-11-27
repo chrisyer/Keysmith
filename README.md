@@ -74,11 +74,13 @@ On launch, Keysmith extracts the browser extension to `%APPDATA%\dev.keysmith.de
 
 ### macOS (macOS 13+ Apple Silicon & Intel)
 
-#### Option 1: One-Line Installer (Recommended — bypasses Gatekeeper quarantine cleanly)
+#### Option 1: One-Line Installer (Verified via `SHA256SUMS.txt`)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/v0.1.4/install.sh | sh
 ```
+
+> Inspect scripts before piping to `sh`. `install.sh` strictly requires a matching `SHA256SUMS.txt` checksum and leaves macOS Gatekeeper approval under your control.
 
 #### Option 2: Homebrew Cask
 
@@ -94,8 +96,13 @@ To upgrade later, run `brew upgrade --cask chrisyer/keysmith/keysmith` (the `chr
 Download the matching architecture (`aarch64` or `x64`) `.dmg` from [GitHub Releases](https://github.com/chrisyer/Keysmith/releases) and drag `Keysmith.app` into `/Applications`. Because builds are ad-hoc signed without paid Apple Developer notarization, if macOS blocks first launch, allow it via **System Settings → Privacy & Security → Open Anyway** or run:
 
 ```bash
-xattr -cr /Applications/Keysmith.app
+xattr -dr com.apple.quarantine /Applications/Keysmith.app
 ```
+
+#### Desktop Security Options
+
+- Toggle **Screen capture protection** (`screen_capture_protected`) in Settings to prevent external screenshots/screen recordings from capturing main or floating vault windows.
+- TOTP QR screen captures write only to isolated `0700` `tmp-qr/` storage and are zero-wiped immediately after decode.
 
 ---
 
@@ -118,7 +125,13 @@ ks status
 ks list
 ks generate --length 20
 
-# Start the in-memory OpenSSH Ed25519 signing agent (SSH_AUTH_SOCK)
+# Get an item (sensitive fields redacted by default; pass --reveal to print plaintext)
+ks get "GitHub" --reveal
+
+# Inject secrets into subprocess env cleanly (prefer --env-file over CLI argv ks://)
+ks run --env-file .env.ks -- npm run deploy
+
+# Start the in-memory OpenSSH Ed25519 signing agent (enable SSH Agent in Settings first; socket lives under ~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock)
 ks ssh-agent
 
 # Optional manual Native Messaging setup for custom unpacked extension IDs

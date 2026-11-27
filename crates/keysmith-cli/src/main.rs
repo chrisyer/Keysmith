@@ -43,6 +43,9 @@ enum Commands {
         id_or_title: String,
         #[arg(long)]
         field: Option<String>,
+        /// Reveal sensitive fields instead of redacting them
+        #[arg(long)]
+        reveal: bool,
     },
     /// Compute current TOTP code for an item
     Totp { id_or_title: String },
@@ -160,9 +163,15 @@ async fn main() -> Result<()> {
                 print_json(&res)?;
             }
         }
-        Commands::Get { id_or_title, field } => {
+        Commands::Get {
+            id_or_title,
+            field,
+            reveal,
+        } => {
             let client = SocketClient::from_default_path()?;
-            let res = client.get(&id_or_title, field.as_deref()).await?;
+            let res = client
+                .get_with_reveal(&id_or_title, field.as_deref(), reveal)
+                .await?;
             if cli.json {
                 print_json(&res)?;
             } else if field.is_some() {
@@ -250,6 +259,11 @@ async fn main() -> Result<()> {
             no_masking,
             command,
         } => {
+            if command.iter().any(|arg| arg.contains("ks://")) {
+                eprintln!(
+                    "[keysmith] warning: detected 'ks://' reference in command-line arguments. Arguments are visible via process listings (ps); prefer --env-file or environment variables instead."
+                );
+            }
             let client = SocketClient::from_default_path()?;
             let code =
                 run_with_secret_env(&client, env_file.as_deref(), no_masking, &command).await?;

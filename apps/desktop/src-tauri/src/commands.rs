@@ -4,13 +4,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use keysmith_core::crypto::KdfConfig;
 use keysmith_core::domain::{
-    AccountPasskey, AccountPasskeyListResponse, AccountProfileResponse, AppSettings,
-    AppSettingsPatch, AppUpdateInfo, AttachmentDownloadResult, AuthStatus, ExportResult,
-    FieldPurpose, FieldType, GeneratorHistoryEntry, GeneratorOptions, GeneratorResult,
-    ImportSummary, ItemAttachment, ItemDetail, ItemDraft, ItemFilter, ItemStats, ItemSummary,
-    LocalSnapshotInfo, OrganizationInfo, SendCreateFileInput, SendCreateTextInput, SendItem,
-    SendUpdateInput, ServerCheckResult, SessionPreferencesPatch, SessionState, SshAgentStatus,
-    SshKeyPair, SyncStateKind, SyncStatus, TotpCode, Vault, WatchtowerFlagsPatch, WatchtowerReport,
+    AccountProfileResponse, AppSettings, AppSettingsPatch, AppUpdateInfo,
+    AttachmentDownloadResult, AuthStatus, ExportResult, FieldPurpose, FieldType,
+    GeneratorHistoryEntry, GeneratorOptions, GeneratorResult, ImportSummary, ItemAttachment,
+    ItemDetail, ItemDraft, ItemFilter, ItemStats, ItemSummary, LocalSnapshotInfo,
+    OrganizationInfo, SendCreateFileInput, SendCreateTextInput, SendItem, SendUpdateInput,
+    ServerCheckResult, SessionPreferencesPatch, SessionState, SshAgentStatus, SshKeyPair,
+    SyncStateKind, SyncStatus, TotpCode, Vault, WatchtowerFlagsPatch, WatchtowerReport,
 };
 use keysmith_core::error::CoreError;
 use keysmith_core::protocol::check_github_latest_release;
@@ -402,8 +402,12 @@ where
 pub async fn auth_check_server(
     state: State<'_, AppState>,
     server_url: String,
+    allow_insecure_http: Option<bool>,
 ) -> Result<ServerCheckResult, CoreError> {
-    state.core.auth_check_server(&server_url).await
+    state
+        .core
+        .auth_check_server_with_policy(&server_url, allow_insecure_http.unwrap_or(false))
+        .await
 }
 
 #[tauri::command]
@@ -411,8 +415,12 @@ pub async fn auth_prelogin(
     state: State<'_, AppState>,
     server_url: String,
     email: String,
+    allow_insecure_http: Option<bool>,
 ) -> Result<KdfConfig, CoreError> {
-    state.core.auth_prelogin(&server_url, &email).await
+    state
+        .core
+        .auth_prelogin_with_policy(&server_url, &email, allow_insecure_http.unwrap_or(false))
+        .await
 }
 
 #[tauri::command]
@@ -423,14 +431,16 @@ pub async fn auth_login(
     email: String,
     master_password: String,
     two_factor_code: Option<String>,
+    allow_insecure_http: Option<bool>,
 ) -> Result<SessionState, CoreError> {
     let session = state
         .core
-        .auth_login(
+        .auth_login_with_policy(
             &server_url,
             &email,
             &master_password,
             two_factor_code.as_deref(),
+            allow_insecure_http.unwrap_or(false),
         )
         .await?;
     emit_session_state(&app, &session, "login");
@@ -450,10 +460,18 @@ pub async fn auth_register(
     name: String,
     master_password: String,
     kdf_config: Option<KdfConfig>,
+    allow_insecure_http: Option<bool>,
 ) -> Result<SessionState, CoreError> {
     let session = state
         .core
-        .auth_register(&server_url, &email, &name, &master_password, kdf_config)
+        .auth_register_with_policy(
+            &server_url,
+            &email,
+            &name,
+            &master_password,
+            kdf_config,
+            allow_insecure_http.unwrap_or(false),
+        )
         .await?;
     emit_session_state(&app, &session, "register");
     let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
@@ -469,6 +487,7 @@ pub async fn auth_logout(
     state: State<'_, AppState>,
     clear_local_cache: Option<bool>,
 ) -> Result<(), CoreError> {
+    crate::ipc_socket::clear_ssh_approval_cache();
     destroy_floating_windows_and_wipe(&app);
     state
         .core
@@ -479,22 +498,6 @@ pub async fn auth_logout(
     let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
     emit_session_state(&app, &next_state, "logout");
     Ok(())
-}
-
-#[tauri::command]
-pub async fn auth_passkey_login(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    credential_id: Option<String>,
-) -> Result<SessionState, CoreError> {
-    let session = state
-        .core
-        .auth_passkey_login(credential_id.as_deref())
-        .await?;
-    emit_session_state(&app, &session, "passkey_prf");
-    apply_window_preferences(&app, &session);
-    poke_signalr(&state);
-    Ok(session)
 }
 
 // --- Multi-account ---
@@ -524,6 +527,7 @@ pub async fn account_switch(
     state: State<'_, AppState>,
     account_id: String,
 ) -> Result<SessionState, CoreError> {
+    crate::ipc_socket::clear_ssh_approval_cache();
     destroy_floating_windows_and_wipe(&app);
     let core = Arc::clone(&state.core);
     let session = run_blocking(move || core.account_switch(&account_id)).await??;
@@ -616,6 +620,7 @@ pub async fn session_lock(
     state: State<'_, AppState>,
     reason: Option<String>,
 ) -> Result<(), CoreError> {
+    crate::ipc_socket::clear_ssh_approval_cache();
     destroy_floating_windows_and_wipe(&app);
     let r = reason.unwrap_or_else(|| "manual".to_string());
     let core = Arc::clone(&state.core);
@@ -1473,53 +1478,7 @@ pub async fn clipboard_read_image_base64() -> Result<Option<String>, CoreError> 
     run_blocking(macos_read_image_b64).await
 }
 
-// --- Account Passkeys & Profile ---
-
-#[tauri::command]
-pub async fn account_passkey_list(
-    state: State<'_, AppState>,
-) -> Result<AccountPasskeyListResponse, CoreError> {
-    let core = Arc::clone(&state.core);
-    run_blocking(move || match core.account_passkey_list() {
-        Ok(res) => Ok(res),
-        Err(CoreError::InvalidState(_)) => Ok(AccountPasskeyListResponse {
-            rp_id: "keysmith.local".to_string(),
-            user_id: String::new(),
-            credentials: Vec::new(),
-        }),
-        Err(err) => Err(err),
-    })
-    .await?
-}
-
-#[tauri::command]
-pub async fn account_passkey_register(
-    state: State<'_, AppState>,
-    name: String,
-    device_type: String,
-) -> Result<AccountPasskey, CoreError> {
-    let core = Arc::clone(&state.core);
-    run_blocking(move || core.account_passkey_register(&name, &device_type)).await?
-}
-
-#[tauri::command]
-pub async fn account_passkey_rename(
-    state: State<'_, AppState>,
-    id: String,
-    name: String,
-) -> Result<AccountPasskey, CoreError> {
-    let core = Arc::clone(&state.core);
-    run_blocking(move || core.account_passkey_rename(&id, &name)).await?
-}
-
-#[tauri::command]
-pub async fn account_passkey_delete(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), CoreError> {
-    let core = Arc::clone(&state.core);
-    run_blocking(move || core.account_passkey_delete(&id)).await?
-}
+// --- Account Profile ---
 
 #[tauri::command]
 pub async fn account_update_profile(

@@ -62,6 +62,11 @@ export const zhTW = {
     demoHint: '示範主密碼：{pw}',
     savedAccountsQuickSwitch: '本機已儲存帳戶',
     cancelAddAccount: '取消新增',
+    insecureHttpWarning: '偵測到非本機伺服器使用明文 HTTP 連線。除非改用 HTTPS，否則憑證與權杖可能在網路中遭到攔截。',
+    insecureHttpConfirm: '我了解風險，允許對此伺服器使用明文 HTTP 連線',
+    insecureHttpRequired: '請先勾選確認明文 HTTP 風險提示後再繼續，或改用 https:// 位址。',
+    weakKdfWarning: '偵測到較弱的 KDF 設定（PBKDF2 僅 {iterations} 次反覆，低於建議值 600,000），建議在伺服器端提高 KDF 強度。',
+    masterPasswordTooWeak: '主密碼至少需要 12 個字元，且包含至少兩類字元（大寫字母、小寫字母、數字或符號）。',
   },
   lock: {
     unlockPlaceholder: '請輸入主密碼',
