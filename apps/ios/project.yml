@@ -30,8 +30,8 @@ targets:
     sources:
       - path: KeysmithApp
       - path: Shared
-    resources:
-      - path: KeysmithApp/Resources
+        excludes:
+          - Bindings/Headers/**
     info:
       path: KeysmithApp/Info.plist
     entitlements:
@@ -55,8 +55,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.keysmith.app
         INFOPLIST_FILE: KeysmithApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: KeysmithApp/KeysmithApp.entitlements
-        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Shared/Bindings/Headers
-        HEADER_SEARCH_PATHS: $(SRCROOT)/Shared/Bindings/Headers
         OTHER_LDFLAGS:
           - $(inherited)
           - -lc++
@@ -72,6 +70,8 @@ targets:
     sources:
       - path: KeysmithAutoFill
       - path: Shared
+        excludes:
+          - Bindings/Headers/**
     info:
       path: KeysmithAutoFill/Info.plist
     entitlements:
@@ -87,8 +87,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.keysmith.app.autofill
         INFOPLIST_FILE: KeysmithAutoFill/Info.plist
         CODE_SIGN_ENTITLEMENTS: KeysmithAutoFill/KeysmithAutoFill.entitlements
-        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Shared/Bindings/Headers
-        HEADER_SEARCH_PATHS: $(SRCROOT)/Shared/Bindings/Headers
         APPLICATION_EXTENSION_API_ONLY: YES
         OTHER_LDFLAGS:
           - $(inherited)
