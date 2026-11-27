@@ -29,13 +29,12 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: KeysmithApp
+        excludes:
+          - Info.plist
+          - "*.entitlements"
       - path: Shared
         excludes:
           - Bindings/Headers/**
-    info:
-      path: KeysmithApp/Info.plist
-    entitlements:
-      path: KeysmithApp/KeysmithApp.entitlements
     dependencies:
       - framework: Frameworks/KeysmithCore.xcframework
         embed: false
@@ -69,15 +68,14 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: KeysmithAutoFill
+        excludes:
+          - Info.plist
+          - "*.entitlements"
       - path: Shared
         excludes:
           - Bindings/Headers/**
           - KeysmithStore.swift
           - DemoSeedData.swift
-    info:
-      path: KeysmithAutoFill/Info.plist
-    entitlements:
-      path: KeysmithAutoFill/KeysmithAutoFill.entitlements
     dependencies:
       - framework: Frameworks/KeysmithCore.xcframework
         embed: false
@@ -104,13 +102,12 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: KeysmithControls
+        excludes:
+          - Info.plist
+          - "*.entitlements"
       - path: Shared/AppConfig.swift
       - path: Shared/CoreModels.swift
       - path: Shared/LocalizedStrings.swift
-    info:
-      path: KeysmithControls/Info.plist
-    entitlements:
-      path: KeysmithControls/KeysmithControls.entitlements
     dependencies:
       - sdk: WidgetKit.framework
       - sdk: AppIntents.framework
