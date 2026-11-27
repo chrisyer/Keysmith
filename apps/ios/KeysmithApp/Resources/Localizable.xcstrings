@@ -1,0 +1,18 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Keysmith" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}
