@@ -72,6 +72,8 @@ targets:
       - path: Shared
         excludes:
           - Bindings/Headers/**
+          - KeysmithStore.swift
+          - DemoSeedData.swift
     info:
       path: KeysmithAutoFill/Info.plist
     entitlements:
