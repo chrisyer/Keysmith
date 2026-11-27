@@ -47,7 +47,7 @@ const QuickAccessWindow = lazy(() =>
 
 function MainWorkspaceApp() {
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const { dict } = useI18n();
+  const { dict, locale } = useI18n();
 
   const authStatus = useSessionStore((s) => s.status);
   const addingAccount = useSessionStore((s) => s.addingAccount);
@@ -275,7 +275,7 @@ function MainWorkspaceApp() {
     if (!isEditing) return null;
     if (creatingDraftCategory) {
       const targetVault = activeVaultId ?? vaults.find((v) => v.isDefault)?.id ?? vaults[0]?.id ?? 'vault-personal';
-      return createEmptyDraft(creatingDraftCategory, targetVault);
+      return createEmptyDraft(creatingDraftCategory, targetVault, locale);
     }
     if (activeItem) {
       return {
@@ -301,7 +301,7 @@ function MainWorkspaceApp() {
       };
     }
     return null;
-  }, [isEditing, creatingDraftCategory, activeVaultId, vaults, activeItem]);
+  }, [isEditing, creatingDraftCategory, activeVaultId, vaults, activeItem, locale]);
 
   if (!initialized) {
     return (

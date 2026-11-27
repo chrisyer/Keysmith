@@ -1017,7 +1017,10 @@ pub fn draft_to_cipher(
                 }
                 3 => {
                     let mut card = next.card.take().unwrap_or_default();
-                    if let Some(f) = all_fields.iter().find(|f| f.label.contains("持卡人")) {
+                    if let Some(f) = all_fields.iter().find(|f| {
+                        f.label.contains("持卡人")
+                            || f.label.to_ascii_lowercase().contains("cardholder")
+                    }) {
                         card.cardholder_name = enc_opt(usk, &f.value)?;
                     }
                     if let Some(f) = all_fields
@@ -1046,10 +1049,14 @@ pub fn draft_to_cipher(
                 }
                 4 => {
                     let mut identity = next.identity.take().unwrap_or_default();
-                    if let Some(f) = all_fields.iter().find(|f| f.label == "名") {
+                    if let Some(f) = all_fields.iter().find(|f| {
+                        f.label == "名" || f.label.to_ascii_lowercase().contains("first name")
+                    }) {
                         identity.first_name = enc_opt(usk, &f.value)?;
                     }
-                    if let Some(f) = all_fields.iter().find(|f| f.label == "姓") {
+                    if let Some(f) = all_fields.iter().find(|f| {
+                        f.label == "姓" || f.label.to_ascii_lowercase().contains("last name")
+                    }) {
                         identity.last_name = enc_opt(usk, &f.value)?;
                     }
                     if let Some(f) = all_fields.iter().find(|f| f.field_type == FieldType::Email) {

@@ -1,4 +1,4 @@
-import { getDictionary, readStoredLanguage, resolveLocale } from '../i18n';
+import { getDictionary, readStoredLanguage, resolveLocale, type Locale } from '../i18n';
 import type { ItemCategory, ItemDraft } from '../types/domain';
 import { makeId } from '../utils/format';
 
@@ -222,9 +222,14 @@ export const TEMPLATE_MAP: Record<ItemCategory, TemplateMeta> = {
   passkey: PASSKEY_META,
 };
 
-export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemDraft {
+export function createEmptyDraft(
+  category: ItemCategory,
+  vaultId: string,
+  locale?: Locale,
+): ItemDraft {
   const meta = TEMPLATE_MAP[category];
-  const dict = getDictionary(resolveLocale(readStoredLanguage()));
+  const dict = getDictionary(locale ?? resolveLocale(readStoredLanguage()));
+  const { urls: uLbl, sections: sLbl, fields: fLbl } = dict.templates;
   const catLabel = dict.categories[category] ?? meta.label;
   const base: ItemDraft = {
     vaultId,
@@ -252,15 +257,15 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'login':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: 'Login Page', matchRule: 'domain' }],
+        urls: [{ id: makeId('u'), uri: '', label: uLbl.loginPage, matchRule: 'domain' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Username', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
-              { id: makeId('f'), label: 'One-Time Password', fieldType: 'totp', value: '', sensitive: true, copyable: true, purpose: 'totp' },
+              { id: makeId('f'), label: fLbl.username, fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.password, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: fLbl.oneTimePassword, fieldType: 'totp', value: '', sensitive: true, copyable: true, purpose: 'totp' },
             ],
           },
         ],
@@ -269,13 +274,13 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'password':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: 'Website', matchRule: 'domain' }],
+        urls: [{ id: makeId('u'), uri: '', label: uLbl.website, matchRule: 'domain' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: fLbl.password, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
             ],
           },
         ],
@@ -295,20 +300,20 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Cardholder Name', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Card Number', fieldType: 'number', value: '', sensitive: true, copyable: true, purpose: 'card_number' },
-              { id: makeId('f'), label: 'Expiration', fieldType: 'month_year', value: '', sensitive: false, copyable: true, purpose: 'card_expiry' },
-              { id: makeId('f'), label: 'Security Code (CVV)', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'card_cvv' },
-              { id: makeId('f'), label: 'Card Type', fieldType: 'text', value: 'Visa', sensitive: false, copyable: false },
+              { id: makeId('f'), label: fLbl.cardholderName, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.cardNumber, fieldType: 'number', value: '', sensitive: true, copyable: true, purpose: 'card_number' },
+              { id: makeId('f'), label: fLbl.expiration, fieldType: 'month_year', value: '', sensitive: false, copyable: true, purpose: 'card_expiry' },
+              { id: makeId('f'), label: fLbl.securityCodeCvv, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'card_cvv' },
+              { id: makeId('f'), label: fLbl.cardType, fieldType: 'text', value: 'Visa', sensitive: false, copyable: false },
             ],
           },
           {
             id: makeId('sec'),
-            title: 'Billing & Bank',
+            title: sLbl.billingBank,
             fields: [
-              { id: makeId('f'), label: 'Issuing Bank', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'ATM PIN', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
-              { id: makeId('f'), label: 'Support Phone', fieldType: 'phone', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.issuingBank, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.atmPin, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
+              { id: makeId('f'), label: fLbl.supportPhone, fieldType: 'phone', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -322,27 +327,27 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Last Name', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'First Name', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Gender', fieldType: 'text', value: '', sensitive: false, copyable: false },
-              { id: makeId('f'), label: 'Birth Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Company / Title', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.lastName, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.firstName, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.gender, fieldType: 'text', value: '', sensitive: false, copyable: false },
+              { id: makeId('f'), label: fLbl.birthDate, fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.companyTitle, fieldType: 'text', value: '', sensitive: false, copyable: true },
             ],
           },
           {
             id: makeId('sec'),
-            title: 'Contact Information',
+            title: sLbl.contactInfo,
             fields: [
-              { id: makeId('f'), label: 'Email', fieldType: 'email', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Phone', fieldType: 'phone', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Address', fieldType: 'address', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.email, fieldType: 'email', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.phone, fieldType: 'phone', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.address, fieldType: 'address', value: '', sensitive: false, copyable: true },
             ],
           },
           {
             id: makeId('sec'),
-            title: 'Identification',
+            title: sLbl.identification,
             fields: [
-              { id: makeId('f'), label: 'National ID / SSN', fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: fLbl.nationalIdSsn, fieldType: 'password', value: '', sensitive: true, copyable: true },
             ],
           },
         ],
@@ -351,23 +356,23 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'api_credential':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: 'Endpoint URL', matchRule: 'host' }],
+        urls: [{ id: makeId('u'), uri: '', label: uLbl.endpointUrl, matchRule: 'host' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Username / App ID', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'API Key', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'API Secret', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: fLbl.usernameAppId, fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.apiKey, fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: fLbl.apiSecret, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
             ],
           },
           {
             id: makeId('sec'),
-            title: 'Permissions & Expiry',
+            title: sLbl.permissionsExpiry,
             fields: [
-              { id: makeId('f'), label: 'Scope', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Expiration Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.scope, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.expirationDate, fieldType: 'date', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -381,20 +386,20 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Type', fieldType: 'text', value: 'PostgreSQL', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Host', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Port', fieldType: 'number', value: '5432', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Database', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Username', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: fLbl.type, fieldType: 'text', value: 'PostgreSQL', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.host, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.port, fieldType: 'number', value: '5432', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.database, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.username, fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.password, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
             ],
           },
           {
             id: makeId('sec'),
-            title: 'Connection',
+            title: sLbl.connection,
             fields: [
-              { id: makeId('f'), label: 'Connection URI', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'SSL Mode', fieldType: 'text', value: 'require', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.connectionUri, fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: fLbl.sslMode, fieldType: 'text', value: 'require', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -403,25 +408,25 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'server':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: 'Control Panel', matchRule: 'host' }],
+        urls: [{ id: makeId('u'), uri: '', label: uLbl.controlPanel, matchRule: 'host' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Host / IP', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Port', fieldType: 'number', value: '22', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Username', fieldType: 'text', value: 'root', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
-              { id: makeId('f'), label: 'Root / Admin Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: fLbl.hostIp, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.port, fieldType: 'number', value: '22', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.username, fieldType: 'text', value: 'root', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.password, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: fLbl.rootAdminPassword, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
             ],
           },
           {
             id: makeId('sec'),
-            title: 'Provider',
+            title: sLbl.provider,
             fields: [
-              { id: makeId('f'), label: 'Console Account', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Region / Datacenter', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.consoleAccount, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.regionDatacenter, fieldType: 'text', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -435,10 +440,10 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Public Key', fieldType: 'ssh_public_key', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Private Key', fieldType: 'ssh_private_key', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'Passphrase', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
-              { id: makeId('f'), label: 'Fingerprint', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.publicKey, fieldType: 'ssh_public_key', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.privateKey, fieldType: 'ssh_private_key', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: fLbl.passphrase, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: fLbl.fingerprint, fieldType: 'text', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -447,24 +452,24 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'software_license':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: 'Download Page', matchRule: 'domain' }],
+        urls: [{ id: makeId('u'), uri: '', label: uLbl.downloadPage, matchRule: 'domain' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'License Key', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'Registered Email', fieldType: 'email', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Version', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.licenseKey, fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: fLbl.registeredEmail, fieldType: 'email', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.version, fieldType: 'text', value: '', sensitive: false, copyable: true },
             ],
           },
           {
             id: makeId('sec'),
-            title: 'Purchase Details',
+            title: sLbl.purchaseDetails,
             fields: [
-              { id: makeId('f'), label: 'Purchase Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Expiration Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Order Number', fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.purchaseDate, fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.expirationDate, fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.orderNumber, fieldType: 'text', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -473,15 +478,15 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'passkey':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: 'Website', matchRule: 'domain' }],
+        urls: [{ id: makeId('u'), uri: '', label: uLbl.website, matchRule: 'domain' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Relying Party ID (RP ID)', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Relying Party Name', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Account Username', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.relyingPartyId, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.relyingPartyName, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.accountUsername, fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
             ],
           },
         ],
@@ -495,12 +500,12 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Bank Name', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Account Holder', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Account Number / IBAN', fieldType: 'number', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'Routing Number', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'SWIFT / BIC', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Phone Banking PIN', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
+              { id: makeId('f'), label: fLbl.bankName, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.accountHolder, fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.accountNumberIban, fieldType: 'number', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: fLbl.routingNumber, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.swiftBic, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.phoneBankingPin, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
             ],
           },
         ],
@@ -514,11 +519,11 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Network / Asset', fieldType: 'text', value: 'Ethereum / BTC', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Wallet Address', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Seed Phrase', fieldType: 'multiline', value: '', sensitive: true, copyable: true, purpose: 'recovery_codes' },
-              { id: makeId('f'), label: 'Private Key', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'Wallet Passphrase', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: fLbl.networkAsset, fieldType: 'text', value: 'Ethereum / BTC', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.walletAddress, fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.seedPhrase, fieldType: 'multiline', value: '', sensitive: true, copyable: true, purpose: 'recovery_codes' },
+              { id: makeId('f'), label: fLbl.privateKey, fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: fLbl.walletPassphrase, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
             ],
           },
         ],
@@ -527,17 +532,17 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'wifi_router':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: 'http://192.168.1.1', label: 'Router Admin', matchRule: 'host' }],
+        urls: [{ id: makeId('u'), uri: 'http://192.168.1.1', label: uLbl.routerAdmin, matchRule: 'host' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Network Name (SSID)', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Wi-Fi Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
-              { id: makeId('f'), label: 'Security Protocol', fieldType: 'text', value: 'WPA3 / WPA2', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Admin Password', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'Gateway IP', fieldType: 'text', value: '192.168.1.1', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.networkNameSsid, fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.wifiPassword, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: fLbl.securityProtocol, fieldType: 'text', value: 'WPA3 / WPA2', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.adminPassword, fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: fLbl.gatewayIp, fieldType: 'text', value: '192.168.1.1', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -551,12 +556,12 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Issuing Country', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Full Name', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Passport Number', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'Birth Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Issue Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Expiration Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.issuingCountry, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.fullName, fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.passportNumber, fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: fLbl.birthDate, fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.issueDate, fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.expirationDate, fieldType: 'date', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -570,11 +575,11 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Full Name', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'License Number', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'License Class', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Issuing Authority', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Expiration Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.fullName, fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.licenseNumber, fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: fLbl.licenseClass, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.issuingAuthority, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.expirationDate, fieldType: 'date', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -583,17 +588,17 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
     case 'membership':
       return {
         ...base,
-        urls: [{ id: makeId('u'), uri: '', label: 'Member Portal', matchRule: 'domain' }],
+        urls: [{ id: makeId('u'), uri: '', label: uLbl.memberPortal, matchRule: 'domain' }],
         sections: [
           {
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Organization / Brand', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Member ID', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Membership Tier', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'PIN / Password', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
-              { id: makeId('f'), label: 'Expiration Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.organizationBrand, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.memberId, fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.membershipTier, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.pinPassword, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'pin' },
+              { id: makeId('f'), label: fLbl.expirationDate, fieldType: 'date', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -607,11 +612,11 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Patient Name', fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
-              { id: makeId('f'), label: 'Policy / Record ID', fieldType: 'password', value: '', sensitive: true, copyable: true },
-              { id: makeId('f'), label: 'Blood Type', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Allergies', fieldType: 'multiline', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Emergency Contact', fieldType: 'phone', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.patientName, fieldType: 'text', value: '', sensitive: false, copyable: true, purpose: 'username' },
+              { id: makeId('f'), label: fLbl.policyRecordId, fieldType: 'password', value: '', sensitive: true, copyable: true },
+              { id: makeId('f'), label: fLbl.bloodType, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.allergies, fieldType: 'multiline', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.emergencyContact, fieldType: 'phone', value: '', sensitive: false, copyable: true },
             ],
           },
         ],
@@ -625,10 +630,10 @@ export function createEmptyDraft(category: ItemCategory, vaultId: string): ItemD
             id: makeId('sec'),
             title: '',
             fields: [
-              { id: makeId('f'), label: 'Document ID', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Issuer / Organization', fieldType: 'text', value: '', sensitive: false, copyable: true },
-              { id: makeId('f'), label: 'Access Passcode', fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
-              { id: makeId('f'), label: 'Archive Date', fieldType: 'date', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.documentId, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.issuerOrganization, fieldType: 'text', value: '', sensitive: false, copyable: true },
+              { id: makeId('f'), label: fLbl.accessPasscode, fieldType: 'password', value: '', sensitive: true, copyable: true, purpose: 'password' },
+              { id: makeId('f'), label: fLbl.archiveDate, fieldType: 'date', value: '', sensitive: false, copyable: true },
             ],
           },
         ],

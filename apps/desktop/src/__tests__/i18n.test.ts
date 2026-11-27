@@ -6,6 +6,7 @@ import {
   isValidLanguageMode,
   resolveLocale,
 } from '../i18n';
+import { createEmptyDraft } from '../services/templates';
 
 function collectLeafKeys(obj: Record<string, unknown>, prefix = ''): string[] {
   const keys: string[] = [];
@@ -49,5 +50,33 @@ describe('Desktop i18n dictionaries', () => {
     expect(isValidLanguageMode('unknown')).toBe(false);
     expect(resolveLocale('de')).toBe('de');
     expect(formatMessage('New version v{version}', { version: '0.2.0' })).toBe('New version v0.2.0');
+  });
+
+  it('localizes new item template labels according to active locale', () => {
+    const zhLogin = createEmptyDraft('login', 'vault-personal', 'zh-CN');
+    expect(zhLogin.urls[0]?.label).toBe('登录页');
+    expect(zhLogin.sections[0]?.fields.map((f) => f.label)).toEqual([
+      '用户名',
+      '密码',
+      '一次性验证码 (2FA)',
+    ]);
+
+    const enLogin = createEmptyDraft('login', 'vault-personal', 'en');
+    expect(enLogin.urls[0]?.label).toBe('Login Page');
+    expect(enLogin.sections[0]?.fields.map((f) => f.label)).toEqual([
+      'Username',
+      'Password',
+      'One-Time Password',
+    ]);
+
+    for (const loc of SUPPORTED_LOCALES) {
+      for (const category of ['login', 'credit_card', 'ssh_key'] as const) {
+        const draft = createEmptyDraft(category, 'vault-personal', loc.id);
+        expect(draft.sections[0]?.fields.length).toBeGreaterThan(0);
+        for (const f of draft.sections.flatMap((s) => s.fields)) {
+          expect(f.label.trim().length, `${loc.id}.${category} field label non-empty`).toBeGreaterThan(0);
+        }
+      }
+    }
   });
 });

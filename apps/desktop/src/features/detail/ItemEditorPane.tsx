@@ -230,7 +230,12 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
               if (f.fieldType === 'ssh_private_key') {
                 return { ...f, value: pair.privateKeyOpenssh, sensitive: true };
               }
-              if (f.label.includes('指纹') || f.label.toLowerCase().includes('fingerprint')) {
+              if (
+                f.label === dict.templates.fields.fingerprint ||
+                f.label.includes('指纹') ||
+                f.label.includes('指紋') ||
+                f.label.toLowerCase().includes('fingerprint')
+              ) {
                 return { ...f, value: pair.fingerprintSha256 };
               }
               return f;
