@@ -103,6 +103,7 @@ targets:
     sources:
       - path: KeysmithControls
       - path: Shared/AppConfig.swift
+      - path: Shared/CoreModels.swift
       - path: Shared/LocalizedStrings.swift
     info:
       path: KeysmithControls/Info.plist
