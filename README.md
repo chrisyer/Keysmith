@@ -24,6 +24,9 @@
     <img src="https://img.shields.io/badge/Stack-Rust%20%2B%20Tauri%20v2%20%2B%20React%2019-DEA584?logo=rust" alt="Tech Stack" />
     <img src="https://img.shields.io/badge/Browser%20Extension-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white" alt="Chrome Manifest V3 Extension" />
     <img src="https://img.shields.io/badge/Languages-8%20Locales-16A34A" alt="8 Languages Supported" />
+    <a href="./LICENSE">
+      <img src="https://img.shields.io/badge/License-MPL%202.0-brightgreen" alt="License: MPL-2.0" />
+    </a>
   </p>
 
   <p>
@@ -32,7 +35,8 @@
     <a href="#browser-extension">Browser Extension</a> •
     <a href="#cli--ssh-agent">CLI &amp; SSH Agent</a> •
     <a href="#building-from-source">Build from Source</a> •
-    <a href="#project-structure">Architecture</a>
+    <a href="#project-structure">Architecture</a> •
+    <a href="#license">License</a>
   </p>
 </div>
 
@@ -151,3 +155,9 @@ Keysmith/
     ├── desktop/                        # React 19 + Vite frontend & Tauri v2 native shell
     └── browser-extension/              # Chrome Manifest V3 autofill & WebAuthn Passkey extension
 ```
+
+---
+
+## License
+
+Keysmith is licensed under the [Mozilla Public License 2.0](./LICENSE) (`MPL-2.0`).

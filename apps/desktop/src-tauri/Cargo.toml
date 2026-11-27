@@ -2,6 +2,7 @@
 name = "keysmith-desktop"
 version = "0.1.3"
 edition = "2021"
+license = "MPL-2.0"
 authors = ["chrisyer"]
 description = "Keysmith macOS desktop shell powered by Tauri v2"
 repository = "https://github.com/chrisyer/Keysmith"

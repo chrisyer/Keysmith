@@ -2,6 +2,7 @@
 name = "keysmith-core"
 version = "0.1.3"
 edition = "2021"
+license = "MPL-2.0"
 description = "Zero-knowledge core engine for Keysmith password & passkey manager"
 
 [dependencies]
