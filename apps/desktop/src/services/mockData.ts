@@ -288,7 +288,7 @@ const RAW_ITEMS: SeedItem[] = [
         ],
       },
     ],
-    notes: '存放 1Password 8 风格 Desktop UI 规范稿。（演示：密码复用 + 缺 2FA）',
+    notes: '存放桌面端 UI 设计规范稿。（演示：密码复用 + 缺 2FA）',
     passwordHistory: [],
     watchtower: { ignoreWeak: false, ignoreReused: false, ignoreMissing2fa: false, ignoreUnsecuredUrl: false },
     createdAt: '2026-02-05T13:00:00Z',

@@ -525,7 +525,7 @@ export const en = {
       bioStatusOn: 'Enabled',
       bioStatusOff: 'Off',
       configTitle: 'Automatic ~/.ssh/config Integration',
-      configDesc: 'Add a managed IdentityAgent block to ~/.ssh/config with one click (1Password-style) without overwriting your custom Host rules.',
+      configDesc: 'Add a managed IdentityAgent block to ~/.ssh/config with one click without overwriting your custom Host rules.',
       configStatusConfigured: 'Configured',
       configStatusUnconfigured: 'Not Configured',
       configureBtn: 'Configure ~/.ssh/config',

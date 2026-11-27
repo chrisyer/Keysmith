@@ -525,7 +525,7 @@ export const zhTW = {
       bioStatusOn: '已開啟',
       bioStatusOff: '未開啟',
       configTitle: '一鍵設定 ~/.ssh/config',
-      configDesc: '如同 1Password 一鍵將 IdentityAgent 託管區塊寫入 ~/.ssh/config，不覆蓋原有自訂 Host 規則。',
+      configDesc: '自動將 IdentityAgent 託管區塊寫入 ~/.ssh/config（自動設定 0600 權限，不覆蓋原有自訂 Host 規則）。',
       configStatusConfigured: '已設定',
       configStatusUnconfigured: '未設定',
       configureBtn: '一鍵設定 ~/.ssh/config',

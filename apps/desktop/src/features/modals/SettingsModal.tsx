@@ -939,7 +939,7 @@ export function SettingsModal() {
                   />
                 </label>
 
-                {/* 3. 1Password-style One-Click ~/.ssh/config Setup */}
+                {/* 3. One-Click ~/.ssh/config Setup */}
                 <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">

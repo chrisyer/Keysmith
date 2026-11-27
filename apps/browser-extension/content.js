@@ -1157,6 +1157,11 @@
     dd.style.left = `${left}px`;
     dd.style.top = `${rect.bottom + 6}px`;
 
+    const relevantMatches =
+      kind === 'totp'
+        ? (data.matches || []).filter((m) => Boolean(m.hasTotp || m.totp))
+        : data.matches || [];
+
     const head = document.createElement('div');
     head.className = 'ks-dd-header';
     const hostSpan = document.createElement('span');
@@ -1164,7 +1169,7 @@
     const stSpan = document.createElement('span');
     stSpan.textContent =
       data.status === 'Unlocked'
-        ? t('ddMatchCount', { count: data.matches.length })
+        ? t('ddMatchCount', { count: relevantMatches.length })
         : data.connected
           ? t('statusLocked')
           : t('statusDisconnected');
@@ -1173,6 +1178,7 @@
 
     if (
       kind !== 'new-password' &&
+      kind !== 'totp' &&
       activeConditionalPasskey &&
       Array.isArray(activeConditionalPasskey.passkeys) &&
       activeConditionalPasskey.passkeys.length > 0
@@ -1431,13 +1437,13 @@
         closeDropdown();
       });
       dd.appendChild(unlockBtn);
-    } else if (data.matches.length === 0) {
+    } else if (relevantMatches.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'ks-dd-empty';
       empty.textContent = t('ddNoSavedCreds');
       dd.appendChild(empty);
     } else {
-      for (const item of data.matches) {
+      for (const item of relevantMatches) {
         const row = document.createElement('button');
         row.type = 'button';
         row.className = 'ks-dd-row';
@@ -1549,14 +1555,41 @@
       return;
     }
 
+    const totpMatches =
+      cachedPageData.status === 'Unlocked' && Array.isArray(cachedPageData.matches)
+        ? cachedPageData.matches.filter((m) => Boolean(m.hasTotp || m.totp))
+        : [];
+    const hasTotpMatch = totpMatches.length > 0;
+
     const allInputs = Array.from(document.querySelectorAll('input'));
     const visibleAuth = [];
     const seenOtpGroups = new Set();
     for (const inp of allInputs) {
-      if (isVisible(inp)) {
+      if (isSingleCharOtpInput(inp)) {
+        const grp = findSegmentedOtpGroupFromInput(inp);
+        if (grp && grp[0] === inp && !seenOtpGroups.has(grp[0])) {
+          seenOtpGroups.add(grp[0]);
+          if (!trackedInputs.has(inp)) {
+            trackedInputs.add(inp);
+            inp.addEventListener('focus', () => {
+              if (cachedPageData.siteAutofillDisabled) return;
+              const siteHasTotp =
+                cachedPageData.status === 'Unlocked' &&
+                Array.isArray(cachedPageData.matches) &&
+                cachedPageData.matches.some((m) => Boolean(m.hasTotp || m.totp));
+              if (siteHasTotp) {
+                openDropdownForInput(inp, 'totp');
+              }
+            });
+          }
+          if (hasTotpMatch) {
+            const lastBox = grp[grp.length - 1];
+            visibleAuth.push({ input: grp[0], anchorEl: lastBox, kind: 'totp', outsideRight: true });
+          }
+        }
+      } else if (isVisible(inp)) {
         const kind = classifyAuthField(inp, allInputs);
         if (kind) {
-          visibleAuth.push({ input: inp, anchorEl: inp, kind });
           if (!trackedInputs.has(inp)) {
             trackedInputs.add(inp);
             inp.addEventListener('input', () => recordTypedCredential(inp));
@@ -1567,6 +1600,16 @@
             });
             inp.addEventListener('focus', () => {
               if (cachedPageData.siteAutofillDisabled) return;
+              if (kind === 'totp') {
+                const siteHasTotp =
+                  cachedPageData.status === 'Unlocked' &&
+                  Array.isArray(cachedPageData.matches) &&
+                  cachedPageData.matches.some((m) => Boolean(m.hasTotp || m.totp));
+                if (siteHasTotp) {
+                  openDropdownForInput(inp, kind);
+                }
+                return;
+              }
               const hasConditionalPk = Boolean(activeConditionalPasskey?.passkeys?.length);
               if (
                 (cachedPageData.status === 'Unlocked' && cachedPageData.matches.length > 0) ||
@@ -1577,13 +1620,9 @@
               }
             });
           }
-        }
-      } else if (isSingleCharOtpInput(inp)) {
-        const grp = findSegmentedOtpGroupFromInput(inp);
-        if (grp && grp[0] === inp && !seenOtpGroups.has(grp[0])) {
-          seenOtpGroups.add(grp[0]);
-          const lastBox = grp[grp.length - 1];
-          visibleAuth.push({ input: grp[0], anchorEl: lastBox, kind: 'totp', outsideRight: true });
+          if (kind !== 'totp' || hasTotpMatch) {
+            visibleAuth.push({ input: inp, anchorEl: inp, kind });
+          }
         }
       }
     }
@@ -1612,10 +1651,11 @@
       btn.style.top = `${Math.round(rect.top + (rect.height - 22) / 2)}px`;
       btn.appendChild(createKeySvg(13));
 
-      if (cachedPageData.status === 'Unlocked' && cachedPageData.matches.length > 0 && kind !== 'new-password') {
+      const badgeCount = kind === 'totp' ? totpMatches.length : cachedPageData.matches.length;
+      if (cachedPageData.status === 'Unlocked' && badgeCount > 0 && kind !== 'new-password') {
         const badge = document.createElement('span');
         badge.className = 'ks-icon-count';
-        badge.textContent = String(cachedPageData.matches.length);
+        badge.textContent = String(badgeCount);
         btn.appendChild(badge);
       }
 

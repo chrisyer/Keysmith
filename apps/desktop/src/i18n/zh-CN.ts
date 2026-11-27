@@ -525,7 +525,7 @@ export const zhCN = {
       bioStatusOn: '已开启',
       bioStatusOff: '未开启',
       configTitle: '一键配置 ~/.ssh/config',
-      configDesc: '像 1Password 一样自动将 IdentityAgent 托管块写入 ~/.ssh/config（自动设置 0600 权限，绝不覆盖你原有的自定义 Host 配置）。',
+      configDesc: '自动将 IdentityAgent 托管配置块写入 ~/.ssh/config（自动设置 0600 安全权限，不会覆盖你原有的自定义 Host 配置）。',
       configStatusConfigured: '已配置',
       configStatusUnconfigured: '未配置',
       configureBtn: '一键配置 ~/.ssh/config',

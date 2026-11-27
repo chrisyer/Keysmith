@@ -646,4 +646,182 @@ const contentCode = fs.readFileSync('apps/browser-extension/content.js', 'utf8')
   assert.equal(googleBtn.clicked, 1);
 }
 
+// 8. Verify 6-box OTP inline icon is ONLY rendered when the site has a saved item with 2FA (hasTotp)
+{
+  function makeMockNode(tag) {
+    return {
+      tagName: String(tag).toUpperCase(),
+      className: '',
+      title: '',
+      type: '',
+      textContent: '',
+      style: {},
+      dataset: {},
+      children: [],
+      appendChild(child) {
+        this.children.push(child);
+        return child;
+      },
+      append(...nodes) {
+        this.children.push(...nodes);
+      },
+      setAttribute() {},
+      addEventListener() {},
+      attachShadow() {
+        const sr = makeMockNode('shadow');
+        this.shadowRoot = sr;
+        return sr;
+      },
+    };
+  }
+
+  async function runOtpIconScenario(matches) {
+    class OtpBoxInput {
+      constructor(idx) {
+        this.tagName = 'INPUT';
+        this.type = 'text';
+        this.maxLength = 1;
+        this.size = 1;
+        this.value = '';
+        this.disabled = false;
+        this.readOnly = false;
+        this.isConnected = true;
+        this.parentElement = null;
+        this._idx = idx;
+      }
+      getAttribute(attr) {
+        if (attr === 'maxlength') return '1';
+        if (attr === 'inputmode') return 'numeric';
+        if (attr === 'autocomplete') return 'one-time-code';
+        return '';
+      }
+      getBoundingClientRect() {
+        // Even with 52px width (>= 48px), must be treated as segmented OTP group!
+        return {
+          left: 20 + this._idx * 58,
+          right: 20 + this._idx * 58 + 52,
+          top: 120,
+          bottom: 172,
+          width: 52,
+          height: 52,
+        };
+      }
+      addEventListener() {}
+    }
+
+    const container = {
+      parentElement: null,
+      boxes: Array.from({ length: 6 }, (_, i) => new OtpBoxInput(i)),
+      querySelectorAll(sel) {
+        return sel.includes('input') ? this.boxes : [];
+      },
+    };
+    for (const b of container.boxes) b.parentElement = container;
+
+    const docEl = makeMockNode('html');
+    let overlayHost = null;
+    const rafQueue = [];
+
+    const sb = {
+      window: null,
+      globalThis: null,
+      KeysmithI18n: i18nSandbox.KeysmithI18n,
+      HTMLInputElement: OtpBoxInput,
+      HTMLSelectElement: class {},
+      HTMLTextAreaElement: class {},
+      Event: class {},
+      KeyboardEvent: class {},
+      MutationObserver: class {
+        observe() {}
+      },
+      WeakMap,
+      Set,
+      Array,
+      URL,
+      setTimeout,
+      clearTimeout,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      postMessage: () => {},
+      requestAnimationFrame: (cb) => {
+        rafQueue.push(cb);
+      },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+      innerWidth: 1024,
+      innerHeight: 768,
+      location: {
+        protocol: 'https:',
+        href: 'https://example.com/verify-code',
+        origin: 'https://example.com',
+        hostname: 'example.com',
+        pathname: '/verify-code',
+        search: '',
+        hash: '',
+      },
+      document: {
+        readyState: 'complete',
+        title: 'Verify',
+        documentElement: docEl,
+        body: makeMockNode('body'),
+        createElement: (tag) => makeMockNode(tag),
+        createElementNS: (_ns, tag) => makeMockNode(tag),
+        getElementById: (id) => (id === 'keysmith-ext-root' ? overlayHost : null),
+        addEventListener: () => {},
+        querySelector: () => null,
+        querySelectorAll: (sel) => (sel.includes('input') ? container.boxes : []),
+      },
+      chrome: {
+        runtime: {
+          lastError: null,
+          sendMessage: (msg, cb) => {
+            if (msg.type === 'GET_PAGE_AUTOFILL_DATA') {
+              cb({
+                connected: true,
+                status: 'Unlocked',
+                matches,
+                autoCopyTotp: true,
+                siteAutofillDisabled: false,
+              });
+              return;
+            }
+            if (cb) cb({ ok: true });
+          },
+          onMessage: { addListener: () => {} },
+        },
+      },
+    };
+    docEl.appendChild = (node) => {
+      overlayHost = node;
+      docEl.children.push(node);
+      return node;
+    };
+    sb.window = sb;
+    sb.globalThis = sb;
+    vm.runInNewContext(contentCode, sb);
+    await new Promise((r) => setTimeout(r, 15));
+    while (rafQueue.length > 0) {
+      const fn = rafQueue.shift();
+      fn();
+    }
+    const varsRoot = overlayHost?.shadowRoot?.children?.find((c) => c.className === 'ks-vars');
+    const iconLayer = varsRoot?.children?.[0];
+    return iconLayer ? iconLayer.children.length : 0;
+  }
+
+  // Case A: Login saved for site WITHOUT 2FA -> 0 inline icons on 6-box code page
+  assert.equal(
+    await runOtpIconScenario([{ id: '1', title: 'Example', username: 'u@example.com', hasTotp: false }]),
+    0,
+    'Must NOT render OTP inline icon when site has no saved 2FA',
+  );
+  // Case B: No login saved at all -> 0 inline icons on 6-box code page
+  assert.equal(await runOtpIconScenario([]), 0);
+  // Case C: Login saved WITH 2FA -> renders exactly 1 inline icon next to the 6th box
+  assert.equal(
+    await runOtpIconScenario([{ id: '1', title: 'Example', username: 'u@example.com', hasTotp: true }]),
+    1,
+    'Must render exactly 1 OTP inline icon when site has saved 2FA',
+  );
+}
+
 console.log('Extension test suite passed successfully.');
