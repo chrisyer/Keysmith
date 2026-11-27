@@ -1,0 +1,138 @@
+name: Keysmith
+options:
+  bundleIdPrefix: dev.keysmith
+  deploymentTarget:
+    iOS: "26.0"
+  xcodeVersion: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    MARKETING_VERSION: "0.1.4"
+    CURRENT_PROJECT_VERSION: "1"
+    SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+configs:
+  Debug: debug
+  Release: release
+
+targets:
+  KeysmithApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: KeysmithApp
+      - path: Shared
+    resources:
+      - path: KeysmithApp/Resources
+    info:
+      path: KeysmithApp/Info.plist
+    entitlements:
+      path: KeysmithApp/KeysmithApp.entitlements
+    dependencies:
+      - framework: Frameworks/KeysmithCore.xcframework
+        embed: false
+      - target: KeysmithAutoFill
+        embed: true
+      - target: KeysmithControls
+        embed: true
+      - sdk: AuthenticationServices.framework
+      - sdk: LocalAuthentication.framework
+      - sdk: AVFoundation.framework
+      - sdk: PhotosUI.framework
+      - sdk: Security.framework
+      - sdk: AppIntents.framework
+      - sdk: WidgetKit.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.keysmith.app
+        INFOPLIST_FILE: KeysmithApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: KeysmithApp/KeysmithApp.entitlements
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Shared/Bindings/Headers
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Shared/Bindings/Headers
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -lc++
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/Frameworks"
+        ENABLE_PREVIEWS: YES
+
+  KeysmithAutoFill:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: KeysmithAutoFill
+      - path: Shared
+    info:
+      path: KeysmithAutoFill/Info.plist
+    entitlements:
+      path: KeysmithAutoFill/KeysmithAutoFill.entitlements
+    dependencies:
+      - framework: Frameworks/KeysmithCore.xcframework
+        embed: false
+      - sdk: AuthenticationServices.framework
+      - sdk: LocalAuthentication.framework
+      - sdk: Security.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.keysmith.app.autofill
+        INFOPLIST_FILE: KeysmithAutoFill/Info.plist
+        CODE_SIGN_ENTITLEMENTS: KeysmithAutoFill/KeysmithAutoFill.entitlements
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Shared/Bindings/Headers
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Shared/Bindings/Headers
+        APPLICATION_EXTENSION_API_ONLY: YES
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -lc++
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/Frameworks"
+          - "@executable_path/../../Frameworks"
+
+  KeysmithControls:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: KeysmithControls
+      - path: Shared/AppConfig.swift
+      - path: Shared/LocalizedStrings.swift
+    info:
+      path: KeysmithControls/Info.plist
+    entitlements:
+      path: KeysmithControls/KeysmithControls.entitlements
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: AppIntents.framework
+      - sdk: SwiftUI.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.keysmith.app.controls
+        INFOPLIST_FILE: KeysmithControls/Info.plist
+        CODE_SIGN_ENTITLEMENTS: KeysmithControls/KeysmithControls.entitlements
+        APPLICATION_EXTENSION_API_ONLY: YES
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/Frameworks"
+          - "@executable_path/../../Frameworks"
+
+schemes:
+  KeysmithApp:
+    build:
+      targets:
+        KeysmithApp: all
+        KeysmithAutoFill: all
+        KeysmithControls: all
+    run:
+      config: Debug
+    archive:
+      config: Release
