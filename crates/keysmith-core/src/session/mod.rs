@@ -1996,12 +1996,18 @@ impl AppCore {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let cipher_clone = cipher.clone();
+            let encrypted_for = account.id.clone();
             match self
                 .with_fresh_token(&mut account, move |tok| {
                     let client = client.clone();
                     let server_url = server_url.clone();
                     let cipher = cipher_clone.clone();
-                    async move { client.create_cipher(&server_url, &tok, &cipher).await }
+                    let encrypted_for = encrypted_for.clone();
+                    async move {
+                        client
+                            .create_cipher(&server_url, &tok, &cipher, &encrypted_for)
+                            .await
+                    }
                 })
                 .await
             {
@@ -2075,17 +2081,23 @@ impl AppCore {
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
             let cipher_clone = cipher.clone();
+            let encrypted_for = account.id.clone();
             let res = self
                 .with_fresh_token(&mut account, move |tok| {
                     let client = client.clone();
                     let server_url = server_url.clone();
                     let id = id_owned.clone();
                     let cipher = cipher_clone.clone();
+                    let encrypted_for = encrypted_for.clone();
                     async move {
                         if was_offline_create {
-                            client.create_cipher(&server_url, &tok, &cipher).await
+                            client
+                                .create_cipher(&server_url, &tok, &cipher, &encrypted_for)
+                                .await
                         } else {
-                            client.update_cipher(&server_url, &tok, &id, &cipher).await
+                            client
+                                .update_cipher(&server_url, &tok, &id, &cipher, &encrypted_for)
+                                .await
                         }
                     }
                 })
@@ -2707,22 +2719,58 @@ impl AppCore {
         account: &mut StoredAccount,
         old_id: &str,
         dto: &CipherDto,
+        encrypted_for: &str,
     ) -> Result<(), CoreError> {
         let client = self.client.clone();
         let server_url = account.server_url.clone();
         let dto_clone = dto.clone();
+        let encrypted_for_owned = encrypted_for.to_string();
         let mut remote = self
             .with_fresh_token(account, move |tok| {
                 let client = client.clone();
                 let server_url = server_url.clone();
                 let dto = dto_clone.clone();
-                async move { client.create_cipher(&server_url, &tok, &dto).await }
+                let encrypted_for = encrypted_for_owned.clone();
+                async move {
+                    client
+                        .create_cipher(&server_url, &tok, &dto, &encrypted_for)
+                        .await
+                }
             })
             .await?;
         Self::preserve_local_fido2_if_stripped(dto, &mut remote);
         self.storage.delete_cipher_row(old_id)?;
         self.storage.upsert_cipher(&account.id, &remote, None)?;
         Ok(())
+    }
+
+    fn summarize_push_errors(errors: &[String]) -> String {
+        let mut order: Vec<String> = Vec::new();
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for err in errors {
+            let trimmed = err.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Some(cnt) = counts.get_mut(trimmed) {
+                *cnt += 1;
+            } else {
+                order.push(trimmed.to_string());
+                counts.insert(trimmed.to_string(), 1);
+            }
+        }
+        order
+            .into_iter()
+            .map(|msg| {
+                let n = counts.get(&msg).copied().unwrap_or(1);
+                if n > 1 {
+                    format!("{msg}（共 {n} 项）")
+                } else {
+                    msg
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
     }
 
     pub async fn sync_now(&self) -> Result<SyncStatus, CoreError> {
@@ -2793,6 +2841,11 @@ impl AppCore {
             .chain(sync_resp.profile.organizations.iter())
             .map(|o| o.id.clone())
             .collect();
+        let encrypted_for = if !sync_resp.profile.id.trim().is_empty() {
+            sync_resp.profile.id.clone()
+        } else {
+            account.id.clone()
+        };
         let mut actually_pushed = false;
         let mut push_errors: Vec<String> = Vec::new();
 
@@ -2970,7 +3023,10 @@ impl AppCore {
 
             match sc.dirty_op.as_deref() {
                 Some("create") => {
-                    match self.push_recreate_cipher(account, &sc.id, &dto).await {
+                    match self
+                        .push_recreate_cipher(account, &sc.id, &dto, &encrypted_for)
+                        .await
+                    {
                         Ok(()) => actually_pushed = true,
                         Err(e) => {
                             eprintln!("[keysmith sync] cipher create {} failed: {e}", sc.id);
@@ -2980,7 +3036,10 @@ impl AppCore {
                 }
                 Some("update") => {
                     let Some(remote_orig) = remote_by_id.get(&dto.id) else {
-                        match self.push_recreate_cipher(account, &sc.id, &dto).await {
+                        match self
+                            .push_recreate_cipher(account, &sc.id, &dto, &encrypted_for)
+                            .await
+                        {
                             Ok(()) => actually_pushed = true,
                             Err(e) => {
                                 eprintln!(
@@ -3017,13 +3076,17 @@ impl AppCore {
                             let client = self.client.clone();
                             let server_url = account.server_url.clone();
                             let dto_clone = dto.clone();
+                            let encrypted_for_owned = encrypted_for.clone();
                             match self
                                 .with_fresh_token(account, move |tok| {
                                     let client = client.clone();
                                     let server_url = server_url.clone();
                                     let dto = dto_clone.clone();
+                                    let encrypted_for = encrypted_for_owned.clone();
                                     async move {
-                                        client.create_cipher(&server_url, &tok, &dto).await
+                                        client
+                                            .create_cipher(&server_url, &tok, &dto, &encrypted_for)
+                                            .await
                                     }
                                 })
                                 .await
@@ -3058,14 +3121,22 @@ impl AppCore {
                         let client = self.client.clone();
                         let server_url = account.server_url.clone();
                         let dto_clone = dto.clone();
+                        let encrypted_for_owned = encrypted_for.clone();
                         match self
                             .with_fresh_token(account, move |tok| {
                                 let client = client.clone();
                                 let server_url = server_url.clone();
                                 let dto = dto_clone.clone();
+                                let encrypted_for = encrypted_for_owned.clone();
                                 async move {
                                     client
-                                        .update_cipher(&server_url, &tok, &dto.id, &dto)
+                                        .update_cipher(
+                                            &server_url,
+                                            &tok,
+                                            &dto.id,
+                                            &dto,
+                                            &encrypted_for,
+                                        )
                                         .await
                                 }
                             })
@@ -3077,7 +3148,10 @@ impl AppCore {
                                 actually_pushed = true;
                             }
                             Err(e) if crate::protocol::is_not_found_or_missing_cipher_err(&e) => {
-                                match self.push_recreate_cipher(account, &sc.id, &dto).await {
+                                match self
+                                    .push_recreate_cipher(account, &sc.id, &dto, &encrypted_for)
+                                    .await
+                                {
                                     Ok(()) => actually_pushed = true,
                                     Err(e2) => {
                                         eprintln!(
@@ -3133,7 +3207,10 @@ impl AppCore {
                 Some("restore") => {
                     if !remote_by_id.contains_key(&dto.id) {
                         dto.deleted_date = None;
-                        match self.push_recreate_cipher(account, &sc.id, &dto).await {
+                        match self
+                            .push_recreate_cipher(account, &sc.id, &dto, &encrypted_for)
+                            .await
+                        {
                             Ok(()) => actually_pushed = true,
                             Err(e) => {
                                 eprintln!(
@@ -3162,7 +3239,10 @@ impl AppCore {
                             }
                             Err(e) if crate::protocol::is_not_found_or_missing_cipher_err(&e) => {
                                 dto.deleted_date = None;
-                                match self.push_recreate_cipher(account, &sc.id, &dto).await {
+                                match self
+                                    .push_recreate_cipher(account, &sc.id, &dto, &encrypted_for)
+                                    .await
+                                {
                                     Ok(()) => actually_pushed = true,
                                     Err(e2) => {
                                         eprintln!(
@@ -3340,7 +3420,15 @@ impl AppCore {
         let stored_rev = self.persist_server_revision(&account.id, latest_rev);
 
         let (final_state, final_message) = if pending_count > 0 && !push_errors.is_empty() {
-            (SyncStateKind::Error, Some(push_errors.join("; ")))
+            let summary = Self::summarize_push_errors(&push_errors);
+            (
+                SyncStateKind::Error,
+                if summary.is_empty() {
+                    None
+                } else {
+                    Some(summary)
+                },
+            )
         } else {
             (SyncStateKind::Idle, None)
         };
@@ -5256,6 +5344,7 @@ impl AppCore {
         let item_id_owned = item_id.to_string();
         let cipher_clone = org_cipher.clone();
         let col_ids_clone = collection_ids.clone();
+        let encrypted_for = account.id.clone();
 
         org_cipher = self
             .with_fresh_token(&mut account, move |tok| {
@@ -5264,7 +5353,12 @@ impl AppCore {
                 let id = item_id_owned.clone();
                 let c = cipher_clone.clone();
                 let cols = col_ids_clone.clone();
-                async move { client.share_cipher(&server_url, &tok, &id, &c, &cols).await }
+                let encrypted_for = encrypted_for.clone();
+                async move {
+                    client
+                        .share_cipher(&server_url, &tok, &id, &c, &cols, &encrypted_for)
+                        .await
+                }
             })
             .await?;
 

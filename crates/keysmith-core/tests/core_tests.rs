@@ -2892,6 +2892,10 @@ async fn auto_sync_revision_detection_manual_mode_and_offline_flush() {
                         .and_then(|h| std::str::from_utf8(&raw[h..]).ok())
                         .unwrap_or("{}");
                     let mut val: serde_json::Value = serde_json::from_str(body_str).unwrap();
+                    assert_eq!(
+                        val.get("encryptedFor").and_then(|v| v.as_str()),
+                        Some("acc-auto-sync")
+                    );
                     val["id"] = serde_json::json!(format!("srv-{count}"));
                     val["revisionDate"] = serde_json::json!("2026-11-27T00:02:00Z");
                     let dto: CipherDto = serde_json::from_value(val).unwrap();
@@ -3037,8 +3041,16 @@ async fn sync_heals_missing_remote_delete_and_update_and_surfaces_push_error() {
         deleted_date: None,
         extra: Default::default(),
     };
+    let mut remote_html_fail_1 = remote_existing.clone();
+    remote_html_fail_1.id = "remote-html-1".to_string();
+    let mut remote_html_fail_2 = remote_existing.clone();
+    remote_html_fail_2.id = "remote-html-2".to_string();
 
-    let remote_ciphers = Arc::new(Mutex::new(vec![remote_existing.clone()]));
+    let remote_ciphers = Arc::new(Mutex::new(vec![
+        remote_existing.clone(),
+        remote_html_fail_1.clone(),
+        remote_html_fail_2.clone(),
+    ]));
     let delete_calls = Arc::new(AtomicUsize::new(0));
     let posted_payloads: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -3101,6 +3113,7 @@ async fn sync_heals_missing_remote_delete_and_update_and_surfaces_push_error() {
                     .and_then(|h| std::str::from_utf8(&raw[h..]).ok())
                     .unwrap_or("{}");
 
+                let rocket_422 = "<!DOCTYPE html><html lang=\"en\"><head><title>422 Unprocessable Entity</title></head><body><h1>422: Unprocessable Entity</h1><p>The request was well-formed but was unable to be followed due to semantic errors.</p><small>Rocket</small></body></html>";
                 let (status, body) = if first_line.starts_with("GET /api/accounts/revision-date") {
                     ("200 OK", "2000".to_string())
                 } else if first_line.starts_with("GET /api/sync") {
@@ -3114,17 +3127,29 @@ async fn sync_heals_missing_remote_delete_and_update_and_surfaces_push_error() {
                     ("200 OK", payload.to_string())
                 } else if first_line.starts_with("POST /api/ciphers") {
                     let mut val: serde_json::Value = serde_json::from_str(body_str).unwrap();
-                    posted_c.lock().unwrap().push(val.clone());
-                    val["id"] = serde_json::json!("recreated-1");
-                    val["revisionDate"] = serde_json::json!("2026-11-27T01:00:00Z");
-                    let dto: CipherDto = serde_json::from_value(val).unwrap();
-                    ciphers_c.lock().unwrap().push(dto.clone());
-                    ("200 OK", serde_json::to_string(&dto).unwrap())
+                    if val.get("encryptedFor").and_then(|v| v.as_str()) != Some("acc-heal") {
+                        ("422 Unprocessable Entity", rocket_422.to_string())
+                    } else {
+                        posted_c.lock().unwrap().push(val.clone());
+                        val["id"] = serde_json::json!("recreated-1");
+                        val["revisionDate"] = serde_json::json!("2026-11-27T01:00:00Z");
+                        let dto: CipherDto = serde_json::from_value(val).unwrap();
+                        ciphers_c.lock().unwrap().push(dto.clone());
+                        ("200 OK", serde_json::to_string(&dto).unwrap())
+                    }
                 } else if first_line.starts_with("PUT /api/ciphers/remote-fail") {
-                    (
-                        "400 Bad Request",
-                        serde_json::json!({ "message": "Simulated validation error" }).to_string(),
-                    )
+                    let val: serde_json::Value = serde_json::from_str(body_str).unwrap();
+                    if val.get("encryptedFor").and_then(|v| v.as_str()) != Some("acc-heal") {
+                        ("422 Unprocessable Entity", rocket_422.to_string())
+                    } else {
+                        (
+                            "400 Bad Request",
+                            serde_json::json!({ "message": "Simulated validation error" })
+                                .to_string(),
+                        )
+                    }
+                } else if first_line.starts_with("PUT /api/ciphers/remote-html-") {
+                    ("422 Unprocessable Entity", rocket_422.to_string())
                 } else if first_line.starts_with("DELETE /api/ciphers/") {
                     delete_c.fetch_add(1, Ordering::SeqCst);
                     ("404 Not Found", "{}".to_string())
@@ -3243,27 +3268,35 @@ async fn sync_heals_missing_remote_delete_and_update_and_surfaces_push_error() {
     let payloads = posted_payloads.lock().unwrap().clone();
     assert_eq!(payloads.len(), 1);
     assert!(payloads[0].get("folderId").is_none());
+    assert_eq!(payloads[0]["encryptedFor"], "acc-heal");
     assert_eq!(payloads[0]["key"], "2.cipherkey|iv|mac");
     assert_eq!(
         payloads[0]["login"]["fido2Credentials"][0]["creationDate"],
         "2026-11-26T15:29:35.940Z"
     );
 
-    // 2. Surface HTTP 400 push failure as SyncStateKind::Error with pending_count preserved
+    // 2. Surface HTTP 400 and sanitized deduplicated HTML 422 push failures as SyncStateKind::Error
     let mut failing_dto = remote_existing;
     failing_dto.name = Some(usk.encrypt_string("Remote Existing Updated").unwrap());
     storage
         .upsert_cipher(&acc.id, &failing_dto, Some("update"))
         .unwrap();
+    storage
+        .upsert_cipher(&acc.id, &remote_html_fail_1, Some("update"))
+        .unwrap();
+    storage
+        .upsert_cipher(&acc.id, &remote_html_fail_2, Some("update"))
+        .unwrap();
 
     let st2 = core.sync_now().await.unwrap();
     assert_eq!(st2.state, SyncStateKind::Error);
-    assert_eq!(st2.pending_count, 1);
-    assert!(st2
-        .message
-        .as_deref()
-        .unwrap_or("")
-        .contains("Simulated validation error"));
+    assert_eq!(st2.pending_count, 3);
+    let msg = st2.message.as_deref().unwrap_or("");
+    assert!(msg.contains("Simulated validation error"));
+    assert!(msg.contains("422: Unprocessable Entity"));
+    assert!(msg.contains("（共 2 项）"));
+    assert!(!msg.contains("<!DOCTYPE"));
+    assert!(!msg.contains("<html>"));
     assert!(!core.check_and_sync_if_changed(false).await.unwrap());
 
     server_task.abort();

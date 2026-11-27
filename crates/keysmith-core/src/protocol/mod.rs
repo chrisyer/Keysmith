@@ -434,6 +434,8 @@ pub struct CipherCreateUpdatePayload {
     pub organization_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encrypted_for: Option<String>,
     pub name: Option<String>,
     pub notes: Option<String>,
     pub favorite: bool,
@@ -453,8 +455,20 @@ pub struct CipherCreateUpdatePayload {
     pub reprompt: Option<u8>,
 }
 
-impl From<&CipherDto> for CipherCreateUpdatePayload {
-    fn from(c: &CipherDto) -> Self {
+impl CipherCreateUpdatePayload {
+    pub fn from_cipher(c: &CipherDto, encrypted_for: Option<&str>) -> Self {
+        let resolved_encrypted_for = encrypted_for
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                c.extra
+                    .get("encryptedFor")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            });
         Self {
             cipher_type: c.cipher_type,
             folder_id: c.folder_id.clone(),
@@ -464,7 +478,8 @@ impl From<&CipherDto> for CipherCreateUpdatePayload {
                 .get("key")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            name: c.name.clone(),
+            encrypted_for: resolved_encrypted_for,
+            name: Some(c.name.clone().unwrap_or_default()),
             notes: c.notes.clone(),
             favorite: c.favorite,
             login: c.login.clone().map(|mut l| {
@@ -482,6 +497,12 @@ impl From<&CipherDto> for CipherCreateUpdatePayload {
             password_history: c.password_history.clone(),
             reprompt: c.reprompt,
         }
+    }
+}
+
+impl From<&CipherDto> for CipherCreateUpdatePayload {
+    fn from(c: &CipherDto) -> Self {
+        Self::from_cipher(c, None)
     }
 }
 
@@ -758,11 +779,116 @@ impl VaultwardenClient {
         Ok(trimmed.to_string())
     }
 
+    fn summarize_http_error_body(body: &str) -> String {
+        fn collapse_and_truncate(raw: &str, max_chars: usize) -> String {
+            let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+            if collapsed.chars().count() <= max_chars {
+                collapsed
+            } else {
+                let mut truncated: String = collapsed.chars().take(max_chars).collect();
+                truncated.push_str("...");
+                truncated
+            }
+        }
+
+        fn strip_html_tags(input: &str) -> String {
+            let lower = input.to_ascii_lowercase();
+            let slice = if let Some(b_start) = lower.find("<body") {
+                &input[b_start..]
+            } else {
+                input
+            };
+            let mut out = String::with_capacity(slice.len());
+            let mut in_tag = false;
+            for ch in slice.chars() {
+                match ch {
+                    '<' => {
+                        in_tag = true;
+                        out.push(' ');
+                    }
+                    '>' => {
+                        in_tag = false;
+                        out.push(' ');
+                    }
+                    _ if !in_tag => out.push(ch),
+                    _ => {}
+                }
+            }
+            out.replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+        }
+
+        let trimmed = body.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+
+        if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(trimmed) {
+            let mut parts: Vec<String> = Vec::new();
+            for candidate in [
+                map.get("ErrorModel")
+                    .or_else(|| map.get("errorModel"))
+                    .and_then(|v| v.get("Message").or_else(|| v.get("message"))),
+                map.get("Message"),
+                map.get("message"),
+                map.get("error_description"),
+                map.get("error"),
+            ] {
+                if let Some(msg) = candidate.and_then(|v| v.as_str()).map(str::trim) {
+                    if !msg.is_empty() && !parts.iter().any(|p| p == msg) {
+                        parts.push(msg.to_string());
+                    }
+                }
+            }
+            if let Some(ve) = map
+                .get("ErrorModel")
+                .or_else(|| map.get("errorModel"))
+                .and_then(|v| v.get("ValidationErrors").or_else(|| v.get("validationErrors")))
+                .or_else(|| map.get("validationErrors"))
+            {
+                if let Some(obj) = ve.as_object() {
+                    for (k, v) in obj {
+                        if let Some(arr) = v.as_array() {
+                            let msgs: Vec<&str> = arr.iter().filter_map(|x| x.as_str()).collect();
+                            if !msgs.is_empty() {
+                                parts.push(format!("{k}: {}", msgs.join(", ")));
+                            }
+                        } else if let Some(s) = v.as_str() {
+                            parts.push(format!("{k}: {s}"));
+                        }
+                    }
+                }
+            }
+            if !parts.is_empty() {
+                return collapse_and_truncate(&parts.join("; "), 240);
+            }
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("<!doctype") || lower.starts_with("<html") || lower.contains("<body") {
+            let text = strip_html_tags(trimmed);
+            let summarized = collapse_and_truncate(&text, 200);
+            if !summarized.is_empty() {
+                return summarized;
+            }
+        }
+
+        collapse_and_truncate(trimmed, 240)
+    }
+
     fn map_http_status_err(status: StatusCode, op: &str, body: &str) -> CoreError {
         if status == StatusCode::UNAUTHORIZED {
             return CoreError::Unauthorized(format!("{op} 返回 401"));
         }
-        CoreError::Network(format!("{op} ({status}): {body}"))
+        let summary = Self::summarize_http_error_body(body);
+        if summary.is_empty() {
+            CoreError::Network(format!("{op} ({status})"))
+        } else {
+            CoreError::Network(format!("{op} ({status}): {summary}"))
+        }
     }
 
     pub async fn check_server(&self, server_url: &str) -> Result<(String, bool), CoreError> {
@@ -1111,9 +1237,10 @@ impl VaultwardenClient {
         server_url: &str,
         access_token: &str,
         cipher: &CipherDto,
+        encrypted_for: &str,
     ) -> Result<CipherDto, CoreError> {
         let base = Self::normalize_base_url(server_url)?;
-        let payload = CipherCreateUpdatePayload::from(cipher);
+        let payload = CipherCreateUpdatePayload::from_cipher(cipher, Some(encrypted_for));
         let resp = self
             .http
             .post(format!("{base}/api/ciphers"))
@@ -1138,9 +1265,10 @@ impl VaultwardenClient {
         access_token: &str,
         id: &str,
         cipher: &CipherDto,
+        encrypted_for: &str,
     ) -> Result<CipherDto, CoreError> {
         let base = Self::normalize_base_url(server_url)?;
-        let payload = CipherCreateUpdatePayload::from(cipher);
+        let payload = CipherCreateUpdatePayload::from_cipher(cipher, Some(encrypted_for));
         let resp = self
             .http
             .put(format!("{base}/api/ciphers/{id}"))
@@ -1166,10 +1294,11 @@ impl VaultwardenClient {
         id: &str,
         cipher: &CipherDto,
         collection_ids: &[String],
+        encrypted_for: &str,
     ) -> Result<CipherDto, CoreError> {
         let base = Self::normalize_base_url(server_url)?;
         let payload = CipherSharePayload {
-            cipher: CipherCreateUpdatePayload::from(cipher),
+            cipher: CipherCreateUpdatePayload::from_cipher(cipher, Some(encrypted_for)),
             collection_ids: collection_ids.to_vec(),
         };
         let resp = self
