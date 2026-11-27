@@ -878,6 +878,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     sshAgentEnabled: true,
     snapshotIntervalDays: 1,
     snapshotKeepCount: 5,
+    syncMode: 'auto',
   };
 
   private session: SessionState = {
@@ -914,6 +915,26 @@ class KeysmithPrototypeClient implements KeysmithClient {
   private listeners = new Map<keyof TauriEventMap, Set<EventListener<never>>>();
   private clipboardTimer: number | null = null;
   private clipboardState: { label: string; remainingSeconds: number; totalSeconds: number } | null = null;
+
+  private markDemoSynced(): void {
+    const mode = this.appSettings.syncMode ?? 'auto';
+    if (mode === 'auto') {
+      const now = new Date().toISOString();
+      this.session.lastSyncAt = now;
+      this.syncStatusState = {
+        ...this.syncStatusState,
+        state: 'idle',
+        pendingCount: 0,
+        lastSyncAt: now,
+      };
+    } else {
+      this.syncStatusState = {
+        ...this.syncStatusState,
+        pendingCount: this.syncStatusState.pendingCount + 1,
+      };
+    }
+    this.emit('sync:status', { ...this.syncStatusState });
+  }
 
   onEvent<K extends keyof TauriEventMap>(event: K, listener: EventListener<K>): () => void {
     let set = this.listeners.get(event);
@@ -1165,6 +1186,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     };
     this.vaults.push(created);
     this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [], deletedItemIds: [] });
+    this.markDemoSynced();
     return { ...created, itemCount: 0 };
   }
 
@@ -1173,6 +1195,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     if (!v) throw new Error('Vault not found');
     v.name = name.trim() || v.name;
     this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [], deletedItemIds: [] });
+    this.markDemoSynced();
     return {
       ...v,
       itemCount: this.items.filter((it) => !it.deletedAt && !it.archived && it.vaultId === v.id).length,
@@ -1186,6 +1209,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     this.items = this.items.map((it) => (it.vaultId === id ? { ...it, vaultId: fallback.id } : it));
     this.vaults = this.vaults.filter((v) => v.id !== id);
     this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [], deletedItemIds: [] });
+    this.markDemoSynced();
   }
 
   async vaultSetTravelSafe(id: string, travelSafe: boolean): Promise<Vault> {
@@ -1512,6 +1536,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     };
     this.items.unshift(created);
     this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [created.id], deletedItemIds: [] });
+    this.markDemoSynced();
     return structuredClone(created);
   }
 
@@ -1565,6 +1590,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
     this.items[idx] = updated;
     this.emit('sync:data_changed', { vaultChanged: false, updatedItemIds: [id], deletedItemIds: [] });
+    this.markDemoSynced();
     return structuredClone(updated);
   }
 
@@ -1668,6 +1694,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     if (!item) return;
     item.deletedAt = new Date().toISOString();
     this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [], deletedItemIds: [id] });
+    this.markDemoSynced();
   }
 
   async itemRestore(id: string): Promise<void> {
@@ -1675,11 +1702,13 @@ class KeysmithPrototypeClient implements KeysmithClient {
     if (!item) return;
     delete item.deletedAt;
     this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [id], deletedItemIds: [] });
+    this.markDemoSynced();
   }
 
   async itemDeletePermanent(id: string): Promise<void> {
     this.items = this.items.filter((i) => i.id !== id);
     this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [], deletedItemIds: [id] });
+    this.markDemoSynced();
   }
 
   async itemEmptyTrash(): Promise<number> {

@@ -802,6 +802,10 @@ fn default_snapshot_keep() -> usize {
     5
 }
 
+fn default_sync_mode() -> String {
+    "auto".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -825,6 +829,8 @@ pub struct AppSettings {
     pub snapshot_interval_days: u32,
     #[serde(default = "default_snapshot_keep")]
     pub snapshot_keep_count: usize,
+    #[serde(default = "default_sync_mode")]
+    pub sync_mode: String,
 }
 
 impl Default for AppSettings {
@@ -841,6 +847,7 @@ impl Default for AppSettings {
             ssh_agent_enabled: true,
             snapshot_interval_days: 1,
             snapshot_keep_count: 5,
+            sync_mode: "auto".to_string(),
         }
     }
 }
@@ -859,6 +866,7 @@ pub struct AppSettingsPatch {
     pub ssh_agent_enabled: Option<bool>,
     pub snapshot_interval_days: Option<u32>,
     pub snapshot_keep_count: Option<usize>,
+    pub sync_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

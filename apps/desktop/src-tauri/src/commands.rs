@@ -42,6 +42,7 @@ pub struct AppState {
     pub quick_access_pinned: AtomicBool,
     pub quick_access_last_shown_ms: AtomicU64,
     pub signalr_poke: watch::Sender<u64>,
+    pub sync_poke: watch::Sender<u64>,
     pub saved_main_logical_size: Mutex<Option<(f64, f64)>>,
     pub main_window_compact: AtomicBool,
 }
@@ -130,9 +131,30 @@ pub fn emit_data_changed(
     );
 }
 
+pub fn bump_sync_poke(sender: &watch::Sender<u64>) {
+    let next = sender.borrow().wrapping_add(1);
+    let _ = sender.send(next);
+}
+
+pub fn poke_sync(app: &AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        bump_sync_poke(&state.sync_poke);
+    }
+}
+
 pub fn poke_signalr(state: &AppState) {
     let next = state.signalr_poke.borrow().wrapping_add(1);
     let _ = state.signalr_poke.send(next);
+    bump_sync_poke(&state.sync_poke);
+}
+
+pub fn emit_sync_status_and_poke(app: &AppHandle, core: &AppCore) {
+    let status = core.sync_get_status();
+    let pending = status.pending_count;
+    let _ = app.emit(EVENT_SYNC_STATUS, status);
+    if pending > 0 && core.is_auto_sync_enabled() {
+        poke_sync(app);
+    }
 }
 
 pub fn wipe_large_type_payload(state: &AppState) {
@@ -634,7 +656,7 @@ pub async fn vault_create(
         .vault_create(&name, color.as_deref(), icon.as_deref())
         .await?;
     emit_data_changed(&app, true, Vec::new(), Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(vault)
 }
 
@@ -647,7 +669,7 @@ pub async fn vault_rename(
 ) -> Result<Vault, CoreError> {
     let vault = state.core.vault_rename(&id, &name).await?;
     emit_data_changed(&app, true, Vec::new(), Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(vault)
 }
 
@@ -659,7 +681,7 @@ pub async fn vault_delete(
 ) -> Result<(), CoreError> {
     state.core.vault_delete(&id).await?;
     emit_data_changed(&app, true, Vec::new(), Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(())
 }
 
@@ -672,7 +694,7 @@ pub async fn vault_set_travel_safe(
 ) -> Result<Vault, CoreError> {
     let vault = state.core.vault_set_travel_safe(&id, travel_safe).await?;
     emit_data_changed(&app, true, Vec::new(), Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(vault)
 }
 
@@ -697,7 +719,7 @@ pub async fn vault_import(
         )
         .await?;
     emit_data_changed(&app, true, Vec::new(), Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(summary)
 }
 
@@ -744,7 +766,7 @@ pub async fn snapshot_restore(
 ) -> Result<ImportSummary, CoreError> {
     let summary = state.core.snapshot_restore(&snapshot_id).await?;
     emit_data_changed(&app, true, Vec::new(), Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(summary)
 }
 
@@ -792,7 +814,7 @@ pub async fn item_create(
 ) -> Result<ItemDetail, CoreError> {
     let created = state.core.item_create(draft).await?;
     emit_data_changed(&app, true, vec![created.id.clone()], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(created)
 }
 
@@ -805,7 +827,7 @@ pub async fn item_update(
 ) -> Result<ItemDetail, CoreError> {
     let updated = state.core.item_update(&id, draft).await?;
     emit_data_changed(&app, false, vec![updated.id.clone()], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(updated)
 }
 
@@ -818,7 +840,7 @@ pub async fn item_update_watchtower_flags(
 ) -> Result<ItemDetail, CoreError> {
     let updated = state.core.item_update_watchtower_flags(&id, flags).await?;
     emit_data_changed(&app, false, vec![updated.id.clone()], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(updated)
 }
 
@@ -831,7 +853,7 @@ pub async fn item_toggle_favorite(
 ) -> Result<ItemDetail, CoreError> {
     let updated = state.core.item_toggle_favorite(&id, favorite).await?;
     emit_data_changed(&app, false, vec![updated.id.clone()], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(updated)
 }
 
@@ -843,7 +865,7 @@ pub async fn item_duplicate(
 ) -> Result<ItemDetail, CoreError> {
     let created = state.core.item_duplicate(&id).await?;
     emit_data_changed(&app, true, vec![created.id.clone()], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(created)
 }
 
@@ -856,7 +878,7 @@ pub async fn item_set_archived(
 ) -> Result<ItemDetail, CoreError> {
     let updated = state.core.item_set_archived(&id, archived).await?;
     emit_data_changed(&app, true, vec![updated.id.clone()], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(updated)
 }
 
@@ -869,7 +891,7 @@ pub async fn item_move_vault(
 ) -> Result<usize, CoreError> {
     let count = state.core.item_move_vault(&ids, &target_vault_id).await?;
     emit_data_changed(&app, true, ids, Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(count)
 }
 
@@ -881,7 +903,7 @@ pub async fn item_batch_trash(
 ) -> Result<usize, CoreError> {
     let count = state.core.item_batch_trash(&ids).await?;
     emit_data_changed(&app, true, Vec::new(), ids);
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(count)
 }
 
@@ -894,7 +916,7 @@ pub async fn item_batch_add_tag(
 ) -> Result<usize, CoreError> {
     let count = state.core.item_batch_add_tag(&ids, &tag).await?;
     emit_data_changed(&app, false, ids, Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(count)
 }
 
@@ -906,7 +928,7 @@ pub async fn item_trash(
 ) -> Result<(), CoreError> {
     state.core.item_trash(&id).await?;
     emit_data_changed(&app, true, Vec::new(), vec![id]);
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(())
 }
 
@@ -918,7 +940,7 @@ pub async fn item_restore(
 ) -> Result<(), CoreError> {
     state.core.item_restore(&id).await?;
     emit_data_changed(&app, true, vec![id], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(())
 }
 
@@ -930,7 +952,7 @@ pub async fn item_delete_permanent(
 ) -> Result<(), CoreError> {
     state.core.item_delete_permanent(&id).await?;
     emit_data_changed(&app, true, Vec::new(), vec![id]);
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(())
 }
 
@@ -938,7 +960,7 @@ pub async fn item_delete_permanent(
 pub async fn item_empty_trash(app: AppHandle, state: State<'_, AppState>) -> Result<usize, CoreError> {
     let count = state.core.item_empty_trash().await?;
     emit_data_changed(&app, true, Vec::new(), Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(count)
 }
 
@@ -1002,7 +1024,7 @@ pub async fn attachment_upload(
         .attachment_upload(&item_id, &file_name, &data_base64)
         .await?;
     emit_data_changed(&app, false, vec![item_id], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(att)
 }
 
@@ -1030,7 +1052,7 @@ pub async fn attachment_delete(
         .attachment_delete(&item_id, &attachment_id)
         .await?;
     emit_data_changed(&app, false, vec![item_id], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(())
 }
 
@@ -1767,7 +1789,7 @@ pub async fn item_share_to_organization(
         .item_share_to_organization(&item_id, &organization_id, collection_ids)
         .await?;
     emit_data_changed(&app, true, vec![updated.id.clone()], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    emit_sync_status_and_poke(&app, &state.core);
     Ok(updated)
 }
 
@@ -1801,6 +1823,7 @@ pub async fn app_settings_update(
 ) -> Result<AppSettings, CoreError> {
     let lang_changed = patch.language.is_some();
     let theme_changed = patch.theme.is_some();
+    let sync_mode_changed = patch.sync_mode.is_some();
     let core = Arc::clone(&state.core);
     let updated = run_blocking(move || core.app_settings_update(patch)).await??;
     if lang_changed {
@@ -1814,6 +1837,10 @@ pub async fn app_settings_update(
                 apply_window_vibrancy(&main_win, true);
             }
         }
+    }
+    if sync_mode_changed {
+        poke_signalr(&state);
+        let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
     }
     let _ = app.emit(EVENT_UI_SETTINGS_CHANGED, &updated);
     Ok(updated)

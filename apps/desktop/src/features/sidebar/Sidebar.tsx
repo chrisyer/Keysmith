@@ -87,6 +87,7 @@ export function Sidebar() {
   const savedAccounts = useSessionStore((s) => s.savedAccounts);
   const vibrancyEnabled = useSessionStore((s) => s.vibrancyEnabled);
   const travelMode = useSessionStore((s) => s.travelMode);
+  const syncMode = useSessionStore((s) => s.appSettings.syncMode ?? 'auto');
   const lock = useSessionStore((s) => s.lock);
   const switchAccount = useSessionStore((s) => s.switchAccount);
   const startAddingAccount = useSessionStore((s) => s.startAddingAccount);
@@ -557,7 +558,13 @@ export function Sidebar() {
         >
           <span
             className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-              syncStatus.signalrConnected ? 'bg-[var(--status-success)]' : 'bg-[var(--text-muted)]/60'
+              syncStatus.state === 'offline' || syncStatus.state === 'error'
+                ? 'bg-[var(--status-warning)]'
+                : syncStatus.pendingCount > 0
+                  ? 'bg-[var(--status-warning)] animate-pulse'
+                  : syncMode === 'manual'
+                    ? 'bg-[var(--text-muted)]/60'
+                    : 'bg-[var(--status-success)]'
             }`}
           />
           <RefreshCw size={12} className={`shrink-0 ${syncStatus.state === 'syncing' ? 'animate-spin text-[var(--accent-primary)]' : ''}`} />
@@ -566,7 +573,9 @@ export function Sidebar() {
               ? fmt(dict.sidebar.clipboardCountdown, { secs: clipboardCountdown.remainingSeconds })
               : syncStatus.state === 'syncing'
                 ? dict.sidebar.syncing
-                : formatRelativeTime(syncStatus.lastSyncAt)}
+                : syncStatus.pendingCount > 0
+                  ? fmt(dict.sidebar.pendingSync, { count: syncStatus.pendingCount })
+                  : formatRelativeTime(syncStatus.lastSyncAt)}
           </span>
         </button>
 

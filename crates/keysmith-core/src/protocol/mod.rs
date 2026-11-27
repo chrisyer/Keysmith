@@ -973,6 +973,30 @@ impl VaultwardenClient {
             .map_err(|e| CoreError::Network(format!("解析同步数据失败: {e}")))
     }
 
+    pub async fn get_revision_date(
+        &self,
+        server_url: &str,
+        access_token: &str,
+    ) -> Result<String, CoreError> {
+        let base = Self::normalize_base_url(server_url)?;
+        let resp = self
+            .http
+            .get(format!("{base}/api/accounts/revision-date"))
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .map_err(|e| CoreError::Network(e.to_string()))?;
+        let status = resp.status();
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| CoreError::Network(e.to_string()))?;
+        if !status.is_success() {
+            return Err(Self::map_http_status_err(status, "获取同步版本失败", &text));
+        }
+        Ok(text.trim().trim_matches('"').to_string())
+    }
+
     pub async fn create_folder(
         &self,
         server_url: &str,

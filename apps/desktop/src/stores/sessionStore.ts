@@ -46,7 +46,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   initError: null,
   addingAccount: false,
   savedAccounts: [],
-  appSettings: { language: 'system', theme: 'system', customShortcuts: {} },
+  appSettings: { language: 'system', theme: 'system', customShortcuts: {}, syncMode: 'auto' },
   status: 'Unauthenticated',
   accountId: '',
   email: '',
@@ -78,6 +78,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           language: 'system' as const,
           theme: 'system' as const,
           customShortcuts: {},
+          syncMode: 'auto' as const,
         })),
       ]);
       const ui = useUiStore.getState();

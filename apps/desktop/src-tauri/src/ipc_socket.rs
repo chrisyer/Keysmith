@@ -29,10 +29,10 @@ use tokio::net::windows::named_pipe::ServerOptions;
 use url::Url;
 
 use crate::commands::{
-    apply_window_preferences, emit_data_changed, emit_session_state, poke_signalr,
-    show_main_window, AppState,
+    apply_window_preferences, emit_data_changed, emit_session_state, emit_sync_status_and_poke,
+    poke_signalr, show_main_window, AppState,
 };
-use crate::events::{UiFocusItemPayload, EVENT_SYNC_STATUS, EVENT_UI_FOCUS_ITEM};
+use crate::events::{UiFocusItemPayload, EVENT_UI_FOCUS_ITEM};
 
 pub const APP_SUPPORT_DIR_NAME: &str = "dev.keysmith.desktop";
 const SOCKET_FILE_NAME: &str = "keysmith.sock";
@@ -756,7 +756,7 @@ async fn rpc_item_update_quick(
         .await
         .map_err(|e| e.to_string())?;
     emit_data_changed(app, false, vec![updated.id.clone()], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+    emit_sync_status_and_poke(app, core);
     Ok(json!({ "updated": true, "id": updated.id, "title": updated.title }))
 }
 
@@ -793,7 +793,7 @@ async fn rpc_item_trash(
         .await
         .map_err(|e| e.to_string())?;
     emit_data_changed(app, true, Vec::new(), vec![existing.id.clone()]);
-    let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+    emit_sync_status_and_poke(app, core);
     Ok(json!({ "trashed": true, "id": existing.id }))
 }
 
@@ -1327,7 +1327,7 @@ async fn rpc_save_or_update_login(
             .await
             .map_err(|e| e.to_string())?;
         emit_data_changed(app, false, vec![saved.id.clone()], Vec::new());
-        let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+        emit_sync_status_and_poke(app, core);
         return Ok(json!({
             "action": "updated",
             "itemId": saved.id,
@@ -1409,7 +1409,7 @@ async fn rpc_save_or_update_login(
         .await
         .map_err(|e| e.to_string())?;
     emit_data_changed(app, false, vec![saved.id.clone()], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+    emit_sync_status_and_poke(app, core);
     Ok(json!({
         "action": "created",
         "itemId": saved.id,
@@ -1601,7 +1601,7 @@ async fn rpc_save_sso_login(
             .await
             .map_err(|e| e.to_string())?;
         emit_data_changed(app, false, vec![saved.id.clone()], Vec::new());
-        let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+        emit_sync_status_and_poke(app, core);
         return Ok(json!({
             "action": "updated",
             "itemId": saved.id,
@@ -1670,7 +1670,7 @@ async fn rpc_save_sso_login(
         .await
         .map_err(|e| e.to_string())?;
     emit_data_changed(app, false, vec![saved.id.clone()], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+    emit_sync_status_and_poke(app, core);
     Ok(json!({
         "action": "created",
         "itemId": saved.id,
@@ -2094,7 +2094,7 @@ async fn rpc_passkey_create(
     };
 
     emit_data_changed(app, false, vec![saved.id.clone()], Vec::new());
-    let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+    emit_sync_status_and_poke(app, core);
 
     Ok(json!({
         "handled": true,
@@ -2234,7 +2234,7 @@ async fn rpc_passkey_assert(
 
     if let Ok(updated) = core.item_update(&item.id, draft).await {
         emit_data_changed(app, false, vec![updated.id], Vec::new());
-        let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+        emit_sync_status_and_poke(app, core);
     }
 
     Ok(json!({

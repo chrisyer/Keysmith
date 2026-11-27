@@ -45,6 +45,7 @@ import type {
   LocalSnapshotInfo,
   MaskedEmailProvider,
   SshAgentStatus,
+  SyncMode,
 } from '../../types/domain';
 import { formatDateTime } from '../../utils/format';
 import { openExternalUrl } from '../../utils/opener';
@@ -1698,7 +1699,17 @@ export function SettingsModal() {
               </div>
             )}
 
-            {tab === 'sync' && (
+            {tab === 'sync' && (() => {
+              const syncMode: SyncMode = appSettings.syncMode ?? 'auto';
+              const channelLabel =
+                syncMode === 'manual'
+                  ? dict.settings.syncChannelPaused
+                  : syncStatus.signalrConnected
+                    ? dict.settings.syncChannelLive
+                    : dict.settings.syncChannelPolling;
+              const channelHealthy = syncMode !== 'manual';
+
+              return (
               <div className="flex flex-col gap-3.5 text-[13px]">
                 <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-2">
                   <div className="flex items-center justify-between">
@@ -1715,7 +1726,13 @@ export function SettingsModal() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-[var(--text-secondary)]">{dict.settings.pendingChanges}</span>
-                    <span className="font-mono-tabular text-[var(--text-primary)]">
+                    <span
+                      className={`font-mono-tabular ${
+                        syncStatus.pendingCount > 0
+                          ? 'text-[var(--status-warning)] font-medium'
+                          : 'text-[var(--text-primary)]'
+                      }`}
+                    >
                       {fmt(dict.settings.pendingCount, { count: syncStatus.pendingCount })}
                     </span>
                   </div>
@@ -1723,17 +1740,37 @@ export function SettingsModal() {
                     <span className="text-[var(--text-secondary)]">{dict.settings.realtimeSync}</span>
                     <span
                       className={`inline-flex items-center gap-1.5 font-medium ${
-                        syncStatus.signalrConnected ? 'text-[var(--status-success)]' : 'text-[var(--text-secondary)]'
+                        channelHealthy ? 'text-[var(--status-success)]' : 'text-[var(--text-secondary)]'
                       }`}
                     >
                       <span
                         className={`w-2 h-2 rounded-full ${
-                          syncStatus.signalrConnected ? 'bg-[var(--status-success)]' : 'bg-[var(--text-muted)]'
+                          channelHealthy ? 'bg-[var(--status-success)]' : 'bg-[var(--text-muted)]'
                         }`}
                       />
-                      {syncStatus.signalrConnected ? dict.settings.connected : dict.settings.onDemand}
+                      {channelLabel}
                     </span>
                   </div>
+                </div>
+
+                <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-[var(--text-primary)]">{dict.settings.syncModeLabel}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5 leading-relaxed">
+                      {syncMode === 'auto' ? dict.settings.syncModeAutoDesc : dict.settings.syncModeManualDesc}
+                    </div>
+                  </div>
+                  <select
+                    value={syncMode}
+                    onChange={(e) => {
+                      const nextMode = e.target.value as SyncMode;
+                      void updateAppSettings({ syncMode: nextMode });
+                    }}
+                    className="ks-input border-[var(--border-strong)] text-xs shrink-0"
+                  >
+                    <option value="auto">{dict.settings.syncModeAuto}</option>
+                    <option value="manual">{dict.settings.syncModeManual}</option>
+                  </select>
                 </div>
 
                 <form
@@ -1874,7 +1911,8 @@ export function SettingsModal() {
                   </button>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {tab === 'shortcuts' && (
               <div className="flex flex-col gap-3 text-xs" onKeyDown={handleShortcutKeyDown}>

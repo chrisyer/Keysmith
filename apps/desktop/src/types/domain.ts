@@ -482,6 +482,8 @@ export type LanguageMode =
   | 'fr'
   | 'es';
 
+export type SyncMode = 'auto' | 'manual';
+
 export interface AppSettings {
   language: LanguageMode;
   theme: 'system' | 'light' | 'dark';
@@ -494,6 +496,7 @@ export interface AppSettings {
   sshAgentEnabled?: boolean;
   snapshotIntervalDays?: number;
   snapshotKeepCount?: number;
+  syncMode?: SyncMode;
 }
 
 export interface AppSettingsPatch {
@@ -508,6 +511,7 @@ export interface AppSettingsPatch {
   sshAgentEnabled?: boolean;
   snapshotIntervalDays?: number;
   snapshotKeepCount?: number;
+  syncMode?: SyncMode;
 }
 
 export interface SshAgentStatus {

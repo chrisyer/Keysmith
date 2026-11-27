@@ -177,6 +177,7 @@ struct CoreState {
     unlocked: Option<UnlockedMemory>,
     sync_status: SyncStatus,
     last_activity: Instant,
+    last_server_revision: Option<String>,
 }
 
 /// Primary zero-knowledge engine facade exposed to desktop/mobile/CLI shells.
@@ -212,6 +213,13 @@ impl AppCore {
             .as_ref()
             .and_then(|a| a.last_sync_at.clone())
             .unwrap_or_default();
+        let last_server_revision = account.as_ref().and_then(|acc| {
+            storage
+                .get_all_app_settings()
+                .ok()
+                .and_then(|m| m.get(&format!("server_revision:{}", acc.id)).cloned())
+                .filter(|s| !s.trim().is_empty())
+        });
 
         Ok(Self {
             storage,
@@ -229,6 +237,7 @@ impl AppCore {
                     signalr_connected: false,
                 },
                 last_activity: Instant::now(),
+                last_server_revision,
             }),
             sync_lock: AsyncMutex::new(()),
         })
@@ -556,6 +565,68 @@ impl AppCore {
         }
     }
 
+    pub fn is_auto_sync_enabled(&self) -> bool {
+        self.app_settings_get()
+            .map(|s| s.sync_mode != "manual")
+            .unwrap_or(true)
+    }
+
+    fn persist_server_revision(&self, account_id: &str, rev: Option<String>) -> Option<String> {
+        let clean = rev
+            .map(|s| s.trim().trim_matches('"').to_string())
+            .filter(|s| !s.is_empty());
+        if let Some(ref val) = clean {
+            let _ = self
+                .storage
+                .set_app_setting(&format!("server_revision:{account_id}"), val);
+        }
+        clean
+    }
+
+    fn mark_remote_mutation_synced(&self, account: &mut StoredAccount, guard: &mut CoreState) {
+        let now = Utc::now().to_rfc3339();
+        account.last_sync_at = Some(now.clone());
+        let _ = self.storage.upsert_account(account);
+        if let Some(cur) = &mut guard.account {
+            if cur.id == account.id {
+                cur.last_sync_at = Some(now.clone());
+            }
+        }
+        guard.sync_status.last_sync_at = now;
+        guard.sync_status.state = SyncStateKind::Idle;
+        guard.sync_status.message = None;
+    }
+
+    pub async fn refresh_access_token(&self) -> Result<bool, CoreError> {
+        let mut account = {
+            let guard = self.read_state()?;
+            let Some(acc) = guard.account.clone() else {
+                return Ok(false);
+            };
+            acc
+        };
+        let Some(rt) = account.refresh_token.clone() else {
+            return Ok(false);
+        };
+        let refreshed = self
+            .client
+            .refresh_token(&account.server_url, &rt)
+            .await?;
+        account.access_token = Some(refreshed.access_token);
+        if let Some(new_rt) = refreshed.refresh_token {
+            account.refresh_token = Some(new_rt);
+        }
+        self.storage.upsert_account(&account)?;
+        let mut guard = self.write_state()?;
+        if let Some(cur) = &mut guard.account {
+            if cur.id == account.id {
+                cur.access_token = account.access_token.clone();
+                cur.refresh_token = account.refresh_token.clone();
+            }
+        }
+        Ok(true)
+    }
+
     // --- Auth & Server ---
 
     pub async fn auth_check_server(&self, server_url: &str) -> Result<ServerCheckResult, CoreError> {
@@ -689,10 +760,20 @@ impl AppCore {
         }
         let _ = self.storage.set_app_setting("last_server_url", &account.server_url);
 
+        let rev_token = account.access_token.clone();
+        let rev_server = account.server_url.clone();
+        let initial_rev = if let Some(tok) = rev_token {
+            self.client.get_revision_date(&rev_server, &tok).await.ok()
+        } else {
+            None
+        };
+        let stored_rev = self.persist_server_revision(&account.id, initial_rev);
+
         let mut guard = self.write_state()?;
         guard.account = Some(account);
         guard.unlocked = Some(unlocked);
         guard.last_activity = Instant::now();
+        guard.last_server_revision = stored_rev;
         guard.sync_status = SyncStatus {
             state: SyncStateKind::Idle,
             pending_count: 0,
@@ -776,6 +857,7 @@ impl AppCore {
             let id = guard.account.as_ref().map(|a| a.id.clone());
             guard.unlocked = None;
             guard.account = None;
+            guard.last_server_revision = None;
             guard.sync_status = SyncStatus {
                 state: SyncStateKind::Idle,
                 pending_count: 0,
@@ -788,6 +870,7 @@ impl AppCore {
 
         if let Some(id) = account_id {
             let _ = self.biometric.delete_unlock_key(&id);
+            let _ = self.storage.delete_app_setting(&format!("server_revision:{id}"));
             self.storage.clear_account_data(&id, clear_local_cache)?;
         }
 
@@ -795,9 +878,16 @@ impl AppCore {
         if let Some(next_acc) = self.storage.load_primary_account()? {
             let next_active = self.storage.set_active_account(&next_acc.id)?;
             let pending = self.storage.count_pending_dirty(&next_active.id)?;
+            let next_rev = self
+                .storage
+                .get_all_app_settings()
+                .ok()
+                .and_then(|m| m.get(&format!("server_revision:{}", next_active.id)).cloned())
+                .filter(|s| !s.trim().is_empty());
             let mut guard = self.write_state()?;
             guard.sync_status.last_sync_at = next_active.last_sync_at.clone().unwrap_or_default();
             guard.sync_status.pending_count = pending;
+            guard.last_server_revision = next_rev;
             guard.account = Some(next_active);
         }
         Ok(())
@@ -865,11 +955,18 @@ impl AppCore {
     pub fn account_switch(&self, account_id: &str) -> Result<SessionState, CoreError> {
         let target = self.storage.set_active_account(account_id)?;
         let pending = self.storage.count_pending_dirty(&target.id)?;
+        let next_rev = self
+            .storage
+            .get_all_app_settings()
+            .ok()
+            .and_then(|m| m.get(&format!("server_revision:{}", target.id)).cloned())
+            .filter(|s| !s.trim().is_empty());
         let mut guard = self.write_state()?;
         // Lock & zeroize current account's unlocked memory
         guard.unlocked = None;
         guard.account = Some(target.clone());
         guard.last_activity = Instant::now();
+        guard.last_server_revision = next_rev;
         guard.sync_status = SyncStatus {
             state: SyncStateKind::Idle,
             pending_count: pending,
@@ -1323,8 +1420,9 @@ impl AppCore {
         let mut id = new_uuid();
         let mut revision_date = Utc::now().to_rfc3339();
         let mut dirty_op = Some("create".to_string());
+        let mut synced_remotely = false;
 
-        if account.access_token.is_some() {
+        if self.is_auto_sync_enabled() && account.access_token.is_some() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let name_enc_clone = name_enc.clone();
@@ -1342,6 +1440,7 @@ impl AppCore {
                     revision_date = rev;
                 }
                 dirty_op = None;
+                synced_remotely = true;
             }
         }
 
@@ -1369,6 +1468,9 @@ impl AppCore {
         let mut guard = self.write_state()?;
         if let Some(unlocked) = &mut guard.unlocked {
             unlocked.vaults.push(vault.clone());
+        }
+        if synced_remotely {
+            self.mark_remote_mutation_synced(&mut account, &mut guard);
         }
         guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(vault)
@@ -1415,8 +1517,9 @@ impl AppCore {
         target.name = trimmed.to_string();
         let mut revision_date = Utc::now().to_rfc3339();
         let mut dirty_op = Some("update".to_string());
+        let mut synced_remotely = false;
 
-        if account.access_token.is_some() {
+        if self.is_auto_sync_enabled() && account.access_token.is_some() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -1435,6 +1538,7 @@ impl AppCore {
                     revision_date = rev;
                 }
                 dirty_op = None;
+                synced_remotely = true;
             }
         }
 
@@ -1454,6 +1558,9 @@ impl AppCore {
                 v.name = target.name.clone();
                 target = v.clone();
             }
+        }
+        if synced_remotely {
+            self.mark_remote_mutation_synced(&mut account, &mut guard);
         }
         guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(target)
@@ -1491,6 +1598,7 @@ impl AppCore {
         };
 
         target.travel_safe = travel_safe;
+        let mut synced_remotely = false;
 
         if id == DEFAULT_PERSONAL_VAULT_ID {
             self.storage.set_app_setting(
@@ -1505,7 +1613,7 @@ impl AppCore {
             if let Some(name_enc) = name_enc_opt {
                 let mut revision_date = Utc::now().to_rfc3339();
                 let mut dirty_op = Some("update".to_string());
-                if account.access_token.is_some() {
+                if self.is_auto_sync_enabled() && account.access_token.is_some() {
                     let client = self.client.clone();
                     let server_url = account.server_url.clone();
                     let id_owned = id.to_string();
@@ -1526,6 +1634,7 @@ impl AppCore {
                             revision_date = rev;
                         }
                         dirty_op = None;
+                        synced_remotely = true;
                     }
                 }
                 self.storage.upsert_vault(&StoredVault {
@@ -1546,6 +1655,9 @@ impl AppCore {
                 v.travel_safe = travel_safe;
                 target = v.clone();
             }
+        }
+        if synced_remotely {
+            self.mark_remote_mutation_synced(&mut account, &mut guard);
         }
         guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(target)
@@ -1583,13 +1695,8 @@ impl AppCore {
             (acc, affected)
         };
 
-        for mut c in affected_ciphers {
-            c.folder_id = None;
-            let _ = self.storage.upsert_cipher(&account.id, &c, Some("update"));
-        }
-
         let mut deleted_remotely = false;
-        if account.access_token.is_some() {
+        if self.is_auto_sync_enabled() && account.access_token.is_some() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -1605,6 +1712,12 @@ impl AppCore {
             {
                 deleted_remotely = true;
             }
+        }
+
+        let cipher_dirty = if deleted_remotely { None } else { Some("update") };
+        for mut c in affected_ciphers {
+            c.folder_id = None;
+            let _ = self.storage.upsert_cipher(&account.id, &c, cipher_dirty);
         }
 
         if deleted_remotely {
@@ -1635,6 +1748,9 @@ impl AppCore {
                 }
             }
             Self::recompute_vault_counts(unlocked);
+        }
+        if deleted_remotely {
+            self.mark_remote_mutation_synced(&mut account, &mut guard);
         }
         guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(())
@@ -1859,7 +1975,8 @@ impl AppCore {
         };
 
         let mut dirty_op = Some("create");
-        if account.access_token.is_some() {
+        let mut synced_remotely = false;
+        if self.is_auto_sync_enabled() && account.access_token.is_some() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let cipher_clone = cipher.clone();
@@ -1877,6 +1994,7 @@ impl AppCore {
                     item.id = remote.id.clone();
                     cipher = remote;
                     dirty_op = None;
+                    synced_remotely = true;
                 }
                 Err(err) => {
                     eprintln!("[keysmith] remote create_cipher failed, queued offline create: {err}");
@@ -1891,6 +2009,9 @@ impl AppCore {
             unlocked.ciphers.insert(cipher.id.clone(), cipher);
             unlocked.items.insert(item.id.clone(), item.clone());
             Self::recompute_vault_counts(unlocked);
+        }
+        if synced_remotely {
+            self.mark_remote_mutation_synced(&mut account, &mut guard);
         }
         guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(item)
@@ -1932,7 +2053,8 @@ impl AppCore {
         };
 
         let mut dirty_op = Some(if was_offline_create { "create" } else { "update" });
-        if account.access_token.is_some() {
+        let mut synced_remotely = false;
+        if self.is_auto_sync_enabled() && account.access_token.is_some() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -1957,6 +2079,7 @@ impl AppCore {
                     Self::preserve_local_fido2_if_stripped(&cipher, &mut remote);
                     cipher = remote;
                     dirty_op = None;
+                    synced_remotely = true;
                 }
                 Err(err) => {
                     eprintln!("[keysmith] remote update_cipher failed, queued offline update: {err}");
@@ -1978,6 +2101,9 @@ impl AppCore {
             unlocked.ciphers.insert(cipher.id.clone(), cipher);
             unlocked.items.insert(item.id.clone(), item.clone());
             Self::recompute_vault_counts(unlocked);
+        }
+        if synced_remotely {
+            self.mark_remote_mutation_synced(&mut account, &mut guard);
         }
         guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(item)
@@ -2182,7 +2308,8 @@ impl AppCore {
         cipher.deleted_date = Some(now.clone());
 
         let mut dirty_op = Some("trash");
-        if account.access_token.is_some() {
+        let mut synced_remotely = false;
+        if self.is_auto_sync_enabled() && account.access_token.is_some() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -2197,6 +2324,7 @@ impl AppCore {
                 .is_ok()
             {
                 dirty_op = None;
+                synced_remotely = true;
             }
         }
 
@@ -2209,6 +2337,9 @@ impl AppCore {
                 it.deleted_at = Some(now);
             }
             Self::recompute_vault_counts(unlocked);
+        }
+        if synced_remotely {
+            self.mark_remote_mutation_synced(&mut account, &mut guard);
         }
         guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(())
@@ -2236,7 +2367,8 @@ impl AppCore {
         cipher.deleted_date = None;
 
         let mut dirty_op = Some("restore");
-        if account.access_token.is_some() {
+        let mut synced_remotely = false;
+        if self.is_auto_sync_enabled() && account.access_token.is_some() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -2251,6 +2383,7 @@ impl AppCore {
             {
                 cipher = remote;
                 dirty_op = None;
+                synced_remotely = true;
             }
         }
 
@@ -2263,6 +2396,9 @@ impl AppCore {
                 it.deleted_at = None;
             }
             Self::recompute_vault_counts(unlocked);
+        }
+        if synced_remotely {
+            self.mark_remote_mutation_synced(&mut account, &mut guard);
         }
         guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(())
@@ -2282,8 +2418,17 @@ impl AppCore {
             (acc, unlocked.ciphers.get(id).cloned())
         };
 
+        let was_offline_create = self
+            .storage
+            .list_ciphers(&account.id)?
+            .into_iter()
+            .find(|sc| sc.id == id)
+            .and_then(|sc| sc.dirty_op)
+            .as_deref()
+            == Some("create");
+
         let mut deleted_remotely = false;
-        if account.access_token.is_some() {
+        if !was_offline_create && self.is_auto_sync_enabled() && account.access_token.is_some() {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
@@ -2301,7 +2446,7 @@ impl AppCore {
             }
         }
 
-        if deleted_remotely {
+        if deleted_remotely || was_offline_create || account.access_token.is_none() {
             self.storage.delete_cipher_row(id)?;
         } else if let Some(c) = cipher_opt {
             self.storage.upsert_cipher(&account.id, &c, Some("delete"))?;
@@ -2312,6 +2457,9 @@ impl AppCore {
             unlocked.ciphers.remove(id);
             unlocked.items.remove(id);
             Self::recompute_vault_counts(unlocked);
+        }
+        if deleted_remotely {
+            self.mark_remote_mutation_synced(&mut account, &mut guard);
         }
         guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(())
@@ -2337,11 +2485,22 @@ impl AppCore {
             (acc, list)
         };
 
+        let offline_created_ids: HashSet<String> = self
+            .storage
+            .list_ciphers(&account.id)?
+            .into_iter()
+            .filter(|sc| sc.dirty_op.as_deref() == Some("create"))
+            .map(|sc| sc.id)
+            .collect();
+        let should_push = self.is_auto_sync_enabled() && account.access_token.is_some();
+
         let mut purged = 0usize;
+        let mut any_synced_remotely = false;
         let mut removed_ids: Vec<String> = Vec::new();
         for (id, cipher_opt) in trashed {
+            let was_offline = offline_created_ids.contains(&id);
             let mut deleted_remotely = false;
-            if account.access_token.is_some() {
+            if should_push && !was_offline {
                 let client = self.client.clone();
                 let server_url = account.server_url.clone();
                 let id_owned = id.clone();
@@ -2356,9 +2515,10 @@ impl AppCore {
                     .is_ok()
                 {
                     deleted_remotely = true;
+                    any_synced_remotely = true;
                 }
             }
-            if deleted_remotely || account.access_token.is_none() {
+            if deleted_remotely || was_offline || account.access_token.is_none() {
                 self.storage.delete_cipher_row(&id)?;
             } else if let Some(c) = cipher_opt {
                 self.storage.upsert_cipher(&account.id, &c, Some("delete"))?;
@@ -2374,6 +2534,9 @@ impl AppCore {
                 unlocked.items.remove(&id);
             }
             Self::recompute_vault_counts(unlocked);
+        }
+        if any_synced_remotely {
+            self.mark_remote_mutation_synced(&mut account, &mut guard);
         }
         guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(purged)
@@ -2411,11 +2574,13 @@ impl AppCore {
             return Ok(0);
         }
 
+        let should_push = self.is_auto_sync_enabled() && account.access_token.is_some();
         let mut purged = 0usize;
+        let mut any_synced_remotely = false;
         let mut removed_ids = Vec::with_capacity(expired.len());
         for (id, cipher_opt) in expired {
             let mut deleted_remotely = false;
-            if account.access_token.is_some() {
+            if should_push {
                 let client = self.client.clone();
                 let server_url = account.server_url.clone();
                 let id_owned = id.clone();
@@ -2430,6 +2595,7 @@ impl AppCore {
                     .is_ok()
                 {
                     deleted_remotely = true;
+                    any_synced_remotely = true;
                 }
             }
             if deleted_remotely || account.access_token.is_none() {
@@ -2448,6 +2614,9 @@ impl AppCore {
                 unlocked.items.remove(&id);
             }
             Self::recompute_vault_counts(unlocked);
+        }
+        if any_synced_remotely {
+            self.mark_remote_mutation_synced(&mut account, &mut guard);
         }
         guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(purged)
@@ -2508,6 +2677,7 @@ impl AppCore {
             .into_iter()
             .filter(|v| v.dirty_op.is_some())
             .collect();
+        let had_dirty_vaults = !dirty_vaults.is_empty();
 
         let mut folder_id_remap: HashMap<String, String> = HashMap::new();
         for sv in dirty_vaults {
@@ -2602,7 +2772,7 @@ impl AppCore {
             .filter(|c| c.dirty_op.is_some())
             .collect();
 
-        let pushed_any = !dirty_ciphers.is_empty();
+        let pushed_any = !dirty_ciphers.is_empty() || had_dirty_vaults;
 
         for sc in dirty_ciphers {
             let Ok(mut dto) = serde_json::from_str::<CipherDto>(&sc.raw_json) else {
@@ -2856,12 +3026,27 @@ impl AppCore {
         .await
         .map_err(|e| CoreError::Internal(format!("同步落盘与解密失败: {e}")))??;
 
+        let client_rev = self.client.clone();
+        let server_url_rev = account.server_url.clone();
+        let latest_rev = self
+            .with_fresh_token(&mut account, move |tok| {
+                let client = client_rev.clone();
+                let server_url = server_url_rev.clone();
+                async move { client.get_revision_date(&server_url, &tok).await }
+            })
+            .await
+            .ok();
+        let stored_rev = self.persist_server_revision(&account.id, latest_rev);
+
         let out_status = {
             let mut guard = self.write_state()?;
             let signalr_connected = guard.sync_status.signalr_connected;
             guard.account = Some(account);
             if let Some(u) = refreshed_unlocked {
                 guard.unlocked = Some(u);
+            }
+            if stored_rev.is_some() {
+                guard.last_server_revision = stored_rev;
             }
             guard.sync_status = SyncStatus {
                 state: SyncStateKind::Idle,
@@ -2875,6 +3060,82 @@ impl AppCore {
         let _ = self.purge_expired_trash().await;
         self.maybe_create_scheduled_snapshot();
         Ok(out_status)
+    }
+
+    pub async fn check_and_sync_if_changed(
+        &self,
+        sync_if_revision_unknown: bool,
+    ) -> Result<bool, CoreError> {
+        let (mut account, prev_rev) = {
+            let guard = self.read_state()?;
+            if guard.unlocked.is_none() {
+                return Ok(false);
+            }
+            let Some(acc) = guard.account.clone() else {
+                return Ok(false);
+            };
+            if acc
+                .access_token
+                .as_deref()
+                .map(|t| t.trim().is_empty())
+                .unwrap_or(true)
+            {
+                return Ok(false);
+            }
+            let rev = guard.last_server_revision.clone();
+            (acc, rev)
+        };
+
+        let pending_count = self.storage.count_pending_dirty(&account.id)?;
+        if pending_count > 0 {
+            let st = self.sync_now().await?;
+            return Ok(st.state == SyncStateKind::Idle);
+        }
+
+        let client = self.client.clone();
+        let server_url = account.server_url.clone();
+        let remote_rev = self
+            .with_fresh_token(&mut account, move |tok| {
+                let client = client.clone();
+                let server_url = server_url.clone();
+                async move { client.get_revision_date(&server_url, &tok).await }
+            })
+            .await?;
+
+        let prev_rev = prev_rev.or_else(|| {
+            self.storage
+                .get_all_app_settings()
+                .ok()
+                .and_then(|m| m.get(&format!("server_revision:{}", account.id)).cloned())
+                .filter(|s| !s.trim().is_empty())
+        });
+
+        let changed = match prev_rev {
+            Some(ref p) => !remote_rev.is_empty() && p != &remote_rev,
+            None => sync_if_revision_unknown,
+        };
+
+        if changed {
+            let st = self.sync_now().await?;
+            if st.state == SyncStateKind::Idle && !remote_rev.is_empty() {
+                let stored_rev = self.persist_server_revision(&account.id, Some(remote_rev));
+                if let Ok(mut guard) = self.write_state() {
+                    if guard.last_server_revision.is_none() {
+                        guard.last_server_revision = stored_rev;
+                    }
+                }
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+
+        if prev_rev.is_none() && !remote_rev.is_empty() {
+            let stored_rev = self.persist_server_revision(&account.id, Some(remote_rev));
+            if let Ok(mut guard) = self.write_state() {
+                guard.last_server_revision = stored_rev;
+            }
+        }
+        Ok(false)
     }
 
     // --- TOTP / QR / Generator / History / SSH / Watchtower / Clipboard ---
@@ -4711,6 +4972,8 @@ impl AppCore {
                 .insert(updated_item.id.clone(), updated_item.clone());
             Self::recompute_vault_counts(unlocked);
         }
+        self.mark_remote_mutation_synced(&mut account, &mut guard);
+        guard.sync_status.pending_count = self.storage.count_pending_dirty(&account.id)?;
         Ok(updated_item)
     }
 
@@ -4785,6 +5048,11 @@ impl AppCore {
             .and_then(|s| s.parse::<usize>().ok())
             .map(|n| n.clamp(1, 50))
             .unwrap_or(5);
+        let sync_mode = raw
+            .get("sync_mode")
+            .cloned()
+            .filter(|v| matches!(v.as_str(), "auto" | "manual"))
+            .unwrap_or_else(|| "auto".to_string());
 
         Ok(AppSettings {
             language,
@@ -4798,6 +5066,7 @@ impl AppCore {
             ssh_agent_enabled,
             snapshot_interval_days,
             snapshot_keep_count,
+            sync_mode,
         })
     }
 
@@ -4878,6 +5147,11 @@ impl AppCore {
         if let Some(keep) = patch.snapshot_keep_count {
             self.storage
                 .set_app_setting("snapshot_keep_count", &keep.clamp(1, 50).to_string())?;
+        }
+        if let Some(mode) = patch.sync_mode {
+            if matches!(mode.as_str(), "auto" | "manual") {
+                self.storage.set_app_setting("sync_mode", &mode)?;
+            }
         }
         self.app_settings_get()
     }

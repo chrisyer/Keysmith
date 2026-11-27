@@ -10,17 +10,18 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use keysmith_core::domain::{AuthStatus, GeneratorOptions};
+use keysmith_core::domain::{AuthStatus, GeneratorOptions, SyncStateKind};
+use keysmith_core::error::CoreError;
 use keysmith_core::protocol::signalr::{run_signalr_session, SignalREvent};
 use keysmith_core::AppCore;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::commands::{
-    apply_window_preferences, destroy_floating_windows_and_wipe, emit_data_changed,
+    apply_window_preferences, bump_sync_poke, destroy_floating_windows_and_wipe, emit_data_changed,
     set_main_window_compact, show_generator_window, show_main_window, show_quick_access_window,
     toggle_quick_access_window, update_global_shortcut, AppState,
 };
@@ -662,11 +663,15 @@ fn spawn_signalr_supervisor(
     app: AppHandle,
     core: Arc<AppCore>,
     mut poke_rx: watch::Receiver<u64>,
+    sync_poke: watch::Sender<u64>,
 ) {
     tauri::async_runtime::spawn(async move {
+        let mut reconnect_delay_secs = 5u64;
+
         loop {
             let session = core.session_get_state();
-            let creds = if session.status == AuthStatus::Unlocked {
+            let auto_sync = core.is_auto_sync_enabled();
+            let creds = if session.status == AuthStatus::Unlocked && auto_sync {
                 core.signalr_credentials()
             } else {
                 None
@@ -675,21 +680,31 @@ fn spawn_signalr_supervisor(
             let Some((server_url, access_token)) = creds else {
                 core.set_signalr_connected(false);
                 let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+                reconnect_delay_secs = 5;
                 tokio::select! {
-                    _ = poke_rx.changed() => {},
-                    _ = tokio::time::sleep(Duration::from_secs(15)) => {},
+                    changed = poke_rx.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(15)) => {}
                 }
                 continue;
             };
 
             let (ev_tx, mut ev_rx) = mpsc::channel::<SignalREvent>(32);
             let (shutdown_tx, shutdown_rx) = watch::channel(false);
+            let (res_tx, mut res_rx) = oneshot::channel::<Result<(), CoreError>>();
 
             let url_c = server_url.clone();
             let tok_c = access_token.clone();
             let session_task = tauri::async_runtime::spawn(async move {
-                let _ = run_signalr_session(&url_c, &tok_c, ev_tx, shutdown_rx).await;
+                let res = run_signalr_session(&url_c, &tok_c, ev_tx, shutdown_rx).await;
+                let _ = res_tx.send(res);
             });
+
+            let mut was_connected = false;
+            let mut should_exit_on_poke = false;
 
             loop {
                 tokio::select! {
@@ -699,21 +714,26 @@ fn spawn_signalr_supervisor(
                             return;
                         }
                         let st = core.session_get_state();
-                        let next_creds = if st.status == AuthStatus::Unlocked {
+                        let next_auto = core.is_auto_sync_enabled();
+                        let next_creds = if st.status == AuthStatus::Unlocked && next_auto {
                             core.signalr_credentials()
                         } else {
                             None
                         };
                         if next_creds.as_ref() != Some(&(server_url.clone(), access_token.clone())) {
                             let _ = shutdown_tx.send(true);
+                            should_exit_on_poke = true;
                             break;
                         }
                     }
                     ev_opt = ev_rx.recv() => {
                         match ev_opt {
                             Some(SignalREvent::Connected) => {
+                                was_connected = true;
+                                reconnect_delay_secs = 5;
                                 core.set_signalr_connected(true);
                                 let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+                                bump_sync_poke(&sync_poke);
                             }
                             Some(SignalREvent::Disconnected(_)) | None => {
                                 core.set_signalr_connected(false);
@@ -723,10 +743,25 @@ fn spawn_signalr_supervisor(
                             Some(SignalREvent::SyncCipher { .. })
                             | Some(SignalREvent::SyncFolder { .. })
                             | Some(SignalREvent::SyncVault) => {
+                                tokio::time::sleep(Duration::from_millis(300)).await;
+                                let mut disconnected = false;
+                                while let Ok(extra) = ev_rx.try_recv() {
+                                    if matches!(extra, SignalREvent::Disconnected(_)) {
+                                        disconnected = true;
+                                    }
+                                }
+                                let mut syncing = core.sync_get_status();
+                                syncing.state = SyncStateKind::Syncing;
+                                let _ = app.emit(EVENT_SYNC_STATUS, syncing);
                                 if core.sync_now().await.is_ok() {
                                     emit_data_changed(&app, true, Vec::new(), Vec::new());
                                 }
                                 let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+                                if disconnected {
+                                    core.set_signalr_connected(false);
+                                    let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+                                    break;
+                                }
                             }
                         }
                     }
@@ -734,11 +769,130 @@ fn spawn_signalr_supervisor(
             }
 
             let _ = session_task.await;
+            let session_res = res_rx.try_recv().ok();
+            let is_unauthorized = matches!(session_res, Some(Err(CoreError::Unauthorized(_))));
 
-            // Backoff before reconnecting if still unlocked
+            if is_unauthorized {
+                let _ = core.refresh_access_token().await;
+                reconnect_delay_secs = 1;
+            } else if should_exit_on_poke || was_connected {
+                reconnect_delay_secs = 5;
+            }
+
+            let wait_secs = if is_unauthorized { 1 } else { reconnect_delay_secs };
+            if !is_unauthorized {
+                reconnect_delay_secs = (reconnect_delay_secs * 2).min(30);
+            }
+
             tokio::select! {
-                _ = poke_rx.changed() => {},
-                _ = tokio::time::sleep(Duration::from_secs(5)) => {},
+                changed = poke_rx.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                    reconnect_delay_secs = 5;
+                }
+                _ = tokio::time::sleep(Duration::from_secs(wait_secs)) => {}
+            }
+        }
+    });
+}
+
+fn spawn_auto_sync_loop(
+    app: AppHandle,
+    core: Arc<AppCore>,
+    mut sync_poke_rx: watch::Receiver<u64>,
+) {
+    tauri::async_runtime::spawn(async move {
+        let mut pending_backoff_secs = 2u64;
+        let mut just_unlocked = true;
+
+        loop {
+            let unlocked = core.session_get_state().status == AuthStatus::Unlocked;
+            let auto_sync = core.is_auto_sync_enabled();
+            if !unlocked || !auto_sync {
+                pending_backoff_secs = 2;
+                just_unlocked = true;
+                tokio::select! {
+                    changed = sync_poke_rx.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(30)) => {}
+                }
+                continue;
+            }
+
+            let status = core.sync_get_status();
+            if status.pending_count > 0 {
+                let mut syncing = status;
+                syncing.state = SyncStateKind::Syncing;
+                let _ = app.emit(EVENT_SYNC_STATUS, syncing);
+
+                match core.sync_now().await {
+                    Ok(next_status) => {
+                        let synced_ok = next_status.state == SyncStateKind::Idle;
+                        let _ = app.emit(EVENT_SYNC_STATUS, next_status);
+                        if synced_ok {
+                            emit_data_changed(&app, true, Vec::new(), Vec::new());
+                            pending_backoff_secs = 2;
+                            just_unlocked = false;
+                        } else {
+                            let wait = pending_backoff_secs;
+                            pending_backoff_secs = (pending_backoff_secs * 2).min(60);
+                            tokio::select! {
+                                changed = sync_poke_rx.changed() => {
+                                    if changed.is_err() {
+                                        return;
+                                    }
+                                    tokio::time::sleep(Duration::from_millis(800)).await;
+                                    pending_backoff_secs = 2;
+                                }
+                                _ = tokio::time::sleep(Duration::from_secs(wait)) => {}
+                            }
+                            continue;
+                        }
+                    }
+                    Err(_) => {
+                        let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+                        let wait = pending_backoff_secs;
+                        pending_backoff_secs = (pending_backoff_secs * 2).min(60);
+                        tokio::select! {
+                            changed = sync_poke_rx.changed() => {
+                                if changed.is_err() {
+                                    return;
+                                }
+                                tokio::time::sleep(Duration::from_millis(800)).await;
+                                pending_backoff_secs = 2;
+                            }
+                            _ = tokio::time::sleep(Duration::from_secs(wait)) => {}
+                        }
+                        continue;
+                    }
+                }
+            } else {
+                pending_backoff_secs = 2;
+                let sync_on_unknown = just_unlocked;
+                just_unlocked = false;
+                if let Ok(true) = core.check_and_sync_if_changed(sync_on_unknown).await {
+                    emit_data_changed(&app, true, Vec::new(), Vec::new());
+                    let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+                }
+            }
+
+            let poll_secs = if core.sync_get_status().signalr_connected {
+                90
+            } else {
+                15
+            };
+            tokio::select! {
+                changed = sync_poke_rx.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(800)).await;
+                }
+                _ = tokio::time::sleep(Duration::from_secs(poll_secs)) => {}
             }
         }
     });
@@ -769,6 +923,7 @@ pub fn run() {
             );
 
             let (signalr_poke, signalr_poke_rx) = watch::channel(0u64);
+            let (sync_poke, sync_poke_rx) = watch::channel(0u64);
             let initial_session = core.session_get_state();
             let initial_lang = core
                 .app_settings_get()
@@ -782,6 +937,7 @@ pub fn run() {
                 quick_access_pinned: AtomicBool::new(false),
                 quick_access_last_shown_ms: AtomicU64::new(0),
                 signalr_poke: signalr_poke.clone(),
+                sync_poke: sync_poke.clone(),
                 saved_main_logical_size: Mutex::new(None),
                 main_window_compact: AtomicBool::new(false),
             });
@@ -798,12 +954,14 @@ pub fn run() {
             }
             apply_window_preferences(&handle, &initial_session);
 
-            // Close-to-tray behavior on main window
+            // Close-to-tray behavior + focus auto-sync check on main window
             if let Some(main_win) = handle.get_webview_window("main") {
                 let win_handle = handle.clone();
                 let win_core = Arc::clone(&core);
-                main_win.on_window_event(move |event| {
-                    if let WindowEvent::CloseRequested { api, .. } = event {
+                let focus_sync_poke = sync_poke.clone();
+                let last_focus_poke = Mutex::new(None::<std::time::Instant>);
+                main_win.on_window_event(move |event| match event {
+                    WindowEvent::CloseRequested { api, .. } => {
                         if win_core.session_get_state().close_to_tray {
                             api.prevent_close();
                             if let Some(w) = win_handle.get_webview_window("main") {
@@ -811,6 +969,23 @@ pub fn run() {
                             }
                         }
                     }
+                    WindowEvent::Focused(true) => {
+                        if win_core.session_get_state().status == AuthStatus::Unlocked
+                            && win_core.is_auto_sync_enabled()
+                        {
+                            let mut guard = last_focus_poke
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner());
+                            let due = guard
+                                .map(|prev| prev.elapsed() >= Duration::from_secs(5))
+                                .unwrap_or(true);
+                            if due {
+                                *guard = Some(std::time::Instant::now());
+                                bump_sync_poke(&focus_sync_poke);
+                            }
+                        }
+                    }
+                    _ => {}
                 });
             }
 
@@ -877,8 +1052,14 @@ pub fn run() {
                 }
             });
 
-            // SignalR real-time sync supervisor + Unix Domain Socket IPC server
-            spawn_signalr_supervisor(handle.clone(), Arc::clone(&core), signalr_poke_rx);
+            // SignalR real-time sync supervisor + change-driven auto-sync loop + Unix Domain Socket IPC server
+            spawn_signalr_supervisor(
+                handle.clone(),
+                Arc::clone(&core),
+                signalr_poke_rx,
+                sync_poke.clone(),
+            );
+            spawn_auto_sync_loop(handle.clone(), Arc::clone(&core), sync_poke_rx);
             spawn_ipc_socket_server(handle.clone(), Arc::clone(&core));
 
             // Auto-register Native Messaging Host manifests & sync bundled browser extension

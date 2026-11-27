@@ -2747,3 +2747,249 @@ async fn roadmap_watchtower_emergency_kit_snapshots_travel_mode_secret_ref_and_s
         "Expired trashed item (>30 days) must be auto-purged on unlock"
     );
 }
+
+#[tokio::test]
+async fn auto_sync_revision_detection_manual_mode_and_offline_flush() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let base_url = format!("http://{addr}");
+
+    let kdf = KdfConfig {
+        kdf: 0,
+        kdf_iterations: 1000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    };
+    let mk = derive_master_key("SyncPass#2026", "sync@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let protected = protect_user_symmetric_key(&usk, &smk).unwrap();
+
+    let initial_cipher = CipherDto {
+        id: "remote-1".to_string(),
+        organization_id: None,
+        folder_id: None,
+        collection_ids: vec![],
+        cipher_type: 1,
+        name: Some(usk.encrypt_string("Initial Remote").unwrap()),
+        notes: None,
+        favorite: false,
+        login: None,
+        secure_note: None,
+        card: None,
+        identity: None,
+        fields: vec![],
+        password_history: vec![],
+        attachments: vec![],
+        reprompt: Some(0),
+        revision_date: Some("2026-11-27T00:00:00Z".to_string()),
+        creation_date: Some("2026-11-27T00:00:00Z".to_string()),
+        deleted_date: None,
+        extra: Default::default(),
+    };
+    let bumped_cipher = CipherDto {
+        id: "remote-2".to_string(),
+        organization_id: None,
+        folder_id: None,
+        collection_ids: vec![],
+        cipher_type: 1,
+        name: Some(usk.encrypt_string("Added Remotely").unwrap()),
+        notes: None,
+        favorite: false,
+        login: None,
+        secure_note: None,
+        card: None,
+        identity: None,
+        fields: vec![],
+        password_history: vec![],
+        attachments: vec![],
+        reprompt: Some(0),
+        revision_date: Some("2026-11-27T00:01:00Z".to_string()),
+        creation_date: Some("2026-11-27T00:01:00Z".to_string()),
+        deleted_date: None,
+        extra: Default::default(),
+    };
+
+    let rev_value = Arc::new(Mutex::new("1000".to_string()));
+    let remote_ciphers = Arc::new(Mutex::new(vec![initial_cipher]));
+    let sync_calls = Arc::new(AtomicUsize::new(0));
+    let create_calls = Arc::new(AtomicUsize::new(0));
+
+    let rev_srv = Arc::clone(&rev_value);
+    let ciphers_srv = Arc::clone(&remote_ciphers);
+    let sync_calls_srv = Arc::clone(&sync_calls);
+    let create_calls_srv = Arc::clone(&create_calls);
+
+    let server_task = tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                break;
+            };
+            let rev_c = Arc::clone(&rev_srv);
+            let ciphers_c = Arc::clone(&ciphers_srv);
+            let sync_c = Arc::clone(&sync_calls_srv);
+            let create_c = Arc::clone(&create_calls_srv);
+            tokio::spawn(async move {
+                let mut raw = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let mut header_end: Option<usize> = None;
+                let mut expected_total: Option<usize> = None;
+                loop {
+                    let Ok(n) = sock.read(&mut chunk).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        break;
+                    }
+                    raw.extend_from_slice(&chunk[..n]);
+                    if header_end.is_none() {
+                        if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                            let h_end = pos + 4;
+                            header_end = Some(h_end);
+                            let headers = String::from_utf8_lossy(&raw[..h_end]);
+                            let clen = headers
+                                .lines()
+                                .find_map(|l| {
+                                    let (k, v) = l.split_once(':')?;
+                                    if k.trim().eq_ignore_ascii_case("content-length") {
+                                        v.trim().parse::<usize>().ok()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or(0);
+                            expected_total = Some(h_end + clen);
+                        }
+                    }
+                    if let Some(total) = expected_total {
+                        if raw.len() >= total {
+                            break;
+                        }
+                    }
+                }
+                if raw.is_empty() {
+                    return;
+                }
+                let req = String::from_utf8_lossy(&raw).to_string();
+                let first_line = req.lines().next().unwrap_or("");
+                let (status, body) = if first_line.starts_with("GET /api/accounts/revision-date") {
+                    ("200 OK", rev_c.lock().unwrap().clone())
+                } else if first_line.starts_with("GET /api/sync") {
+                    sync_c.fetch_add(1, Ordering::SeqCst);
+                    let list = ciphers_c.lock().unwrap().clone();
+                    let payload = serde_json::json!({
+                        "profile": { "id": "acc-auto-sync", "email": "sync@example.com" },
+                        "folders": [],
+                        "collections": [],
+                        "ciphers": list,
+                    });
+                    ("200 OK", payload.to_string())
+                } else if first_line.starts_with("POST /api/ciphers") {
+                    let count = create_c.fetch_add(1, Ordering::SeqCst) + 1;
+                    let body_str = header_end
+                        .and_then(|h| std::str::from_utf8(&raw[h..]).ok())
+                        .unwrap_or("{}");
+                    let mut val: serde_json::Value = serde_json::from_str(body_str).unwrap();
+                    val["id"] = serde_json::json!(format!("srv-{count}"));
+                    val["revisionDate"] = serde_json::json!("2026-11-27T00:02:00Z");
+                    let dto: CipherDto = serde_json::from_value(val).unwrap();
+                    ciphers_c.lock().unwrap().push(dto.clone());
+                    *rev_c.lock().unwrap() = "3000".to_string();
+                    ("200 OK", serde_json::to_string(&dto).unwrap())
+                } else {
+                    ("404 Not Found", "{}".to_string())
+                };
+
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+
+    let storage = Storage::open_in_memory().unwrap();
+    let mut acc = make_test_account("acc-auto-sync", "sync@example.com", &base_url, &kdf, protected);
+    acc.access_token = Some("tok-sync-ok".to_string());
+    storage.upsert_account(&acc).unwrap();
+
+    let core = AppCore::with_storage(
+        storage.clone(),
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    core.session_unlock_password("SyncPass#2026").await.unwrap();
+
+    // 1. First sync records revision "1000"
+    let st1 = core.sync_now().await.unwrap();
+    assert_eq!(st1.pending_count, 0);
+    assert_eq!(sync_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(core.item_list(ItemFilter::default()).unwrap().len(), 1);
+
+    // 2. When server revision is unchanged ("1000"), check_and_sync_if_changed returns Ok(false) without calling /api/sync
+    assert!(!core.check_and_sync_if_changed(false).await.unwrap());
+    assert_eq!(sync_calls.load(Ordering::SeqCst), 1);
+
+    // 3. When server revision changes ("2000"), check_and_sync_if_changed triggers sync and pulls "Added Remotely"
+    remote_ciphers.lock().unwrap().push(bumped_cipher);
+    *rev_value.lock().unwrap() = "2000".to_string();
+    assert!(core.check_and_sync_if_changed(false).await.unwrap());
+    assert_eq!(sync_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(core.item_list(ItemFilter::default()).unwrap().len(), 2);
+
+    // 4. Manual mode queues local edits without pushing, and auto mode + check_and_sync_if_changed flushes them
+    core.app_settings_update(AppSettingsPatch {
+        sync_mode: Some("manual".to_string()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(!core.is_auto_sync_enabled());
+
+    let manual_item = core
+        .item_create(ItemDraft {
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: "Queued Offline".to_string(),
+            category: ItemCategory::Login,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(create_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(core.sync_get_status().pending_count, 1);
+
+    // Permanently deleting an offline-only created item clears its pending create cleanly
+    let discard_item = core
+        .item_create(ItemDraft {
+            vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+            title: "Discarded Offline".to_string(),
+            category: ItemCategory::Login,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(core.sync_get_status().pending_count, 2);
+    core.item_delete_permanent(&discard_item.id).await.unwrap();
+    assert_eq!(core.sync_get_status().pending_count, 1);
+
+    // Re-enable auto mode and flush via check_and_sync_if_changed
+    core.app_settings_update(AppSettingsPatch {
+        sync_mode: Some("auto".to_string()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(core.is_auto_sync_enabled());
+    assert!(core.check_and_sync_if_changed(false).await.unwrap());
+    assert_eq!(create_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(core.sync_get_status().pending_count, 0);
+    assert!(core
+        .item_list(ItemFilter::default())
+        .unwrap()
+        .iter()
+        .any(|i| i.title == "Queued Offline" && i.id != manual_item.id));
+
+    server_task.abort();
+}
