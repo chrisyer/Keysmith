@@ -250,22 +250,22 @@ jobs:
         with:
           generate_release_notes: true
           body: |
-            ### Windows 安装说明
-            - 直接下载 `Keysmith_<version>_x64-setup.exe`（NSIS）或 `Keysmith_<version>_x64_en-US.msi` 安装即可。
-            - 桌面应用启动后会自动将浏览器扩展释放到 `%APPDATA%\dev.keysmith.desktop\browser-extension`，并为 Chrome / Edge / Brave / Chromium / Vivaldi 自动写入 `NativeMessagingHosts` 注册表配置。
+            ### Windows Installation
+            - Download and run `Keysmith_<version>_x64-setup.exe` (NSIS) or `Keysmith_<version>_x64_en-US.msi`.
+            - On first launch, the desktop app automatically extracts the browser extension to `%APPDATA%\dev.keysmith.desktop\browser-extension` and registers `NativeMessagingHosts` in the Windows Registry for Chrome / Edge / Brave / Chromium / Vivaldi.
 
-            ### macOS 推荐安装方式（无 Gatekeeper 拦截弹窗）
+            ### macOS Installation (Gatekeeper-friendly)
 
-            1. **一键脚本安装（自动校验 SHA-256 并安装到 `/Applications`）：**
+            1. **One-line install script (verifies SHA-256 and installs to `/Applications`):**
                ```bash
                curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/main/install.sh | sh
                ```
-            2. **Homebrew Cask 安装（支持 `brew upgrade` 自动升级）：**
+            2. **Homebrew Cask (supports `brew upgrade`):**
                ```bash
                brew tap chrisyer/keysmith https://github.com/chrisyer/Keysmith.git
                brew install --cask keysmith
                ```
-            3. **手动下载 `.dmg` 安装：** 拖入 `/Applications` 后首次打开如被 Gatekeeper 提示，可在 **系统设置 → 隐私与安全性 →「仍要打开」** 放行，或运行一次 `xattr -cr /Applications/Keysmith.app`。
+            3. **Manual `.dmg` install:** Drag `Keysmith.app` into `/Applications`. If macOS Gatekeeper prompts on first launch, allow it under **System Settings → Privacy & Security → Open Anyway**, or run `xattr -cr /Applications/Keysmith.app`.
           files: release-assets/*
 
       - name: Checkout main to update Homebrew Cask

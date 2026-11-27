@@ -1862,7 +1862,7 @@ export function SettingsModal() {
                   <div className="min-w-0">
                     <div className="font-semibold text-[var(--text-primary)]">{dict.settings.appVersion}</div>
                     <div className="text-xs text-[var(--text-secondary)] mt-0.5 flex flex-wrap items-center gap-2">
-                      <span>{updateInfo ? `v${updateInfo.currentVersion}` : 'v0.1.3'}</span>
+                      <span>{updateInfo ? `v${updateInfo.currentVersion}` : 'v0.1.4'}</span>
                       {updateInfo?.updateAvailable && updateInfo.latestVersion && (
                         <span className="px-2 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-primary)] font-medium">
                           {fmt(dict.settings.newVersionAvailable, { version: updateInfo.latestVersion })}

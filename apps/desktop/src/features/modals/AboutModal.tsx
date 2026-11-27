@@ -45,7 +45,7 @@ export function AboutContent({ autoCheckUpdate = false }: AboutContentProps) {
     }
   }, [autoCheckUpdate, handleCheckUpdate]);
 
-  const versionText = updateInfo ? `v${updateInfo.currentVersion}` : 'v0.1.3';
+  const versionText = updateInfo ? `v${updateInfo.currentVersion}` : 'v0.1.4';
 
   return (
     <div className="flex flex-col gap-4 text-[13px]">
