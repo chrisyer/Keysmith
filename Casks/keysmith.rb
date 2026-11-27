@@ -1,9 +1,9 @@
 cask "keysmith" do
   arch arm: "aarch64", intel: "x64"
 
-  version "0.1.3"
-  sha256 arm:   "c2ee33bb756f2f8034d281b0b3eba536661ad0abcc3669676be3497676fa4f53",
-         intel: "66aea5a84d7114afe917708d20b6041e2b7615c98df39dce7bc2e735eae29791"
+  version "0.1.4"
+  sha256 arm:   "f50c9f6c5a2957dab50b448b6249e33ecba4d1425a52b7c447a66efd0b6d5ceb",
+         intel: "1720b4962d971720cee4d5693da8135e3c380d6efa57123439cd729d383c628a"
 
   url "https://github.com/chrisyer/Keysmith/releases/download/v#{version}/Keysmith_#{version}_#{arch}.dmg"
   name "Keysmith"
