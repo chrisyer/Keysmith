@@ -1668,7 +1668,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                     found && found.collections.length > 0 ? [found.collections[0].id] : [],
                   );
                 }}
-                className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-strong)] text-xs text-[var(--text-primary)]"
+                className="ks-select w-full text-xs text-[var(--text-primary)]"
               >
                 {orgs.map((o) => (
                   <option key={o.id} value={o.id}>

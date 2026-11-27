@@ -2,28 +2,44 @@ import {
   Archive,
   ArrowDown,
   ArrowUp,
+  Calendar,
   Check,
+  ChevronDown,
   ClipboardPaste,
+  Clock,
   Fingerprint,
+  Globe,
   GripVertical,
   KeyRound,
   Link2,
   Lock,
+  Mail,
   Palette,
+  Phone,
   Plus,
   QrCode,
+  ScanLine,
+  ShieldAlert,
   Trash2,
+  Type,
+  User,
   X,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { GeneratorPopover } from '../../components/GeneratorPopover';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
-import { useI18n } from '../../i18n';
+import { useI18n, type Dictionary } from '../../i18n';
 import { tauriClient } from '../../services/tauriClient';
 import { TEMPLATE_MAP } from '../../services/templates';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
-import type { FieldType, ItemDraft, ItemField, UrlMatchRule } from '../../types/domain';
+import type {
+  FieldPurpose,
+  FieldType,
+  ItemDraft,
+  ItemField,
+  UrlMatchRule,
+} from '../../types/domain';
 import { makeId } from '../../utils/format';
 
 const ICON_COLOR_PRESETS = [
@@ -54,6 +70,102 @@ const FIELD_TYPE_ORDER: FieldType[] = [
 
 const URL_RULE_ORDER: UrlMatchRule[] = ['domain', 'host', 'starts_with', 'exact', 'never'];
 
+interface CommonFieldPreset {
+  id: string;
+  label: string;
+  fieldType: FieldType;
+  sensitive: boolean;
+  purpose?: FieldPurpose;
+  icon: React.ReactNode;
+}
+
+function defaultLabelForFieldType(ft: FieldType, dict: Dictionary): string {
+  if (ft === 'totp') return dict.editor.presetTotp;
+  if (ft === 'password') return dict.templates.fields.password;
+  if (ft === 'url') return dict.templates.urls.website;
+  return dict.editor.fieldTypes[ft as keyof typeof dict.editor.fieldTypes] ?? ft;
+}
+
+function getCommonFieldPresets(dict: Dictionary): CommonFieldPreset[] {
+  return [
+    {
+      id: 'totp',
+      label: dict.editor.presetTotp,
+      fieldType: 'totp',
+      sensitive: true,
+      purpose: 'totp',
+      icon: <Clock size={13} className="text-[var(--accent-primary)] shrink-0" />,
+    },
+    {
+      id: 'password',
+      label: dict.templates.fields.password,
+      fieldType: 'password',
+      sensitive: true,
+      purpose: 'password',
+      icon: <KeyRound size={13} className="text-[var(--text-secondary)] shrink-0" />,
+    },
+    {
+      id: 'username',
+      label: dict.templates.fields.username,
+      fieldType: 'text',
+      sensitive: false,
+      purpose: 'username',
+      icon: <User size={13} className="text-[var(--text-secondary)] shrink-0" />,
+    },
+    {
+      id: 'email',
+      label: dict.templates.fields.email,
+      fieldType: 'email',
+      sensitive: false,
+      icon: <Mail size={13} className="text-[var(--text-secondary)] shrink-0" />,
+    },
+    {
+      id: 'phone',
+      label: dict.templates.fields.phone,
+      fieldType: 'phone',
+      sensitive: false,
+      icon: <Phone size={13} className="text-[var(--text-secondary)] shrink-0" />,
+    },
+    {
+      id: 'recovery_codes',
+      label: dict.editor.presetRecoveryCodes,
+      fieldType: 'multiline',
+      sensitive: true,
+      purpose: 'recovery_codes',
+      icon: <ShieldAlert size={13} className="text-[var(--status-warning)] shrink-0" />,
+    },
+    {
+      id: 'pin',
+      label: dict.editor.presetPin,
+      fieldType: 'password',
+      sensitive: true,
+      purpose: 'pin',
+      icon: <Lock size={13} className="text-[var(--text-secondary)] shrink-0" />,
+    },
+    {
+      id: 'url',
+      label: dict.templates.urls.website,
+      fieldType: 'url',
+      sensitive: false,
+      icon: <Globe size={13} className="text-[var(--text-secondary)] shrink-0" />,
+    },
+    {
+      id: 'date',
+      label: dict.editor.fieldTypes.date,
+      fieldType: 'date',
+      sensitive: false,
+      icon: <Calendar size={13} className="text-[var(--text-secondary)] shrink-0" />,
+    },
+    {
+      id: 'custom_text',
+      label: dict.editor.customFieldOption,
+      fieldType: 'text',
+      sensitive: false,
+      icon: <Type size={13} className="text-[var(--text-secondary)] shrink-0" />,
+    },
+  ];
+}
+
 interface ItemEditorPaneProps {
   initialDraft: ItemDraft;
   isNew: boolean;
@@ -64,7 +176,9 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
   const iconPopUid = useId().replace(/:/g, '');
   const iconPopoverId = `icon-pop-${iconPopUid}`;
   const iconAnchorName = `--icon-btn-${iconPopUid}`;
+  const addFieldBaseId = useId().replace(/:/g, '');
   const iconPopoverRef = useRef<HTMLDivElement>(null);
+  const commonPresets = getCommonFieldPresets(dict);
 
   const [draft, setDraft] = useState<ItemDraft>(() => structuredClone(initialDraft));
   const [tagInput, setTagInput] = useState('');
@@ -150,7 +264,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
     }));
   };
 
-  const addFieldToSection = (sectionId: string) => {
+  const addFieldToSection = (sectionId: string, preset?: CommonFieldPreset) => {
     setDraft((prev) => ({
       ...prev,
       sections: prev.sections.map((sec) =>
@@ -162,11 +276,16 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                 ...sec.fields,
                 {
                   id: makeId('f'),
-                  label: dict.editor.customFieldDefault,
-                  fieldType: 'text',
+                  label: preset
+                    ? preset.id === 'custom_text'
+                      ? dict.editor.customFieldDefault
+                      : preset.label
+                    : dict.editor.customFieldDefault,
+                  fieldType: preset?.fieldType ?? 'text',
                   value: '',
-                  sensitive: false,
+                  sensitive: preset?.sensitive ?? false,
                   copyable: true,
+                  purpose: preset?.purpose,
                 },
               ],
             },
@@ -256,6 +375,28 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
       });
     } finally {
       setSshGenerating(false);
+    }
+  };
+
+  const handleTotpFromScreen = async (sectionId: string, fieldId: string) => {
+    setQrBusyFieldId(fieldId);
+    try {
+      const otpUri = await tauriClient.totpScanScreenQr();
+      if (!otpUri) return;
+      updateField(sectionId, fieldId, { value: otpUri, sensitive: true, purpose: 'totp' });
+      showToast({
+        label: dict.editor.totpQrLabel,
+        text: dict.editor.totpQrScreenToast,
+        kind: 'info',
+      });
+    } catch (err) {
+      showToast({
+        label: dict.editor.qrParseFailedLabel,
+        text: err instanceof Error ? err.message : dict.editor.qrParseFailedText,
+        kind: 'warning',
+      });
+    } finally {
+      setQrBusyFieldId(null);
     }
   };
 
@@ -559,13 +700,28 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                               nextType === 'password' ||
                               nextType === 'totp' ||
                               nextType === 'ssh_private_key';
+                            const curLabel = field.label.trim();
+                            const shouldAutoLabel =
+                              !curLabel ||
+                              curLabel === dict.editor.customFieldDefault ||
+                              curLabel === dict.editor.customSectionFieldDefault ||
+                              curLabel === defaultLabelForFieldType(field.fieldType, dict);
                             updateField(section.id, field.id, {
                               fieldType: nextType,
+                              label: shouldAutoLabel
+                                ? defaultLabelForFieldType(nextType, dict)
+                                : field.label,
                               sensitive: autoSensitive ? true : field.sensitive,
+                              purpose:
+                                nextType === 'totp'
+                                  ? 'totp'
+                                  : field.purpose === 'totp'
+                                    ? undefined
+                                    : field.purpose,
                             });
                           }}
                           aria-label={dict.editor.fieldTypeAria}
-                          className="ks-select-sm min-w-[96px] text-[var(--text-secondary)] shrink-0 whitespace-nowrap"
+                          className="ks-select-sm min-w-[116px] max-w-[168px] text-[var(--text-secondary)] shrink-0 whitespace-nowrap"
                         >
                           {FIELD_TYPE_ORDER.map((ft) => (
                             <option key={ft} value={ft}>
@@ -663,11 +819,20 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                         <button
                           type="button"
                           disabled={qrBusyFieldId === field.id}
+                          onClick={() => void handleTotpFromScreen(section.id, field.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[var(--accent-primary)]/10 hover:bg-[var(--accent-primary)]/18 border border-[var(--accent-primary)]/30 text-[11px] font-medium text-[var(--accent-primary)] cursor-pointer disabled:opacity-60"
+                        >
+                          <ScanLine size={11} />
+                          {qrBusyFieldId === field.id ? dict.editor.qrRecognizing : dict.editor.scanQrScreen}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={qrBusyFieldId === field.id}
                           onClick={() => void handleTotpFromClipboard(section.id, field.id)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--bg-card)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--bg-card)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer disabled:opacity-60"
                         >
                           <ClipboardPaste size={11} />
-                          {qrBusyFieldId === field.id ? dict.editor.qrRecognizing : dict.editor.importQrClipboard}
+                          {dict.editor.importQrClipboard}
                         </button>
                         <label className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--bg-card)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer">
                           <QrCode size={11} />
@@ -686,31 +851,89 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
               })}
             </div>
 
-            <div className="flex items-center flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => addFieldToSection(section.id)}
-                className="self-start inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-primary)] hover:underline cursor-pointer"
-              >
-                <Plus size={13} />
-                {dict.editor.addField}
-              </button>
+            {(() => {
+              const safeSecId = section.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+              const addFieldPopId = `add-field-pop-${addFieldBaseId}-${safeSecId}`;
+              const addFieldAnchorName = `--add-field-btn-${addFieldBaseId}-${safeSecId}`;
+              const quickChips = commonPresets.filter(
+                (p) => p.id === 'totp' || p.id === 'password' || p.id === 'recovery_codes',
+              );
 
-              {(draft.category === 'ssh_key' ||
-                section.fields.some(
-                  (f) => f.fieldType === 'ssh_private_key' || f.fieldType === 'ssh_public_key',
-                )) && (
-                <button
-                  type="button"
-                  disabled={sshGenerating}
-                  onClick={() => void handleGenerateSshKeypair(section.id)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-detail)] hover:bg-[var(--bg-selected)] border border-[var(--border-strong)] text-xs font-medium text-[var(--accent-primary)] cursor-pointer"
-                >
-                  <KeyRound size={12} />
-                  {sshGenerating ? dict.editor.generatingEd25519 : dict.editor.generateEd25519}
-                </button>
-              )}
-            </div>
+              return (
+                <div className="flex items-center flex-wrap gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    popoverTarget={addFieldPopId}
+                    style={{ anchorName: addFieldAnchorName } as React.CSSProperties}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-detail)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--accent-primary)] cursor-pointer"
+                  >
+                    <Plus size={13} />
+                    <span>{dict.editor.addField}</span>
+                    <ChevronDown size={12} className="opacity-70" />
+                  </button>
+
+                  <div
+                    id={addFieldPopId}
+                    popover="auto"
+                    style={{ positionAnchor: addFieldAnchorName } as React.CSSProperties}
+                    className="ks-popover ks-anchored-popover w-[240px]"
+                  >
+                    <div className="p-1.5 flex flex-col gap-0.5 text-xs">
+                      <div className="px-2.5 py-1 text-[10.5px] font-semibold text-[var(--text-muted)]">
+                        {dict.editor.commonFieldsTitle}
+                      </div>
+                      {commonPresets.map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => {
+                            addFieldToSection(section.id, preset);
+                            (document.getElementById(addFieldPopId) as HTMLElement | null)?.hidePopover?.();
+                          }}
+                          className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-left text-[var(--text-primary)] cursor-pointer"
+                        >
+                          <span className="inline-flex items-center gap-2 min-w-0">
+                            {preset.icon}
+                            <span className="truncate font-medium">{preset.label}</span>
+                          </span>
+                          <span className="text-[10.5px] text-[var(--text-muted)] shrink-0">
+                            {dict.editor.fieldTypes[preset.fieldType as keyof typeof dict.editor.fieldTypes] ??
+                              preset.fieldType}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {quickChips.map((chip) => (
+                    <button
+                      key={chip.id}
+                      type="button"
+                      onClick={() => addFieldToSection(section.id, chip)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--bg-detail)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
+                    >
+                      <Plus size={11} />
+                      <span>{chip.label}</span>
+                    </button>
+                  ))}
+
+                  {(draft.category === 'ssh_key' ||
+                    section.fields.some(
+                      (f) => f.fieldType === 'ssh_private_key' || f.fieldType === 'ssh_public_key',
+                    )) && (
+                    <button
+                      type="button"
+                      disabled={sshGenerating}
+                      onClick={() => void handleGenerateSshKeypair(section.id)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-detail)] hover:bg-[var(--bg-selected)] border border-[var(--border-strong)] text-xs font-medium text-[var(--accent-primary)] cursor-pointer"
+                    >
+                      <KeyRound size={12} />
+                      {sshGenerating ? dict.editor.generatingEd25519 : dict.editor.generateEd25519}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         ))}
 

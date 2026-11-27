@@ -1161,6 +1161,7 @@ pub fn run() {
             commands::sync_now,
             commands::totp_compute,
             commands::totp_parse_qr_image,
+            commands::totp_scan_screen_qr,
             commands::generator_generate,
             commands::generator_generate_masked_email,
             commands::generator_history_list,

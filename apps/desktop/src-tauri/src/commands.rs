@@ -1112,6 +1112,11 @@ pub async fn totp_parse_qr_image(
 }
 
 #[tauri::command]
+pub async fn totp_scan_screen_qr() -> Result<Option<String>, CoreError> {
+    run_blocking(crate::macos::scan_screen_totp_qr).await?
+}
+
+#[tauri::command]
 pub async fn generator_generate(
     state: State<'_, AppState>,
     options: GeneratorOptions,

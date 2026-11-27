@@ -218,6 +218,7 @@ export interface KeysmithClient {
 
   totpCompute(secretOrUri: string): Promise<TotpCode>;
   totpParseQrImage(imageBase64: string): Promise<string>;
+  totpScanScreenQr(): Promise<string | null>;
   generatorGenerate(options: GeneratorOptions): Promise<GeneratorResult>;
   generatorGenerateMaskedEmail(domainHint?: string): Promise<string>;
   generatorHistoryList(): Promise<GeneratorHistoryEntry[]>;
@@ -624,6 +625,10 @@ class KeysmithTauriClient implements KeysmithClient {
 
   totpParseQrImage(imageBase64: string): Promise<string> {
     return invokeCore<string>('totp_parse_qr_image', { imageBase64 });
+  }
+
+  totpScanScreenQr(): Promise<string | null> {
+    return invokeCore<string | null>('totp_scan_screen_qr');
   }
 
   generatorGenerate(options: GeneratorOptions): Promise<GeneratorResult> {
@@ -1898,6 +1903,10 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async totpParseQrImage(_imageBase64: string): Promise<string> {
     throw new Error('Offline QR code recognition is not supported in browser preview mode. Please use the desktop app.');
+  }
+
+  async totpScanScreenQr(): Promise<string | null> {
+    throw new Error('Screen QR code scanning is not supported in browser preview mode. Please use the desktop app.');
   }
 
   async generatorGenerate(options: GeneratorOptions): Promise<GeneratorResult> {

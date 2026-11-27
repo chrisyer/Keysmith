@@ -472,3 +472,119 @@ pub fn keychain_delete(account_id: &str) -> Result<(), CoreError> {
     }
     Ok(())
 }
+
+pub fn scan_screen_totp_qr() -> Result<Option<String>, CoreError> {
+    use std::io::Cursor;
+    use windows_sys::Win32::Graphics::Gdi::{
+        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
+        GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        RGBQUAD, SRCCOPY,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+        SM_YVIRTUALSCREEN,
+    };
+
+    let vx = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+    let vy = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+    let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+    let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+    if width <= 0 || height <= 0 {
+        return Err(CoreError::Internal(
+            "Unable to query Windows virtual screen dimensions".to_string(),
+        ));
+    }
+
+    let screen_dc = unsafe { GetDC(null_mut()) };
+    if screen_dc.is_null() {
+        return Err(CoreError::Internal(
+            "Win32 GetDC(NULL) failed".to_string(),
+        ));
+    }
+    let mem_dc = unsafe { CreateCompatibleDC(screen_dc) };
+    if mem_dc.is_null() {
+        unsafe { ReleaseDC(null_mut(), screen_dc) };
+        return Err(CoreError::Internal(
+            "Win32 CreateCompatibleDC failed".to_string(),
+        ));
+    }
+    let bmp = unsafe { CreateCompatibleBitmap(screen_dc, width, height) };
+    if bmp.is_null() {
+        unsafe {
+            DeleteDC(mem_dc);
+            ReleaseDC(null_mut(), screen_dc);
+        }
+        return Err(CoreError::Internal(
+            "Win32 CreateCompatibleBitmap failed".to_string(),
+        ));
+    }
+
+    let old_obj = unsafe { SelectObject(mem_dc, bmp) };
+    let blt_ok = unsafe { BitBlt(mem_dc, 0, 0, width, height, screen_dc, vx, vy, SRCCOPY) };
+
+    let mut rgba_buf = vec![0u8; (width as usize) * (height as usize) * 4];
+    let mut bmi = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            biSizeImage: 0,
+            biXPelsPerMeter: 0,
+            biYPelsPerMeter: 0,
+            biClrUsed: 0,
+            biClrImportant: 0,
+        },
+        bmiColors: [RGBQUAD {
+            rgbBlue: 0,
+            rgbGreen: 0,
+            rgbRed: 0,
+            rgbReserved: 0,
+        }],
+    };
+    let dib_rows = if blt_ok != 0 {
+        unsafe {
+            GetDIBits(
+                mem_dc,
+                bmp,
+                0,
+                height as u32,
+                rgba_buf.as_mut_ptr() as *mut c_void,
+                &mut bmi,
+                DIB_RGB_COLORS,
+            )
+        }
+    } else {
+        0
+    };
+
+    unsafe {
+        SelectObject(mem_dc, old_obj);
+        DeleteObject(bmp);
+        DeleteDC(mem_dc);
+        ReleaseDC(null_mut(), screen_dc);
+    }
+
+    if blt_ok == 0 || dib_rows == 0 {
+        return Err(CoreError::Internal(format!(
+            "Failed to capture screen image ({})",
+            unsafe { GetLastError() }
+        )));
+    }
+
+    for px in rgba_buf.chunks_exact_mut(4) {
+        px.swap(0, 2);
+        px[3] = 255;
+    }
+
+    let img = image::RgbaImage::from_raw(width as u32, height as u32, rgba_buf)
+        .ok_or_else(|| CoreError::Internal("Failed to construct screen RGBA image".to_string()))?;
+    let mut png_bytes = Vec::new();
+    img.write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .map_err(|e| CoreError::Internal(format!("Failed to encode screen capture: {e}")))?;
+
+    let uri = keysmith_core::totp::parse_totp_qr_bytes(&png_bytes)?;
+    Ok(Some(uri))
+}

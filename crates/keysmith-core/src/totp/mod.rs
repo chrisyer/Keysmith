@@ -167,6 +167,86 @@ pub fn compute_totp_at(secret_or_uri: &str, epoch_secs: u64) -> TotpCode {
     }
 }
 
+fn is_strict_base32_secret(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let valid_chars = trimmed
+        .bytes()
+        .all(|b| matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'2'..=b'7' | b'=' | b' ' | b'-'));
+    if !valid_chars {
+        return false;
+    }
+    decode_base32(trimmed).len() >= 10
+}
+
+fn detect_totp_in_gray(img: &image::GrayImage) -> Option<String> {
+    let mut prepared = rqrr::PreparedImage::prepare(img.clone());
+    let grids = prepared.detect_grids();
+
+    let mut decoded_values = Vec::new();
+    for grid in grids {
+        if let Ok((_meta, content)) = grid.decode() {
+            let trimmed = content.trim().to_string();
+            if !trimmed.is_empty() {
+                decoded_values.push(trimmed);
+            }
+        }
+    }
+
+    if let Some(uri) = decoded_values
+        .iter()
+        .find(|v| v.to_ascii_lowercase().starts_with("otpauth://"))
+    {
+        return Some(uri.clone());
+    }
+
+    decoded_values
+        .into_iter()
+        .find(|v| is_strict_base32_secret(v))
+}
+
+/// Decode a QR code image from raw bytes (PNG/JPEG/WebP) and extract an `otpauth://` URI
+/// or strict Base32 TOTP secret. Tries full-res, half-res (for high-DPI screens), and
+/// color-inverted luma (for dark-mode QR codes).
+pub fn parse_totp_qr_bytes(bytes: &[u8]) -> Result<String, CoreError> {
+    let gray = image::load_from_memory(bytes)
+        .map_err(|e| CoreError::Validation(format!("无法识别的图片格式: {e}")))?
+        .to_luma8();
+
+    if let Some(found) = detect_totp_in_gray(&gray) {
+        return Ok(found);
+    }
+
+    let working_gray = if gray.width() > 1400 || gray.height() > 1000 {
+        let half = image::imageops::resize(
+            &gray,
+            (gray.width() / 2).max(1),
+            (gray.height() / 2).max(1),
+            image::imageops::FilterType::Triangle,
+        );
+        if let Some(found) = detect_totp_in_gray(&half) {
+            return Ok(found);
+        }
+        half
+    } else {
+        gray
+    };
+
+    let mut inverted = working_gray.clone();
+    for px in inverted.pixels_mut() {
+        px.0[0] = 255_u8.saturating_sub(px.0[0]);
+    }
+    if let Some(found) = detect_totp_in_gray(&inverted) {
+        return Ok(found);
+    }
+
+    Err(CoreError::Validation(
+        "未在图片中检测到有效的 TOTP 二维码".to_string(),
+    ))
+}
+
 /// Decode a QR code image (base64-encoded PNG/JPEG/WebP, optional `data:image/...;base64,` prefix)
 /// and extract an `otpauth://` URI or Base32 TOTP secret.
 pub fn parse_totp_qr_image(image_base64: &str) -> Result<String, CoreError> {
@@ -180,25 +260,5 @@ pub fn parse_totp_qr_image(image_base64: &str) -> Result<String, CoreError> {
         .decode(raw_b64)
         .map_err(|e| CoreError::Validation(format!("二维码图片 Base64 解码失败: {e}")))?;
 
-    let img = image::load_from_memory(&bytes)
-        .map_err(|e| CoreError::Validation(format!("无法识别的图片格式: {e}")))?
-        .to_luma8();
-
-    let mut prepared = rqrr::PreparedImage::prepare(img);
-    let grids = prepared.detect_grids();
-
-    for grid in grids {
-        if let Ok((_meta, content)) = grid.decode() {
-            let trimmed = content.trim().to_string();
-            if trimmed.to_ascii_lowercase().starts_with("otpauth://")
-                || !decode_base32(&trimmed).is_empty()
-            {
-                return Ok(trimmed);
-            }
-        }
-    }
-
-    Err(CoreError::Validation(
-        "未在图片中检测到有效的 TOTP 二维码".to_string(),
-    ))
+    parse_totp_qr_bytes(&bytes)
 }

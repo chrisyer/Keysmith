@@ -257,6 +257,10 @@ pub fn system_preferred_language() -> Option<String> {
     macos_impl::system_preferred_language()
 }
 
+pub fn scan_screen_totp_qr() -> Result<Option<String>, CoreError> {
+    macos_impl::scan_screen_totp_qr()
+}
+
 #[cfg(target_os = "macos")]
 mod macos_impl {
     use std::ffi::c_void;
@@ -782,6 +786,99 @@ mod macos_impl {
         }
         Ok(())
     }
+
+    pub fn scan_screen_totp_qr() -> Result<Option<String>, CoreError> {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGPreflightScreenCaptureAccess() -> bool;
+            fn CGRequestScreenCaptureAccess() -> bool;
+        }
+
+        struct TempFileGuard(std::path::PathBuf);
+        impl Drop for TempFileGuard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+
+        fn make_temp_capture_path(tag: &str) -> std::path::PathBuf {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            std::env::temp_dir().join(format!(
+                "keysmith-qr-{}-{}-{tag}.png",
+                std::process::id(),
+                nanos
+            ))
+        }
+
+        let has_perm = unsafe { CGPreflightScreenCaptureAccess() };
+        if has_perm {
+            for display in 1..=4 {
+                let path = make_temp_capture_path(&format!("d{display}"));
+                let guard = TempFileGuard(path.clone());
+                let out = std::process::Command::new("/usr/sbin/screencapture")
+                    .args(["-x", "-t", "png", "-D", &display.to_string()])
+                    .arg(&path)
+                    .output();
+                let Ok(output) = out else {
+                    break;
+                };
+                if !output.status.success() || !path.exists() {
+                    break;
+                }
+                let Ok(bytes) = std::fs::read(&path) else {
+                    continue;
+                };
+                drop(guard);
+                if bytes.is_empty() {
+                    continue;
+                }
+                if let Ok(uri) = keysmith_core::totp::parse_totp_qr_bytes(&bytes) {
+                    return Ok(Some(uri));
+                }
+            }
+        } else {
+            unsafe {
+                let _ = CGRequestScreenCaptureAccess();
+            }
+        }
+
+        // Interactive crosshair capture fallback (supports Esc to cancel cleanly).
+        let path = make_temp_capture_path("sel");
+        let guard = TempFileGuard(path.clone());
+        let status = std::process::Command::new("/usr/sbin/screencapture")
+            .args(["-i", "-s", "-x", "-t", "png"])
+            .arg(&path)
+            .status()
+            .map_err(|e| CoreError::Internal(format!("无法启动屏幕截图工具: {e}")))?;
+
+        if !status.success() || !path.exists() {
+            return Ok(None);
+        }
+
+        let bytes = std::fs::read(&path)
+            .map_err(|e| CoreError::Internal(format!("读取屏幕截图失败: {e}")))?;
+        drop(guard);
+        if bytes.is_empty() {
+            return Ok(None);
+        }
+
+        match keysmith_core::totp::parse_totp_qr_bytes(&bytes) {
+            Ok(uri) => Ok(Some(uri)),
+            Err(err) => {
+                if !unsafe { CGPreflightScreenCaptureAccess() } {
+                    Err(CoreError::Validation(
+                        "未检测到有效的 TOTP 二维码。请确认已在 macOS「系统设置 → 隐私与安全性 → 录屏与系统录音」中允许 Keysmith，或改用剪贴板导入。"
+                            .to_string(),
+                    ))
+                } else {
+                    Err(err)
+                }
+            }
+        }
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -995,6 +1092,19 @@ mod macos_impl {
             let _ = steps;
             Err(CoreError::Validation(
                 "Auto-type is not supported on this platform".to_string(),
+            ))
+        }
+    }
+
+    pub fn scan_screen_totp_qr() -> Result<Option<String>, CoreError> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::windows_native::scan_screen_totp_qr();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Err(CoreError::Validation(
+                "Screen QR scanning is not supported on this platform".to_string(),
             ))
         }
     }

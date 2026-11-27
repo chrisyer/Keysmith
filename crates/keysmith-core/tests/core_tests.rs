@@ -1066,6 +1066,25 @@ async fn ssh_keygen_sign_qr_decode_and_import_export() {
         .unwrap();
     assert_eq!(decoded_uri, otp_uri);
 
+    // 2b. Multi-QR large canvas prefers otpauth:// over arbitrary URLs and supports downscaling
+    let noise_qr = QrCode::new(b"https://example.com/not-a-totp-secret").unwrap();
+    let noise_img = noise_qr
+        .render::<Luma<u8>>()
+        .quiet_zone(true)
+        .min_dimensions(240, 240)
+        .build();
+    let mut canvas = image::GrayImage::from_pixel(2400, 1400, Luma([255u8]));
+    image::imageops::overlay(&mut canvas, &noise_img, 120, 120);
+    image::imageops::overlay(&mut canvas, &qr_img, 1600, 820);
+    let mut canvas_png = Vec::new();
+    canvas
+        .write_to(&mut Cursor::new(&mut canvas_png), ImageFormat::Png)
+        .unwrap();
+    assert_eq!(
+        keysmith_core::totp::parse_totp_qr_bytes(&canvas_png).unwrap(),
+        otp_uri
+    );
+
     // 3. .1pux zip import
     let export_data = r#"{
         "accounts": [{

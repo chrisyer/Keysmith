@@ -44,6 +44,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 windows = { version = "0.58", features = ["Foundation", "Security_Credentials_UI"] }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_Security_Cryptography",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
