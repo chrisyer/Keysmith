@@ -1426,7 +1426,7 @@ impl AppCore {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let name_enc_clone = name_enc.clone();
-            if let Ok(remote) = self
+            if let Err(e) = self
                 .with_fresh_token(&mut account, move |tok| {
                     let client = client.clone();
                     let server_url = server_url.clone();
@@ -1434,13 +1434,16 @@ impl AppCore {
                     async move { client.create_folder(&server_url, &tok, &name_enc).await }
                 })
                 .await
+                .map(|remote| {
+                    id = remote.id;
+                    if let Some(rev) = remote.revision_date {
+                        revision_date = rev;
+                    }
+                    dirty_op = None;
+                    synced_remotely = true;
+                })
             {
-                id = remote.id;
-                if let Some(rev) = remote.revision_date {
-                    revision_date = rev;
-                }
-                dirty_op = None;
-                synced_remotely = true;
+                eprintln!("[keysmith sync] immediate vault_create push failed: {e}");
             }
         }
 
@@ -1524,7 +1527,7 @@ impl AppCore {
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
             let name_enc_clone = name_enc.clone();
-            if let Ok(remote) = self
+            if let Err(e) = self
                 .with_fresh_token(&mut account, move |tok| {
                     let client = client.clone();
                     let server_url = server_url.clone();
@@ -1533,12 +1536,15 @@ impl AppCore {
                     async move { client.update_folder(&server_url, &tok, &id, &name_enc).await }
                 })
                 .await
+                .map(|remote| {
+                    if let Some(rev) = remote.revision_date {
+                        revision_date = rev;
+                    }
+                    dirty_op = None;
+                    synced_remotely = true;
+                })
             {
-                if let Some(rev) = remote.revision_date {
-                    revision_date = rev;
-                }
-                dirty_op = None;
-                synced_remotely = true;
+                eprintln!("[keysmith sync] immediate vault_rename push failed: {e}");
             }
         }
 
@@ -1618,7 +1624,7 @@ impl AppCore {
                     let server_url = account.server_url.clone();
                     let id_owned = id.to_string();
                     let name_enc_clone = name_enc.clone();
-                    if let Ok(remote) = self
+                    if let Err(e) = self
                         .with_fresh_token(&mut account, move |tok| {
                             let client = client.clone();
                             let server_url = server_url.clone();
@@ -1629,12 +1635,15 @@ impl AppCore {
                             }
                         })
                         .await
+                        .map(|remote| {
+                            if let Some(rev) = remote.revision_date {
+                                revision_date = rev;
+                            }
+                            dirty_op = None;
+                            synced_remotely = true;
+                        })
                     {
-                        if let Some(rev) = remote.revision_date {
-                            revision_date = rev;
-                        }
-                        dirty_op = None;
-                        synced_remotely = true;
+                        eprintln!("[keysmith sync] immediate vault_set_travel_safe push failed: {e}");
                     }
                 }
                 self.storage.upsert_vault(&StoredVault {
@@ -1700,7 +1709,7 @@ impl AppCore {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
-            if self
+            match self
                 .with_fresh_token(&mut account, move |tok| {
                     let client = client.clone();
                     let server_url = server_url.clone();
@@ -1708,9 +1717,16 @@ impl AppCore {
                     async move { client.delete_folder(&server_url, &tok, &id).await }
                 })
                 .await
-                .is_ok()
             {
-                deleted_remotely = true;
+                Ok(()) => {
+                    deleted_remotely = true;
+                }
+                Err(e) if crate::protocol::is_not_found_or_missing_cipher_err(&e) => {
+                    deleted_remotely = true;
+                }
+                Err(e) => {
+                    eprintln!("[keysmith sync] immediate vault_delete push failed: {e}");
+                }
             }
         }
 
@@ -2313,7 +2329,7 @@ impl AppCore {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
-            if self
+            match self
                 .with_fresh_token(&mut account, move |tok| {
                     let client = client.clone();
                     let server_url = server_url.clone();
@@ -2321,10 +2337,14 @@ impl AppCore {
                     async move { client.trash_cipher(&server_url, &tok, &id).await }
                 })
                 .await
-                .is_ok()
             {
-                dirty_op = None;
-                synced_remotely = true;
+                Ok(()) => {
+                    dirty_op = None;
+                    synced_remotely = true;
+                }
+                Err(e) => {
+                    eprintln!("[keysmith sync] immediate item_trash push failed: {e}");
+                }
             }
         }
 
@@ -2372,7 +2392,7 @@ impl AppCore {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
-            if let Ok(remote) = self
+            match self
                 .with_fresh_token(&mut account, move |tok| {
                     let client = client.clone();
                     let server_url = server_url.clone();
@@ -2381,9 +2401,14 @@ impl AppCore {
                 })
                 .await
             {
-                cipher = remote;
-                dirty_op = None;
-                synced_remotely = true;
+                Ok(remote) => {
+                    cipher = remote;
+                    dirty_op = None;
+                    synced_remotely = true;
+                }
+                Err(e) => {
+                    eprintln!("[keysmith sync] immediate item_restore push failed: {e}");
+                }
             }
         }
 
@@ -2432,7 +2457,7 @@ impl AppCore {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             let id_owned = id.to_string();
-            if self
+            match self
                 .with_fresh_token(&mut account, move |tok| {
                     let client = client.clone();
                     let server_url = server_url.clone();
@@ -2440,9 +2465,16 @@ impl AppCore {
                     async move { client.delete_cipher_permanent(&server_url, &tok, &id).await }
                 })
                 .await
-                .is_ok()
             {
-                deleted_remotely = true;
+                Ok(()) => {
+                    deleted_remotely = true;
+                }
+                Err(e) if crate::protocol::is_not_found_or_missing_cipher_err(&e) => {
+                    deleted_remotely = true;
+                }
+                Err(e) => {
+                    eprintln!("[keysmith sync] immediate item_delete_permanent push failed: {e}");
+                }
             }
         }
 
@@ -2637,6 +2669,62 @@ impl AppCore {
         }
     }
 
+    async fn push_create_folder_and_remap(
+        &self,
+        account: &mut StoredAccount,
+        sv: &StoredVault,
+        folder_id_remap: &mut HashMap<String, String>,
+        remote_folder_ids: &mut HashSet<String>,
+    ) -> Result<(), CoreError> {
+        let client = self.client.clone();
+        let server_url = account.server_url.clone();
+        let name_enc = sv.name_enc.clone();
+        let remote = self
+            .with_fresh_token(account, move |tok| {
+                let client = client.clone();
+                let server_url = server_url.clone();
+                let name_enc = name_enc.clone();
+                async move { client.create_folder(&server_url, &tok, &name_enc).await }
+            })
+            .await?;
+        folder_id_remap.insert(sv.id.clone(), remote.id.clone());
+        remote_folder_ids.insert(remote.id.clone());
+        self.storage.delete_vault_row(&sv.id)?;
+        self.storage.upsert_vault(&StoredVault {
+            id: remote.id,
+            account_id: account.id.clone(),
+            name_enc: remote.name,
+            revision_date: remote.revision_date.unwrap_or_default(),
+            dirty_op: None,
+            is_organization: false,
+            organization_id: None,
+        })?;
+        Ok(())
+    }
+
+    async fn push_recreate_cipher(
+        &self,
+        account: &mut StoredAccount,
+        old_id: &str,
+        dto: &CipherDto,
+    ) -> Result<(), CoreError> {
+        let client = self.client.clone();
+        let server_url = account.server_url.clone();
+        let dto_clone = dto.clone();
+        let mut remote = self
+            .with_fresh_token(account, move |tok| {
+                let client = client.clone();
+                let server_url = server_url.clone();
+                let dto = dto_clone.clone();
+                async move { client.create_cipher(&server_url, &tok, &dto).await }
+            })
+            .await?;
+        Self::preserve_local_fido2_if_stripped(dto, &mut remote);
+        self.storage.delete_cipher_row(old_id)?;
+        self.storage.upsert_cipher(&account.id, &remote, None)?;
+        Ok(())
+    }
+
     pub async fn sync_now(&self) -> Result<SyncStatus, CoreError> {
         let _sync_guard = self.sync_lock.lock().await;
 
@@ -2651,10 +2739,32 @@ impl AppCore {
             (acc, guard.unlocked.as_ref().map(|u| u.usk.clone()))
         };
 
+        match self.sync_now_inner(&mut account, usk_opt).await {
+            Ok(status) => Ok(status),
+            Err(err) => {
+                let pending_count = self
+                    .storage
+                    .count_pending_dirty(&account.id)
+                    .unwrap_or(0);
+                if let Ok(mut guard) = self.write_state() {
+                    guard.sync_status.state = SyncStateKind::Error;
+                    guard.sync_status.pending_count = pending_count;
+                    guard.sync_status.message = Some(err.to_string());
+                }
+                Err(err)
+            }
+        }
+    }
+
+    async fn sync_now_inner(
+        &self,
+        account: &mut StoredAccount,
+        usk_opt: Option<UserSymmetricKey>,
+    ) -> Result<SyncStatus, CoreError> {
         let client = self.client.clone();
         let server_url = account.server_url.clone();
         let mut sync_resp = match self
-            .with_fresh_token(&mut account, move |tok| {
+            .with_fresh_token(account, move |tok| {
                 let client = client.clone();
                 let server_url = server_url.clone();
                 async move { client.sync(&server_url, &tok).await }
@@ -2663,12 +2773,28 @@ impl AppCore {
         {
             Ok(resp) => resp,
             Err(e) => {
+                let pending_count = self
+                    .storage
+                    .count_pending_dirty(&account.id)
+                    .unwrap_or(0);
                 let mut guard = self.write_state()?;
                 guard.sync_status.state = SyncStateKind::Offline;
+                guard.sync_status.pending_count = pending_count;
                 guard.sync_status.message = Some(e.to_string());
                 return Ok(guard.sync_status.clone());
             }
         };
+
+        let mut remote_folder_ids: HashSet<String> =
+            sync_resp.folders.iter().map(|f| f.id.clone()).collect();
+        let remote_org_ids: HashSet<String> = sync_resp
+            .organizations
+            .iter()
+            .chain(sync_resp.profile.organizations.iter())
+            .map(|o| o.id.clone())
+            .collect();
+        let mut actually_pushed = false;
+        let mut push_errors: Vec<String> = Vec::new();
 
         // 1. Push dirty vaults
         let dirty_vaults: Vec<StoredVault> = self
@@ -2677,87 +2803,140 @@ impl AppCore {
             .into_iter()
             .filter(|v| v.dirty_op.is_some())
             .collect();
-        let had_dirty_vaults = !dirty_vaults.is_empty();
 
         let mut folder_id_remap: HashMap<String, String> = HashMap::new();
         for sv in dirty_vaults {
             match sv.dirty_op.as_deref() {
                 Some("create") => {
-                    let client = self.client.clone();
-                    let server_url = account.server_url.clone();
-                    let name_enc = sv.name_enc.clone();
-                    if let Ok(remote) = self
-                        .with_fresh_token(&mut account, move |tok| {
-                            let client = client.clone();
-                            let server_url = server_url.clone();
-                            let name_enc = name_enc.clone();
-                            async move { client.create_folder(&server_url, &tok, &name_enc).await }
-                        })
+                    match self
+                        .push_create_folder_and_remap(
+                            account,
+                            &sv,
+                            &mut folder_id_remap,
+                            &mut remote_folder_ids,
+                        )
                         .await
                     {
-                        folder_id_remap.insert(sv.id.clone(), remote.id.clone());
-                        self.storage.delete_vault_row(&sv.id)?;
-                        self.storage.upsert_vault(&StoredVault {
-                            id: remote.id,
-                            account_id: account.id.clone(),
-                            name_enc: remote.name,
-                            revision_date: remote.revision_date.unwrap_or_default(),
-                            dirty_op: None,
-                            is_organization: false,
-                            organization_id: None,
-                        })?;
+                        Ok(()) => actually_pushed = true,
+                        Err(e) => {
+                            eprintln!("[keysmith sync] folder create {} failed: {e}", sv.id);
+                            push_errors.push(format!("文件夹创建失败: {e}"));
+                        }
                     }
                 }
                 Some("update") => {
-                    let client = self.client.clone();
-                    let server_url = account.server_url.clone();
-                    let id_owned = sv.id.clone();
-                    let name_enc = sv.name_enc.clone();
-                    if let Ok(remote) = self
-                        .with_fresh_token(&mut account, move |tok| {
-                            let client = client.clone();
-                            let server_url = server_url.clone();
-                            let id = id_owned.clone();
-                            let name_enc = name_enc.clone();
-                            async move {
-                                client.update_folder(&server_url, &tok, &id, &name_enc).await
+                    if !remote_folder_ids.contains(&sv.id) {
+                        match self
+                            .push_create_folder_and_remap(
+                                account,
+                                &sv,
+                                &mut folder_id_remap,
+                                &mut remote_folder_ids,
+                            )
+                            .await
+                        {
+                            Ok(()) => actually_pushed = true,
+                            Err(e) => {
+                                eprintln!(
+                                    "[keysmith sync] folder recreate {} failed: {e}",
+                                    sv.id
+                                );
+                                push_errors.push(format!("文件夹同步失败: {e}"));
                             }
-                        })
-                        .await
-                    {
-                        self.storage.upsert_vault(&StoredVault {
-                            id: remote.id,
-                            account_id: account.id.clone(),
-                            name_enc: remote.name,
-                            revision_date: remote.revision_date.unwrap_or_default(),
-                            dirty_op: None,
-                            is_organization: false,
-                            organization_id: None,
-                        })?;
+                        }
+                    } else {
+                        let client = self.client.clone();
+                        let server_url = account.server_url.clone();
+                        let id_owned = sv.id.clone();
+                        let name_enc = sv.name_enc.clone();
+                        match self
+                            .with_fresh_token(account, move |tok| {
+                                let client = client.clone();
+                                let server_url = server_url.clone();
+                                let id = id_owned.clone();
+                                let name_enc = name_enc.clone();
+                                async move {
+                                    client.update_folder(&server_url, &tok, &id, &name_enc).await
+                                }
+                            })
+                            .await
+                        {
+                            Ok(remote) => {
+                                self.storage.upsert_vault(&StoredVault {
+                                    id: remote.id,
+                                    account_id: account.id.clone(),
+                                    name_enc: remote.name,
+                                    revision_date: remote.revision_date.unwrap_or_default(),
+                                    dirty_op: None,
+                                    is_organization: false,
+                                    organization_id: None,
+                                })?;
+                                actually_pushed = true;
+                            }
+                            Err(e) if crate::protocol::is_not_found_or_missing_cipher_err(&e) => {
+                                match self
+                                    .push_create_folder_and_remap(
+                                        account,
+                                        &sv,
+                                        &mut folder_id_remap,
+                                        &mut remote_folder_ids,
+                                    )
+                                    .await
+                                {
+                                    Ok(()) => actually_pushed = true,
+                                    Err(e2) => {
+                                        eprintln!(
+                                            "[keysmith sync] folder recreate after 404 {} failed: {e2}",
+                                            sv.id
+                                        );
+                                        push_errors.push(format!("文件夹同步失败: {e2}"));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[keysmith sync] folder update {} failed: {e}", sv.id);
+                                push_errors.push(format!("文件夹更新失败: {e}"));
+                            }
+                        }
                     }
                 }
                 Some("delete") => {
-                    let client = self.client.clone();
-                    let server_url = account.server_url.clone();
-                    let id_owned = sv.id.clone();
-                    if self
-                        .with_fresh_token(&mut account, move |tok| {
-                            let client = client.clone();
-                            let server_url = server_url.clone();
-                            let id = id_owned.clone();
-                            async move { client.delete_folder(&server_url, &tok, &id).await }
-                        })
-                        .await
-                        .is_ok()
-                    {
+                    if !remote_folder_ids.contains(&sv.id) {
                         self.storage.delete_vault_row(&sv.id)?;
+                        actually_pushed = true;
+                    } else {
+                        let client = self.client.clone();
+                        let server_url = account.server_url.clone();
+                        let id_owned = sv.id.clone();
+                        match self
+                            .with_fresh_token(account, move |tok| {
+                                let client = client.clone();
+                                let server_url = server_url.clone();
+                                let id = id_owned.clone();
+                                async move { client.delete_folder(&server_url, &tok, &id).await }
+                            })
+                            .await
+                        {
+                            Ok(()) => {
+                                self.storage.delete_vault_row(&sv.id)?;
+                                actually_pushed = true;
+                            }
+                            Err(e) if crate::protocol::is_not_found_or_missing_cipher_err(&e) => {
+                                self.storage.delete_vault_row(&sv.id)?;
+                                actually_pushed = true;
+                            }
+                            Err(e) => {
+                                eprintln!("[keysmith sync] folder delete {} failed: {e}", sv.id);
+                                push_errors.push(format!("文件夹删除失败: {e}"));
+                            }
+                        }
                     }
                 }
                 _ => {}
             }
         }
 
-        // 2. Push dirty ciphers with conflict copy preservation
+        // 2. Push dirty ciphers with conflict copy preservation and stale-ID healing
         let remote_by_id: HashMap<String, CipherDto> = sync_resp
             .ciphers
             .iter()
@@ -2772,40 +2951,51 @@ impl AppCore {
             .filter(|c| c.dirty_op.is_some())
             .collect();
 
-        let pushed_any = !dirty_ciphers.is_empty() || had_dirty_vaults;
-
         for sc in dirty_ciphers {
             let Ok(mut dto) = serde_json::from_str::<CipherDto>(&sc.raw_json) else {
                 continue;
             };
-            if let Some(old_fid) = &dto.folder_id {
-                if let Some(new_fid) = folder_id_remap.get(old_fid) {
+            if let Some(old_fid) = dto.folder_id.clone() {
+                if let Some(new_fid) = folder_id_remap.get(&old_fid) {
                     dto.folder_id = Some(new_fid.clone());
+                } else if !remote_folder_ids.contains(&old_fid) {
+                    dto.folder_id = None;
+                }
+            }
+            if let Some(org_id) = dto.organization_id.as_deref() {
+                if !remote_org_ids.contains(org_id) {
+                    dto.organization_id = None;
                 }
             }
 
             match sc.dirty_op.as_deref() {
                 Some("create") => {
-                    let client = self.client.clone();
-                    let server_url = account.server_url.clone();
-                    let dto_clone = dto.clone();
-                    if let Ok(remote) = self
-                        .with_fresh_token(&mut account, move |tok| {
-                            let client = client.clone();
-                            let server_url = server_url.clone();
-                            let dto = dto_clone.clone();
-                            async move { client.create_cipher(&server_url, &tok, &dto).await }
-                        })
-                        .await
-                    {
-                        self.storage.delete_cipher_row(&sc.id)?;
-                        self.storage.upsert_cipher(&account.id, &remote, None)?;
+                    match self.push_recreate_cipher(account, &sc.id, &dto).await {
+                        Ok(()) => actually_pushed = true,
+                        Err(e) => {
+                            eprintln!("[keysmith sync] cipher create {} failed: {e}", sc.id);
+                            push_errors.push(format!("条目创建失败: {e}"));
+                        }
                     }
                 }
                 Some("update") => {
-                    let has_conflict = remote_by_id
-                        .get(&dto.id)
-                        .and_then(|r| r.revision_date.as_deref())
+                    let Some(remote_orig) = remote_by_id.get(&dto.id) else {
+                        match self.push_recreate_cipher(account, &sc.id, &dto).await {
+                            Ok(()) => actually_pushed = true,
+                            Err(e) => {
+                                eprintln!(
+                                    "[keysmith sync] cipher recreate missing remote {} failed: {e}",
+                                    sc.id
+                                );
+                                push_errors.push(format!("条目同步失败: {e}"));
+                            }
+                        }
+                        continue;
+                    };
+
+                    let has_conflict = remote_orig
+                        .revision_date
+                        .as_deref()
                         .map(|remote_rev| {
                             remote_rev != sc.revision_date && !sc.revision_date.is_empty()
                         })
@@ -2823,11 +3013,12 @@ impl AppCore {
                             let copy_title = format!("{orig_title} (冲突副本 {stamp})");
                             dto.id = new_uuid();
                             dto.name = Some(usk.encrypt_string(&copy_title)?);
+                            dto.organization_id = None;
                             let client = self.client.clone();
                             let server_url = account.server_url.clone();
                             let dto_clone = dto.clone();
-                            if let Ok(copy_remote) = self
-                                .with_fresh_token(&mut account, move |tok| {
+                            match self
+                                .with_fresh_token(account, move |tok| {
                                     let client = client.clone();
                                     let server_url = server_url.clone();
                                     let dto = dto_clone.clone();
@@ -2837,18 +3028,38 @@ impl AppCore {
                                 })
                                 .await
                             {
-                                self.storage.upsert_cipher(&account.id, &copy_remote, None)?;
+                                Ok(mut copy_remote) => {
+                                    Self::preserve_local_fido2_if_stripped(&dto, &mut copy_remote);
+                                    self.storage.upsert_cipher(
+                                        &account.id,
+                                        &copy_remote,
+                                        None,
+                                    )?;
+                                    self.storage.upsert_cipher(
+                                        &account.id,
+                                        remote_orig,
+                                        None,
+                                    )?;
+                                    actually_pushed = true;
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "[keysmith sync] conflict copy create {} failed: {e}",
+                                        sc.id
+                                    );
+                                    push_errors.push(format!("冲突副本保存失败: {e}"));
+                                }
                             }
-                        }
-                        if let Some(remote_orig) = remote_by_id.get(&sc.id) {
-                            self.storage.upsert_cipher(&account.id, remote_orig, None)?;
+                        } else {
+                            push_errors.push("存在同步冲突，请先解锁保险库".to_string());
                         }
                     } else {
+                        dto.organization_id = remote_orig.organization_id.clone();
                         let client = self.client.clone();
                         let server_url = account.server_url.clone();
                         let dto_clone = dto.clone();
-                        if let Ok(remote) = self
-                            .with_fresh_token(&mut account, move |tok| {
+                        match self
+                            .with_fresh_token(account, move |tok| {
                                 let client = client.clone();
                                 let server_url = server_url.clone();
                                 let dto = dto_clone.clone();
@@ -2860,73 +3071,163 @@ impl AppCore {
                             })
                             .await
                         {
-                            self.storage.upsert_cipher(&account.id, &remote, None)?;
+                            Ok(mut remote) => {
+                                Self::preserve_local_fido2_if_stripped(&dto, &mut remote);
+                                self.storage.upsert_cipher(&account.id, &remote, None)?;
+                                actually_pushed = true;
+                            }
+                            Err(e) if crate::protocol::is_not_found_or_missing_cipher_err(&e) => {
+                                match self.push_recreate_cipher(account, &sc.id, &dto).await {
+                                    Ok(()) => actually_pushed = true,
+                                    Err(e2) => {
+                                        eprintln!(
+                                            "[keysmith sync] cipher recreate after 404 {} failed: {e2}",
+                                            sc.id
+                                        );
+                                        push_errors.push(format!("条目同步失败: {e2}"));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[keysmith sync] cipher update {} failed: {e}",
+                                    dto.id
+                                );
+                                push_errors.push(format!("条目更新失败: {e}"));
+                            }
                         }
                     }
                 }
                 Some("trash") => {
-                    let client = self.client.clone();
-                    let server_url = account.server_url.clone();
-                    let id_owned = dto.id.clone();
-                    if self
-                        .with_fresh_token(&mut account, move |tok| {
-                            let client = client.clone();
-                            let server_url = server_url.clone();
-                            let id = id_owned.clone();
-                            async move { client.trash_cipher(&server_url, &tok, &id).await }
-                        })
-                        .await
-                        .is_ok()
-                    {
-                        self.storage.upsert_cipher(&account.id, &dto, None)?;
+                    if !remote_by_id.contains_key(&dto.id) {
+                        self.storage.delete_cipher_row(&sc.id)?;
+                        actually_pushed = true;
+                    } else {
+                        let client = self.client.clone();
+                        let server_url = account.server_url.clone();
+                        let id_owned = dto.id.clone();
+                        match self
+                            .with_fresh_token(account, move |tok| {
+                                let client = client.clone();
+                                let server_url = server_url.clone();
+                                let id = id_owned.clone();
+                                async move { client.trash_cipher(&server_url, &tok, &id).await }
+                            })
+                            .await
+                        {
+                            Ok(()) => {
+                                self.storage.upsert_cipher(&account.id, &dto, None)?;
+                                actually_pushed = true;
+                            }
+                            Err(e) if crate::protocol::is_not_found_or_missing_cipher_err(&e) => {
+                                self.storage.delete_cipher_row(&sc.id)?;
+                                actually_pushed = true;
+                            }
+                            Err(e) => {
+                                eprintln!("[keysmith sync] cipher trash {} failed: {e}", dto.id);
+                                push_errors.push(format!("移入废纸篓失败: {e}"));
+                            }
+                        }
                     }
                 }
                 Some("restore") => {
-                    let client = self.client.clone();
-                    let server_url = account.server_url.clone();
-                    let id_owned = dto.id.clone();
-                    if let Ok(remote) = self
-                        .with_fresh_token(&mut account, move |tok| {
-                            let client = client.clone();
-                            let server_url = server_url.clone();
-                            let id = id_owned.clone();
-                            async move { client.restore_cipher(&server_url, &tok, &id).await }
-                        })
-                        .await
-                    {
-                        self.storage.upsert_cipher(&account.id, &remote, None)?;
+                    if !remote_by_id.contains_key(&dto.id) {
+                        dto.deleted_date = None;
+                        match self.push_recreate_cipher(account, &sc.id, &dto).await {
+                            Ok(()) => actually_pushed = true,
+                            Err(e) => {
+                                eprintln!(
+                                    "[keysmith sync] cipher restore-recreate {} failed: {e}",
+                                    sc.id
+                                );
+                                push_errors.push(format!("条目恢复失败: {e}"));
+                            }
+                        }
+                    } else {
+                        let client = self.client.clone();
+                        let server_url = account.server_url.clone();
+                        let id_owned = dto.id.clone();
+                        match self
+                            .with_fresh_token(account, move |tok| {
+                                let client = client.clone();
+                                let server_url = server_url.clone();
+                                let id = id_owned.clone();
+                                async move { client.restore_cipher(&server_url, &tok, &id).await }
+                            })
+                            .await
+                        {
+                            Ok(remote) => {
+                                self.storage.upsert_cipher(&account.id, &remote, None)?;
+                                actually_pushed = true;
+                            }
+                            Err(e) if crate::protocol::is_not_found_or_missing_cipher_err(&e) => {
+                                dto.deleted_date = None;
+                                match self.push_recreate_cipher(account, &sc.id, &dto).await {
+                                    Ok(()) => actually_pushed = true,
+                                    Err(e2) => {
+                                        eprintln!(
+                                            "[keysmith sync] cipher restore after 404 {} failed: {e2}",
+                                            sc.id
+                                        );
+                                        push_errors.push(format!("条目恢复失败: {e2}"));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[keysmith sync] cipher restore {} failed: {e}",
+                                    dto.id
+                                );
+                                push_errors.push(format!("条目恢复失败: {e}"));
+                            }
+                        }
                     }
                 }
                 Some("delete") => {
-                    let client = self.client.clone();
-                    let server_url = account.server_url.clone();
-                    let id_owned = dto.id.clone();
-                    if self
-                        .with_fresh_token(&mut account, move |tok| {
-                            let client = client.clone();
-                            let server_url = server_url.clone();
-                            let id = id_owned.clone();
-                            async move {
-                                client
-                                    .delete_cipher_permanent(&server_url, &tok, &id)
-                                    .await
+                    if !remote_by_id.contains_key(&dto.id) {
+                        self.storage.delete_cipher_row(&sc.id)?;
+                        actually_pushed = true;
+                    } else {
+                        let client = self.client.clone();
+                        let server_url = account.server_url.clone();
+                        let id_owned = dto.id.clone();
+                        match self
+                            .with_fresh_token(account, move |tok| {
+                                let client = client.clone();
+                                let server_url = server_url.clone();
+                                let id = id_owned.clone();
+                                async move {
+                                    client
+                                        .delete_cipher_permanent(&server_url, &tok, &id)
+                                        .await
+                                }
+                            })
+                            .await
+                        {
+                            Ok(()) => {
+                                self.storage.delete_cipher_row(&dto.id)?;
+                                actually_pushed = true;
                             }
-                        })
-                        .await
-                        .is_ok()
-                    {
-                        self.storage.delete_cipher_row(&dto.id)?;
+                            Err(e) if crate::protocol::is_not_found_or_missing_cipher_err(&e) => {
+                                self.storage.delete_cipher_row(&dto.id)?;
+                                actually_pushed = true;
+                            }
+                            Err(e) => {
+                                eprintln!("[keysmith sync] cipher delete {} failed: {e}", dto.id);
+                                push_errors.push(format!("彻底删除失败: {e}"));
+                            }
+                        }
                     }
                 }
                 _ => {}
             }
         }
 
-        if pushed_any {
+        if actually_pushed {
             let client = self.client.clone();
             let server_url = account.server_url.clone();
             if let Ok(fresh) = self
-                .with_fresh_token(&mut account, move |tok| {
+                .with_fresh_token(account, move |tok| {
                     let client = client.clone();
                     let server_url = server_url.clone();
                     async move { client.sync(&server_url, &tok).await }
@@ -3029,7 +3330,7 @@ impl AppCore {
         let client_rev = self.client.clone();
         let server_url_rev = account.server_url.clone();
         let latest_rev = self
-            .with_fresh_token(&mut account, move |tok| {
+            .with_fresh_token(account, move |tok| {
                 let client = client_rev.clone();
                 let server_url = server_url_rev.clone();
                 async move { client.get_revision_date(&server_url, &tok).await }
@@ -3038,10 +3339,16 @@ impl AppCore {
             .ok();
         let stored_rev = self.persist_server_revision(&account.id, latest_rev);
 
+        let (final_state, final_message) = if pending_count > 0 && !push_errors.is_empty() {
+            (SyncStateKind::Error, Some(push_errors.join("; ")))
+        } else {
+            (SyncStateKind::Idle, None)
+        };
+
         let out_status = {
             let mut guard = self.write_state()?;
             let signalr_connected = guard.sync_status.signalr_connected;
-            guard.account = Some(account);
+            guard.account = Some(account.clone());
             if let Some(u) = refreshed_unlocked {
                 guard.unlocked = Some(u);
             }
@@ -3049,10 +3356,10 @@ impl AppCore {
                 guard.last_server_revision = stored_rev;
             }
             guard.sync_status = SyncStatus {
-                state: SyncStateKind::Idle,
+                state: final_state,
                 pending_count,
                 last_sync_at: now,
-                message: None,
+                message: final_message,
                 signalr_connected,
             };
             guard.sync_status.clone()
@@ -3089,7 +3396,7 @@ impl AppCore {
         let pending_count = self.storage.count_pending_dirty(&account.id)?;
         if pending_count > 0 {
             let st = self.sync_now().await?;
-            return Ok(st.state == SyncStateKind::Idle);
+            return Ok(st.state == SyncStateKind::Idle && st.pending_count == 0);
         }
 
         let client = self.client.clone();

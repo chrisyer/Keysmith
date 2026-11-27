@@ -2993,3 +2993,278 @@ async fn auto_sync_revision_detection_manual_mode_and_offline_flush() {
 
     server_task.abort();
 }
+
+#[tokio::test]
+async fn sync_heals_missing_remote_delete_and_update_and_surfaces_push_error() {
+    use keysmith_core::domain::SyncStateKind;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let base_url = format!("http://{addr}");
+
+    let kdf = KdfConfig {
+        kdf: 0,
+        kdf_iterations: 1000,
+        kdf_memory: None,
+        kdf_parallelism: None,
+    };
+    let mk = derive_master_key("SyncPass#2026", "heal@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let protected = protect_user_symmetric_key(&usk, &smk).unwrap();
+
+    let remote_existing = CipherDto {
+        id: "remote-fail".to_string(),
+        organization_id: None,
+        folder_id: None,
+        collection_ids: vec![],
+        cipher_type: 1,
+        name: Some(usk.encrypt_string("Remote Existing").unwrap()),
+        notes: None,
+        favorite: false,
+        login: None,
+        secure_note: None,
+        card: None,
+        identity: None,
+        fields: vec![],
+        password_history: vec![],
+        attachments: vec![],
+        reprompt: Some(0),
+        revision_date: Some("2026-11-27T00:00:00Z".to_string()),
+        creation_date: Some("2026-11-27T00:00:00Z".to_string()),
+        deleted_date: None,
+        extra: Default::default(),
+    };
+
+    let remote_ciphers = Arc::new(Mutex::new(vec![remote_existing.clone()]));
+    let delete_calls = Arc::new(AtomicUsize::new(0));
+    let posted_payloads: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let ciphers_srv = Arc::clone(&remote_ciphers);
+    let delete_srv = Arc::clone(&delete_calls);
+    let posted_srv = Arc::clone(&posted_payloads);
+
+    let server_task = tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                break;
+            };
+            let ciphers_c = Arc::clone(&ciphers_srv);
+            let delete_c = Arc::clone(&delete_srv);
+            let posted_c = Arc::clone(&posted_srv);
+            tokio::spawn(async move {
+                let mut raw = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let mut header_end: Option<usize> = None;
+                let mut expected_total: Option<usize> = None;
+                loop {
+                    let Ok(n) = sock.read(&mut chunk).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        break;
+                    }
+                    raw.extend_from_slice(&chunk[..n]);
+                    if header_end.is_none() {
+                        if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                            let h_end = pos + 4;
+                            header_end = Some(h_end);
+                            let headers = String::from_utf8_lossy(&raw[..h_end]);
+                            let clen = headers
+                                .lines()
+                                .find_map(|l| {
+                                    let (k, v) = l.split_once(':')?;
+                                    if k.trim().eq_ignore_ascii_case("content-length") {
+                                        v.trim().parse::<usize>().ok()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or(0);
+                            expected_total = Some(h_end + clen);
+                        }
+                    }
+                    if let Some(total) = expected_total {
+                        if raw.len() >= total {
+                            break;
+                        }
+                    }
+                }
+                if raw.is_empty() {
+                    return;
+                }
+                let req = String::from_utf8_lossy(&raw).to_string();
+                let first_line = req.lines().next().unwrap_or("");
+                let body_str = header_end
+                    .and_then(|h| std::str::from_utf8(&raw[h..]).ok())
+                    .unwrap_or("{}");
+
+                let (status, body) = if first_line.starts_with("GET /api/accounts/revision-date") {
+                    ("200 OK", "2000".to_string())
+                } else if first_line.starts_with("GET /api/sync") {
+                    let list = ciphers_c.lock().unwrap().clone();
+                    let payload = serde_json::json!({
+                        "profile": { "id": "acc-heal", "email": "heal@example.com" },
+                        "folders": [],
+                        "collections": [],
+                        "ciphers": list,
+                    });
+                    ("200 OK", payload.to_string())
+                } else if first_line.starts_with("POST /api/ciphers") {
+                    let mut val: serde_json::Value = serde_json::from_str(body_str).unwrap();
+                    posted_c.lock().unwrap().push(val.clone());
+                    val["id"] = serde_json::json!("recreated-1");
+                    val["revisionDate"] = serde_json::json!("2026-11-27T01:00:00Z");
+                    let dto: CipherDto = serde_json::from_value(val).unwrap();
+                    ciphers_c.lock().unwrap().push(dto.clone());
+                    ("200 OK", serde_json::to_string(&dto).unwrap())
+                } else if first_line.starts_with("PUT /api/ciphers/remote-fail") {
+                    (
+                        "400 Bad Request",
+                        serde_json::json!({ "message": "Simulated validation error" }).to_string(),
+                    )
+                } else if first_line.starts_with("DELETE /api/ciphers/") {
+                    delete_c.fetch_add(1, Ordering::SeqCst);
+                    ("404 Not Found", "{}".to_string())
+                } else {
+                    ("404 Not Found", "{}".to_string())
+                };
+
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+
+    let storage = Storage::open_in_memory().unwrap();
+    let mut acc = make_test_account("acc-heal", "heal@example.com", &base_url, &kdf, protected);
+    acc.access_token = Some("tok-heal".to_string());
+    storage.upsert_account(&acc).unwrap();
+
+    // Seed stuck dirty delete (missing remotely) and dirty update (missing remotely, stale folder, passkey + key)
+    let missing_delete = CipherDto {
+        id: "stale-del-1".to_string(),
+        organization_id: None,
+        folder_id: None,
+        collection_ids: vec![],
+        cipher_type: 2,
+        name: Some(usk.encrypt_string("Stale Trashed Note").unwrap()),
+        notes: None,
+        favorite: false,
+        login: None,
+        secure_note: None,
+        card: None,
+        identity: None,
+        fields: vec![],
+        password_history: vec![],
+        attachments: vec![],
+        reprompt: Some(0),
+        revision_date: Some("2026-11-15T00:00:00Z".to_string()),
+        creation_date: Some("2026-11-15T00:00:00Z".to_string()),
+        deleted_date: Some("2026-11-15T00:00:00Z".to_string()),
+        extra: Default::default(),
+    };
+    let mut extra_with_key = serde_json::Map::new();
+    extra_with_key.insert(
+        "key".to_string(),
+        serde_json::Value::String("2.cipherkey|iv|mac".to_string()),
+    );
+    let missing_update = CipherDto {
+        id: "stale-upd-1".to_string(),
+        organization_id: None,
+        folder_id: Some("missing-folder-uuid".to_string()),
+        collection_ids: vec![],
+        cipher_type: 1,
+        name: Some(usk.encrypt_string("Passkey Item").unwrap()),
+        notes: None,
+        favorite: false,
+        login: Some(CipherLoginDto {
+            username: Some(usk.encrypt_string("alice").unwrap()),
+            password: None,
+            totp: None,
+            uris: vec![],
+            fido2_credentials: vec![CipherFido2CredentialDto {
+                credential_id: Some("cred-1".to_string()),
+                key_type: Some("public-key".to_string()),
+                key_algorithm: Some("ECDSA".to_string()),
+                key_curve: Some("P-256".to_string()),
+                key_value: Some("pk-val".to_string()),
+                rp_id: Some("example.com".to_string()),
+                rp_name: Some("Example".to_string()),
+                user_handle: Some("uh".to_string()),
+                user_name: Some("alice".to_string()),
+                user_display_name: None,
+                counter: Some("0".to_string()),
+                discoverable: Some("true".to_string()),
+                creation_date: Some("2026-11-26T15:29:35.940147+00:00".to_string()),
+                extra: Default::default(),
+            }],
+            extra: Default::default(),
+        }),
+        secure_note: None,
+        card: None,
+        identity: None,
+        fields: vec![],
+        password_history: vec![],
+        attachments: vec![],
+        reprompt: Some(0),
+        revision_date: Some("2026-11-26T15:30:00Z".to_string()),
+        creation_date: Some("2026-11-26T15:29:00Z".to_string()),
+        deleted_date: None,
+        extra: extra_with_key,
+    };
+    storage
+        .upsert_cipher(&acc.id, &missing_delete, Some("delete"))
+        .unwrap();
+    storage
+        .upsert_cipher(&acc.id, &missing_update, Some("update"))
+        .unwrap();
+
+    let core = AppCore::with_storage(
+        storage.clone(),
+        Arc::new(MockBiometricStore::default()),
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    core.session_unlock_password("SyncPass#2026").await.unwrap();
+
+    // 1. Heal missing remote delete + recreate missing remote update cleanly
+    let st1 = core.sync_now().await.unwrap();
+    assert_eq!(st1.state, SyncStateKind::Idle);
+    assert_eq!(st1.pending_count, 0);
+    assert!(st1.message.is_none());
+    assert_eq!(delete_calls.load(Ordering::SeqCst), 0);
+
+    let payloads = posted_payloads.lock().unwrap().clone();
+    assert_eq!(payloads.len(), 1);
+    assert!(payloads[0].get("folderId").is_none());
+    assert_eq!(payloads[0]["key"], "2.cipherkey|iv|mac");
+    assert_eq!(
+        payloads[0]["login"]["fido2Credentials"][0]["creationDate"],
+        "2026-11-26T15:29:35.940Z"
+    );
+
+    // 2. Surface HTTP 400 push failure as SyncStateKind::Error with pending_count preserved
+    let mut failing_dto = remote_existing;
+    failing_dto.name = Some(usk.encrypt_string("Remote Existing Updated").unwrap());
+    storage
+        .upsert_cipher(&acc.id, &failing_dto, Some("update"))
+        .unwrap();
+
+    let st2 = core.sync_now().await.unwrap();
+    assert_eq!(st2.state, SyncStateKind::Error);
+    assert_eq!(st2.pending_count, 1);
+    assert!(st2
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("Simulated validation error"));
+    assert!(!core.check_and_sync_if_changed(false).await.unwrap());
+
+    server_task.abort();
+}

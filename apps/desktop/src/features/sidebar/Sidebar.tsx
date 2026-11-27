@@ -553,18 +553,24 @@ export function Sidebar() {
         <button
           type="button"
           onClick={() => void syncNow(getFilter())}
-          title={`${dict.settings.syncNowBtn} (${formatShortcutMac(shortcuts.syncVault)})`}
+          title={
+            syncStatus.message
+              ? `${dict.settings.syncNowBtn} (${formatShortcutMac(shortcuts.syncVault)})\n${syncStatus.message}`
+              : `${dict.settings.syncNowBtn} (${formatShortcutMac(shortcuts.syncVault)})`
+          }
           className="inline-flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer min-w-0 flex-1"
         >
           <span
             className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-              syncStatus.state === 'offline' || syncStatus.state === 'error'
-                ? 'bg-[var(--status-warning)]'
-                : syncStatus.pendingCount > 0
-                  ? 'bg-[var(--status-warning)] animate-pulse'
-                  : syncMode === 'manual'
-                    ? 'bg-[var(--text-muted)]/60'
-                    : 'bg-[var(--status-success)]'
+              syncStatus.state === 'error'
+                ? 'bg-[var(--status-danger)]'
+                : syncStatus.state === 'offline'
+                  ? 'bg-[var(--status-warning)]'
+                  : syncStatus.pendingCount > 0
+                    ? `bg-[var(--status-warning)] ${syncStatus.state === 'syncing' ? 'animate-pulse' : ''}`
+                    : syncMode === 'manual'
+                      ? 'bg-[var(--text-muted)]/60'
+                      : 'bg-[var(--status-success)]'
             }`}
           />
           <RefreshCw size={12} className={`shrink-0 ${syncStatus.state === 'syncing' ? 'animate-spin text-[var(--accent-primary)]' : ''}`} />

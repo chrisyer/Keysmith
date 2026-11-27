@@ -401,6 +401,28 @@ pub struct CipherDto {
     pub extra: Map<String, Value>,
 }
 
+pub(crate) fn normalize_utc_millis_iso(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        return dt
+            .with_timezone(&chrono::Utc)
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    }
+    trimmed.to_string()
+}
+
+pub fn is_not_found_or_missing_cipher_err(err: &CoreError) -> bool {
+    let lower = err.to_string().to_ascii_lowercase();
+    lower.contains("(404)")
+        || lower.contains("404 not found")
+        || lower.contains("doesn't exist")
+        || lower.contains("does not exist")
+        || lower.contains("not found")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CipherCreateUpdatePayload {
@@ -410,6 +432,8 @@ pub struct CipherCreateUpdatePayload {
     pub folder_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub organization_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
     pub name: Option<String>,
     pub notes: Option<String>,
     pub favorite: bool,
@@ -435,10 +459,22 @@ impl From<&CipherDto> for CipherCreateUpdatePayload {
             cipher_type: c.cipher_type,
             folder_id: c.folder_id.clone(),
             organization_id: c.organization_id.clone(),
+            key: c
+                .extra
+                .get("key")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             name: c.name.clone(),
             notes: c.notes.clone(),
             favorite: c.favorite,
-            login: c.login.clone(),
+            login: c.login.clone().map(|mut l| {
+                for cred in &mut l.fido2_credentials {
+                    if let Some(cd) = cred.creation_date.as_deref() {
+                        cred.creation_date = Some(normalize_utc_millis_iso(cd));
+                    }
+                }
+                l
+            }),
             secure_note: c.secure_note.clone(),
             card: c.card.clone(),
             identity: c.identity.clone(),

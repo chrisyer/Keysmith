@@ -142,9 +142,13 @@ pub fn poke_sync(app: &AppHandle) {
     }
 }
 
-pub fn poke_signalr(state: &AppState) {
+pub fn poke_signalr_only(state: &AppState) {
     let next = state.signalr_poke.borrow().wrapping_add(1);
     let _ = state.signalr_poke.send(next);
+}
+
+pub fn poke_signalr(state: &AppState) {
+    poke_signalr_only(state);
     bump_sync_poke(&state.sync_poke);
 }
 
@@ -1077,7 +1081,7 @@ pub async fn sync_now(
         Ok(status) => {
             let _ = app.emit(EVENT_SYNC_STATUS, status.clone());
             emit_data_changed(&app, true, Vec::new(), Vec::new());
-            poke_signalr(&state);
+            poke_signalr_only(&state);
             Ok(status)
         }
         Err(err) => {

@@ -825,21 +825,43 @@ fn spawn_auto_sync_loop(
 
             let status = core.sync_get_status();
             if status.pending_count > 0 {
+                let prev_pending = status.pending_count;
                 let mut syncing = status;
                 syncing.state = SyncStateKind::Syncing;
                 let _ = app.emit(EVENT_SYNC_STATUS, syncing);
 
                 match core.sync_now().await {
                     Ok(next_status) => {
-                        let synced_ok = next_status.state == SyncStateKind::Idle;
+                        let next_pending = next_status.pending_count;
+                        let fully_synced =
+                            next_status.state == SyncStateKind::Idle && next_pending == 0;
+                        let made_progress = next_pending < prev_pending || fully_synced;
+                        let next_state = next_status.state;
                         let _ = app.emit(EVENT_SYNC_STATUS, next_status);
-                        if synced_ok {
+                        if made_progress {
                             emit_data_changed(&app, true, Vec::new(), Vec::new());
+                        }
+                        if fully_synced {
                             pending_backoff_secs = 2;
                             just_unlocked = false;
                         } else {
-                            let wait = pending_backoff_secs;
-                            pending_backoff_secs = (pending_backoff_secs * 2).min(60);
+                            let wait = match next_state {
+                                SyncStateKind::Error => {
+                                    let w = pending_backoff_secs.max(30);
+                                    pending_backoff_secs = (w * 2).min(300);
+                                    w
+                                }
+                                SyncStateKind::Offline => {
+                                    let w = pending_backoff_secs.max(5);
+                                    pending_backoff_secs = (w * 2).min(120);
+                                    w
+                                }
+                                _ => {
+                                    let w = pending_backoff_secs;
+                                    pending_backoff_secs = (pending_backoff_secs * 2).min(60);
+                                    w
+                                }
+                            };
                             tokio::select! {
                                 changed = sync_poke_rx.changed() => {
                                     if changed.is_err() {
@@ -972,6 +994,7 @@ pub fn run() {
                     WindowEvent::Focused(true) => {
                         if win_core.session_get_state().status == AuthStatus::Unlocked
                             && win_core.is_auto_sync_enabled()
+                            && win_core.sync_get_status().state != SyncStateKind::Error
                         {
                             let mut guard = last_focus_poke
                                 .lock()

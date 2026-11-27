@@ -794,11 +794,7 @@ fn build_fido2_credentials_dto(
 
     let mut synced_fido2 = Vec::with_capacity(passkeys.len());
     for pk in passkeys {
-        let normalized_pk_creation = if pk.created_at.trim().is_empty() {
-            Utc::now().to_rfc3339()
-        } else {
-            pk.created_at.clone()
-        };
+        let normalized_pk_creation = crate::protocol::normalize_utc_millis_iso(&pk.created_at);
         if let Some(mut prev) = existing_by_id.remove(&pk.credential_id) {
             prev.counter = enc_opt(usk, &pk.sign_count.to_string())?;
             let repaired_creation = prev
@@ -806,6 +802,7 @@ fn build_fido2_credentials_dto(
                 .as_deref()
                 .map(|s| dec_opt_or_plain(usk, Some(s)))
                 .filter(|s| !s.trim().is_empty())
+                .map(|s| crate::protocol::normalize_utc_millis_iso(&s))
                 .unwrap_or(normalized_pk_creation);
             prev.creation_date = Some(repaired_creation);
             synced_fido2.push(prev);

@@ -1751,6 +1751,17 @@ export function SettingsModal() {
                       {channelLabel}
                     </span>
                   </div>
+                  {syncStatus.message ? (
+                    <div
+                      className={`mt-1 rounded-lg px-2.5 py-2 text-[11.5px] leading-relaxed break-all ${
+                        syncStatus.state === 'error'
+                          ? 'bg-[var(--status-danger)]/10 text-[var(--status-danger)] border border-[var(--status-danger)]/25'
+                          : 'bg-[var(--status-warning)]/10 text-[var(--status-warning)] border border-[var(--status-warning)]/25'
+                      }`}
+                    >
+                      {syncStatus.message}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between gap-3">
