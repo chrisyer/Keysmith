@@ -491,6 +491,7 @@ export interface AppSettings {
   customEquivalentDomains?: string[][];
   disabledAutofillDomains?: string[];
   autoCopyTotpOnFill?: boolean;
+  sshAgentEnabled?: boolean;
   snapshotIntervalDays?: number;
   snapshotKeepCount?: number;
 }
@@ -504,8 +505,19 @@ export interface AppSettingsPatch {
   customEquivalentDomains?: string[][];
   disabledAutofillDomains?: string[];
   autoCopyTotpOnFill?: boolean;
+  sshAgentEnabled?: boolean;
   snapshotIntervalDays?: number;
   snapshotKeepCount?: number;
+}
+
+export interface SshAgentStatus {
+  enabled: boolean;
+  biometricConfirm: boolean;
+  socketListening: boolean;
+  socketPath: string;
+  sshConfigPath: string;
+  sshConfigConfigured: boolean;
+  loadedKeyCount: number;
 }
 
 export type SendType = 'text' | 'file';

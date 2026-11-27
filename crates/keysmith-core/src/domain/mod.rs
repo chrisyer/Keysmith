@@ -819,6 +819,8 @@ pub struct AppSettings {
     pub disabled_autofill_domains: Vec<String>,
     #[serde(default = "default_true_val")]
     pub auto_copy_totp_on_fill: bool,
+    #[serde(default = "default_true_val")]
+    pub ssh_agent_enabled: bool,
     #[serde(default = "default_snapshot_interval")]
     pub snapshot_interval_days: u32,
     #[serde(default = "default_snapshot_keep")]
@@ -836,6 +838,7 @@ impl Default for AppSettings {
             custom_equivalent_domains: Vec::new(),
             disabled_autofill_domains: Vec::new(),
             auto_copy_totp_on_fill: true,
+            ssh_agent_enabled: true,
             snapshot_interval_days: 1,
             snapshot_keep_count: 5,
         }
@@ -853,8 +856,21 @@ pub struct AppSettingsPatch {
     pub custom_equivalent_domains: Option<Vec<Vec<String>>>,
     pub disabled_autofill_domains: Option<Vec<String>>,
     pub auto_copy_totp_on_fill: Option<bool>,
+    pub ssh_agent_enabled: Option<bool>,
     pub snapshot_interval_days: Option<u32>,
     pub snapshot_keep_count: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshAgentStatus {
+    pub enabled: bool,
+    pub biometric_confirm: bool,
+    pub socket_listening: bool,
+    pub socket_path: String,
+    pub ssh_config_path: String,
+    pub ssh_config_configured: bool,
+    pub loaded_key_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

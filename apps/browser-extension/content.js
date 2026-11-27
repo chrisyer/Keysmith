@@ -262,12 +262,219 @@
     return { visible, passwords, newPasswords, totps, usernames };
   }
 
-  function autofillLogin(username, password, totp, anchorInput) {
+  // ==================== Third-Party SSO Detection & Button Matcher ====================
+
+  const SSO_PROVIDERS = [
+    {
+      name: 'Google',
+      ownHosts: ['google.com', 'youtube.com', 'gmail.com'],
+      oauthRe: /accounts\.google\.com\/o\/oauth2|\/auth\/google\b|\/oauth2?\/google\b|provider=google\b/i,
+      attrRe: /\bgoogle\b/i,
+      labelRe: /\bgoogle\b|谷歌/i
+    },
+    {
+      name: 'Apple',
+      ownHosts: ['apple.com', 'icloud.com'],
+      oauthRe: /appleid\.apple\.com\/auth\/authorize|\/auth\/apple\b|\/oauth2?\/apple\b|provider=apple\b/i,
+      attrRe: /\bapple\b/i,
+      labelRe: /\bapple\b/i
+    },
+    {
+      name: 'GitHub',
+      ownHosts: ['github.com'],
+      oauthRe: /github\.com\/login\/oauth|\/auth\/github\b|\/oauth2?\/github\b|provider=github\b/i,
+      attrRe: /\bgithub\b/i,
+      labelRe: /\bgithub\b/i
+    },
+    {
+      name: 'Microsoft',
+      ownHosts: ['microsoft.com', 'live.com', 'office.com', 'azure.com', 'microsoftonline.com'],
+      oauthRe: /login\.microsoftonline\.com|login\.live\.com\/oauth|\/auth\/(microsoft|azure|entra)\b|provider=(microsoft|azuread)\b/i,
+      attrRe: /\b(microsoft|azure[-_]?ad|entra)\b/i,
+      labelRe: /\b(microsoft|azure ad|entra id)\b|微软/i
+    },
+    {
+      name: 'GitLab',
+      ownHosts: ['gitlab.com'],
+      oauthRe: /gitlab\.com\/oauth\/authorize|\/auth\/gitlab\b|\/oauth2?\/gitlab\b|provider=gitlab\b/i,
+      attrRe: /\bgitlab\b/i,
+      labelRe: /\bgitlab\b/i
+    },
+    {
+      name: 'Okta',
+      ownHosts: ['okta.com'],
+      oauthRe: /\.okta\.com\/oauth2|\/auth\/okta\b|\/oauth2?\/okta\b|provider=okta\b/i,
+      attrRe: /\bokta\b/i,
+      labelRe: /\bokta\b/i
+    },
+    {
+      name: 'Discord',
+      ownHosts: ['discord.com'],
+      oauthRe: /discord\.com\/(api\/)?oauth2\/authorize|\/auth\/discord\b|provider=discord\b/i,
+      attrRe: /\bdiscord\b/i,
+      labelRe: /\bdiscord\b/i
+    },
+    {
+      name: 'Slack',
+      ownHosts: ['slack.com'],
+      oauthRe: /slack\.com\/(oauth|openid\/connect)\/authorize|\/auth\/slack\b|provider=slack\b/i,
+      attrRe: /\bslack\b/i,
+      labelRe: /\bslack\b/i
+    },
+    {
+      name: 'Feishu',
+      ownHosts: ['feishu.cn', 'larksuite.com'],
+      oauthRe: /open\.(feishu\.cn|larksuite\.com)\/open-apis\/authen|passport\.feishu\.cn|\/auth\/(feishu|lark)\b/i,
+      attrRe: /\b(feishu|lark)\b/i,
+      labelRe: /\b(feishu|lark)\b|飞书|飛書/i
+    },
+    {
+      name: 'WeChat',
+      ownHosts: ['qq.com', 'wechat.com', 'weixin.qq.com'],
+      oauthRe: /open\.weixin\.qq\.com\/connect\/qrconnect|\/auth\/(wechat|weixin)\b/i,
+      attrRe: /\b(wechat|weixin)\b/i,
+      labelRe: /\b(wechat|weixin)\b|微信/i
+    },
+    {
+      name: 'X',
+      ownHosts: ['x.com', 'twitter.com'],
+      oauthRe: /(twitter|x)\.com\/i\/oauth2\/authorize|api\.twitter\.com\/oauth\/authenticate|\/auth\/twitter\b/i,
+      attrRe: /\btwitter\b/i,
+      labelRe: /\b(twitter)\b|(?:with|via|使用|透過|で)\s*x\b/i
+    }
+  ];
+
+  const SSO_AUTH_VERB_RE =
+    /\b(sign\s*in|log\s*in|login|signin|continue|sign\s*up|connect|auth|sso|with|via)\b|登录|登入|继续|繼續|注册|註冊|授权|授權|ログイン|サインイン|続行|로그인|계속|anmelden|weiter|connexion|continuer|iniciar\s*sesión|continuar/i;
+  const SSO_EXCLUDE_RE =
+    /\b(share|tweet|post\s+to|follow\s+us|google\s+play|app\s+store|youtube|google\s+maps|google\s+docs|star\s+on\s+github|fork\s+on\s+github|join\s+discord|view\s+source)\b|分享|关注我们|下载应用/i;
+
+  let lastProgrammaticSsoClickAt = 0;
+
+  function isOwnProviderHost(host, ownHosts) {
+    const h = String(host || '').toLowerCase();
+    if (!h) return false;
+    return ownHosts.some((d) => h === d || h.endsWith('.' + d));
+  }
+
+  function extractSsoElementSignals(el) {
+    if (!el || typeof el.getAttribute !== 'function') return null;
+    const text = String(el.textContent || el.value || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (text.length > 96) return null;
+    const aria = String(el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
+    let imgAlt = '';
+    if (typeof el.querySelectorAll === 'function') {
+      imgAlt = Array.from(el.querySelectorAll('img[alt], svg[aria-label]'))
+        .map((n) => n.getAttribute('alt') || n.getAttribute('aria-label') || '')
+        .join(' ');
+    }
+    const href = String(
+      el.getAttribute('href') ||
+        el.getAttribute('formaction') ||
+        el.closest?.('form')?.getAttribute?.('action') ||
+        ''
+    );
+    const dataProvider = String(
+      el.getAttribute('data-provider') ||
+        el.getAttribute('data-idp') ||
+        el.getAttribute('data-oauth') ||
+        el.getAttribute('data-social') ||
+        el.getAttribute('data-testid') ||
+        ''
+    );
+    return {
+      combinedLabel: `${text} ${aria} ${imgAlt}`.trim(),
+      href,
+      dataProvider
+    };
+  }
+
+  function detectSsoButtonProvider(el) {
+    const sig = extractSsoElementSignals(el);
+    if (!sig) return null;
+    if (SSO_EXCLUDE_RE.test(sig.combinedLabel)) return null;
+
+    const host = window.location.hostname;
+    const onAuthPath =
+      /\/(log[-_]?in|sign[-_]?in|sign[-_]?up|register|auth|sso|session|oauth)\b/i.test(
+        window.location.pathname || ''
+      ) ||
+      Boolean(
+        typeof document.querySelector === 'function' &&
+          document.querySelector('input[type="password"], input[type="email"]')
+      );
+
+    for (const def of SSO_PROVIDERS) {
+      if (isOwnProviderHost(host, def.ownHosts)) continue;
+      if (sig.href && def.oauthRe.test(sig.href)) {
+        return def.name;
+      }
+      if (sig.dataProvider && def.attrRe.test(sig.dataProvider)) {
+        if (SSO_AUTH_VERB_RE.test(sig.combinedLabel) || onAuthPath) {
+          return def.name;
+        }
+      }
+      if (
+        sig.combinedLabel &&
+        def.labelRe.test(sig.combinedLabel) &&
+        (SSO_AUTH_VERB_RE.test(sig.combinedLabel) ||
+          (onAuthPath && sig.combinedLabel.length <= 28))
+      ) {
+        return def.name;
+      }
+    }
+    return null;
+  }
+
+  function findSsoButtonOnPage(provider) {
+    const target = String(provider || '').trim();
+    if (!target) return null;
+    const targetLower = target.toLowerCase();
+    const candidates = Array.from(
+      document.querySelectorAll(
+        'button, a[href], [role="button"], input[type="button"], input[type="submit"]'
+      )
+    ).filter((el) => isVisibleControl(el, 28));
+
+    for (const el of candidates) {
+      const detected = detectSsoButtonProvider(el);
+      if (detected && detected.toLowerCase() === targetLower) {
+        return el;
+      }
+    }
+
+    // Fallback for custom enterprise SSO names (e.g. "CorpSSO", "Azure AD", "Keycloak")
+    for (const el of candidates) {
+      const sig = extractSsoElementSignals(el);
+      if (!sig || SSO_EXCLUDE_RE.test(sig.combinedLabel)) continue;
+      if (
+        sig.combinedLabel.toLowerCase().includes(targetLower) &&
+        (SSO_AUTH_VERB_RE.test(sig.combinedLabel) || sig.combinedLabel.length <= 36)
+      ) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  function autofillLogin(username, password, totp, anchorInput, ssoProvider) {
+    const cleanSso = String(ssoProvider || '').trim();
     const allVisible = Array.from(document.querySelectorAll('input')).filter(isVisible);
     const segmentedOtp =
       (anchorInput && findSegmentedOtpGroupFromInput(anchorInput)) ||
       findAnySegmentedOtpGroup(anchorInput?.form || document);
     if (allVisible.length === 0 && (!segmentedOtp || segmentedOtp.length === 0)) {
+      if (cleanSso && !password) {
+        const ssoBtn = findSsoButtonOnPage(cleanSso);
+        if (ssoBtn) {
+          lastProgrammaticSsoClickAt = Date.now();
+          ssoBtn.click();
+          return { ok: true, filled: 1, ssoClicked: true, ssoProvider: cleanSso };
+        }
+        return { ok: false, error: t('errNoSsoButton', { provider: cleanSso }) };
+      }
       return { ok: false, error: t('errNoVisibleInputs') };
     }
 
@@ -312,6 +519,18 @@
         markProgrammaticFill(targetTotp);
         setNativeValue(targetTotp, totp);
         filled += 1;
+      }
+    }
+
+    if (cleanSso && !password) {
+      const ssoBtn = findSsoButtonOnPage(cleanSso);
+      if (ssoBtn) {
+        lastProgrammaticSsoClickAt = Date.now();
+        ssoBtn.click();
+        return { ok: true, filled: filled + 1, ssoClicked: true, ssoProvider: cleanSso };
+      }
+      if (filled === 0) {
+        return { ok: false, error: t('errNoSsoButton', { provider: cleanSso }) };
       }
     }
 
@@ -1279,7 +1498,15 @@
               totp = tRes.result.code;
             }
           }
-          const res = autofillLogin(fillItem.username || '', fillItem.password || '', totp, input);
+          const itemSso =
+            fillItem.ssoProvider || fillItem.payload?.ssoProvider || item.ssoProvider || '';
+          const res = autofillLogin(
+            fillItem.username || '',
+            fillItem.password || '',
+            totp,
+            input,
+            itemSso
+          );
           const shouldCopyTotp = Boolean(totp) && data.autoCopyTotp !== false;
           if (shouldCopyTotp) {
             await sendMsg({
@@ -1290,9 +1517,11 @@
           }
           if (res.ok) {
             showToast(
-              shouldCopyTotp
-                ? t('ddFilledWithTotp', { code: totp })
-                : t('ddFilledItem', { title: fillItem.title || item.title || t('ddUnnamed') }),
+              res.ssoClicked && itemSso
+                ? t('ddSsoTriggered', { provider: itemSso })
+                : shouldCopyTotp
+                  ? t('ddFilledWithTotp', { code: totp })
+                  : t('ddFilledItem', { title: fillItem.title || item.title || t('ddUnnamed') }),
               'success'
             );
           } else {
@@ -1578,6 +1807,123 @@
 
     card.appendChild(actions);
     bannerContainer.appendChild(card);
+  }
+
+  function showSaveSsoBanner(info, entry) {
+    if (!ensureOverlay() || !bannerContainer) return;
+    if (bannerContainer.firstChild && bannerContainer.dataset.mode !== 'conditional') {
+      return;
+    }
+    bannerContainer.textContent = '';
+    bannerContainer.dataset.mode = 'sso';
+
+    const provider = info.provider || entry.provider || 'SSO';
+    const card = document.createElement('div');
+    card.className = 'ks-banner';
+
+    const head = document.createElement('div');
+    head.className = 'ks-banner-head';
+    const titleSpan = document.createElement('span');
+    titleSpan.textContent =
+      info.mode === 'attach'
+        ? t('bannerSsoAttachTitle', { title: info.title || window.location.hostname, provider })
+        : t('bannerSsoSaveTitle', { provider });
+    const closeX = document.createElement('button');
+    closeX.type = 'button';
+    closeX.className = 'ks-btn ks-btn-ghost';
+    closeX.textContent = '✕';
+    closeX.addEventListener('click', () => {
+      bannerContainer.textContent = '';
+      delete bannerContainer.dataset.mode;
+      sendMsg({ type: 'CLEAR_PENDING_SSO', origin: entry.origin || window.location.origin });
+    });
+    head.append(titleSpan, closeX);
+    card.appendChild(head);
+
+    const titleFieldWrap = document.createElement('div');
+    titleFieldWrap.className = 'ks-field';
+    const titleLabel = document.createElement('label');
+    titleLabel.textContent = t('bannerLabelTitle');
+    const titleInput = document.createElement('input');
+    titleInput.className = 'ks-input';
+    titleInput.value = info.title || info.suggestedTitle || window.location.hostname;
+    titleFieldWrap.append(titleLabel, titleInput);
+    card.appendChild(titleFieldWrap);
+
+    const userFieldWrap = document.createElement('div');
+    userFieldWrap.className = 'ks-field';
+    const userLabel = document.createElement('label');
+    userLabel.textContent = t('bannerLabelUsername');
+    const userInput = document.createElement('input');
+    userInput.className = 'ks-input';
+    userInput.value = entry.username || info.existingUsername || '';
+    userFieldWrap.append(userLabel, userInput);
+    card.appendChild(userFieldWrap);
+
+    const actions = document.createElement('div');
+    actions.className = 'ks-btn-row';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'ks-btn ks-btn-primary';
+    saveBtn.textContent = t('bannerSsoBtnSave');
+    saveBtn.addEventListener('click', async () => {
+      saveBtn.disabled = true;
+      saveBtn.textContent = t('bannerBtnSaving');
+      const resp = await sendMsg({
+        type: 'SAVE_SSO_LOGIN',
+        url: entry.url || window.location.href,
+        origin: entry.origin || window.location.origin,
+        provider,
+        title: titleInput.value.trim() || window.location.hostname,
+        username: userInput.value.trim(),
+        itemId: info.mode === 'attach' ? info.itemId : undefined
+      });
+      bannerContainer.textContent = '';
+      delete bannerContainer.dataset.mode;
+      if (resp.ok) {
+        showToast(t('bannerSsoToastSaved', { provider }), 'success');
+        fetchAutofillData(true);
+      } else {
+        showToast(resp.error || t('toastSaveFailed'), 'warn');
+      }
+    });
+    actions.appendChild(saveBtn);
+
+    const neverBtn = document.createElement('button');
+    neverBtn.type = 'button';
+    neverBtn.className = 'ks-btn ks-btn-sec';
+    neverBtn.textContent = t('bannerNeverBtn');
+    neverBtn.addEventListener('click', async () => {
+      await sendMsg({ type: 'NEVER_SAVE_ORIGIN', origin: window.location.origin });
+      bannerContainer.textContent = '';
+      delete bannerContainer.dataset.mode;
+    });
+    actions.appendChild(neverBtn);
+
+    card.appendChild(actions);
+    bannerContainer.appendChild(card);
+  }
+
+  async function checkPendingSsoBanner() {
+    if (!isWeb) return;
+    if (/[?&]error=/i.test(window.location.search || '') || /error=/i.test(window.location.hash || '')) {
+      return;
+    }
+    const pendingSso = await sendMsg({
+      type: 'CHECK_PENDING_SSO',
+      origin: window.location.origin
+    });
+    if (!pendingSso?.shouldPrompt || !pendingSso.info || !pendingSso.entry) {
+      return;
+    }
+    const sameLoginPath =
+      window.location.pathname === (pendingSso.entry.loginPath || '') &&
+      Boolean(findSsoButtonOnPage(pendingSso.entry.provider));
+    if (sameLoginPath) {
+      return;
+    }
+    showSaveSsoBanner(pendingSso.info, pendingSso.entry);
   }
 
   async function handleFormSubmitTrigger(targetNode) {
@@ -2447,7 +2793,8 @@
           message.username || '',
           message.password || '',
           message.totp || '',
-          activeDropdownInput
+          activeDropdownInput,
+          message.ssoProvider || ''
         )
       );
       return true;
@@ -2488,6 +2835,34 @@
     document.addEventListener(
       'click',
       (e) => {
+        const ssoControl = e.target?.closest?.(
+          'button, a[href], [role="button"], input[type="button"], input[type="submit"]'
+        );
+        if (ssoControl && Date.now() - lastProgrammaticSsoClickAt > 2500) {
+          const ssoProvider = detectSsoButtonProvider(ssoControl);
+          if (ssoProvider) {
+            const visibleInputs = Array.from(document.querySelectorAll('input')).filter(isVisible);
+            const userInput = visibleInputs.find(
+              (el) => classifyAuthField(el, visibleInputs) === 'username' && el.value.trim().length > 0
+            );
+            const usernameHint = (userInput ? userInput.value.trim() : '') || recallStepUsername();
+            void sendMsg({
+              type: 'RECORD_PENDING_SSO',
+              origin: window.location.origin,
+              url: window.location.href,
+              loginPath: window.location.pathname,
+              provider: ssoProvider,
+              username: usernameHint
+            });
+            const onFocusReturn = () => {
+              setTimeout(() => void checkPendingSsoBanner(), 900);
+            };
+            window.addEventListener('focus', onFocusReturn, { once: true });
+            setTimeout(() => void checkPendingSsoBanner(), 3500);
+            setTimeout(() => void checkPendingSsoBanner(), 8500);
+          }
+        }
+
         const btn = e.target?.closest?.(
           'button[type="submit"], input[type="submit"], button:not([type])'
         );
@@ -2539,7 +2914,9 @@
         });
         if (pending?.payload?.info?.shouldPrompt && pending?.payload?.creds) {
           showSaveLoginBanner(pending.payload.info, pending.payload.creds);
+          return;
         }
+        await checkPendingSsoBanner();
       }, 450);
 
       if (document.body) {

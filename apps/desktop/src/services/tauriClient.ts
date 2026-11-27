@@ -32,6 +32,7 @@ import type {
   SendUpdateInput,
   SessionPreferencesPatch,
   SessionState,
+  SshAgentStatus,
   SshKeyPair,
   SyncStatus,
   TotpCode,
@@ -230,6 +231,8 @@ export interface KeysmithClient {
   watchtowerScan(checkHibp?: boolean): Promise<WatchtowerReport>;
   sshGenerateEd25519(comment?: string): Promise<SshKeyPair>;
   sshAgentSocketPath(): Promise<string>;
+  sshAgentGetStatus(): Promise<SshAgentStatus>;
+  sshAgentConfigureSshConfig(enable: boolean): Promise<SshAgentStatus>;
   autofillAutoType(
     itemId: string,
     mode?: 'credentials' | 'username' | 'password' | 'totp',
@@ -667,6 +670,14 @@ class KeysmithTauriClient implements KeysmithClient {
     return invokeCore<string>('ssh_agent_socket_path');
   }
 
+  sshAgentGetStatus(): Promise<SshAgentStatus> {
+    return invokeCore<SshAgentStatus>('ssh_agent_get_status');
+  }
+
+  sshAgentConfigureSshConfig(enable: boolean): Promise<SshAgentStatus> {
+    return invokeCore<SshAgentStatus>('ssh_agent_configure_ssh_config', { enable });
+  }
+
   autofillAutoType(
     itemId: string,
     mode: 'credentials' | 'username' | 'password' | 'totp' = 'credentials',
@@ -854,6 +865,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
   private demoMasterPassword = 'keysmith';
   private hibpChecked = false;
   private hibpCheckedAt: string | undefined;
+  private demoSshConfigured = false;
   private snapshots: Array<{ info: LocalSnapshotInfo; items: ItemDetail[]; vaults: Omit<Vault, 'itemCount'>[] }> = [];
   private appSettings: AppSettings = {
     language: 'system',
@@ -863,6 +875,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     customEquivalentDomains: [],
     disabledAutofillDomains: [],
     autoCopyTotpOnFill: true,
+    sshAgentEnabled: true,
     snapshotIntervalDays: 1,
     snapshotKeepCount: 5,
   };
@@ -1933,6 +1946,27 @@ class KeysmithPrototypeClient implements KeysmithClient {
 
   async sshAgentSocketPath(): Promise<string> {
     return '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock';
+  }
+
+  async sshAgentGetStatus(): Promise<SshAgentStatus> {
+    const enabled = this.appSettings.sshAgentEnabled !== false;
+    const loadedKeyCount = enabled
+      ? this.items.filter((i) => !i.deletedAt && !i.archived && i.category === 'ssh_key').length
+      : 0;
+    return {
+      enabled,
+      biometricConfirm: Boolean(this.session.sshBiometricConfirm),
+      socketListening: enabled,
+      socketPath: '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock',
+      sshConfigPath: '~/.ssh/config',
+      sshConfigConfigured: this.demoSshConfigured,
+      loadedKeyCount,
+    };
+  }
+
+  async sshAgentConfigureSshConfig(enable: boolean): Promise<SshAgentStatus> {
+    this.demoSshConfigured = enable;
+    return this.sshAgentGetStatus();
   }
 
   async autofillAutoType(

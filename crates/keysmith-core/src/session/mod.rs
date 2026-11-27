@@ -4772,6 +4772,10 @@ impl AppCore {
             .get("auto_copy_totp_on_fill")
             .map(|s| s != "false")
             .unwrap_or(true);
+        let ssh_agent_enabled = raw
+            .get("ssh_agent_enabled")
+            .map(|s| s != "false")
+            .unwrap_or(true);
         let snapshot_interval_days = raw
             .get("snapshot_interval_days")
             .and_then(|s| s.parse::<u32>().ok())
@@ -4791,6 +4795,7 @@ impl AppCore {
             custom_equivalent_domains,
             disabled_autofill_domains,
             auto_copy_totp_on_fill,
+            ssh_agent_enabled,
             snapshot_interval_days,
             snapshot_keep_count,
         })
@@ -4861,6 +4866,10 @@ impl AppCore {
         if let Some(v) = patch.auto_copy_totp_on_fill {
             self.storage
                 .set_app_setting("auto_copy_totp_on_fill", if v { "true" } else { "false" })?;
+        }
+        if let Some(v) = patch.ssh_agent_enabled {
+            self.storage
+                .set_app_setting("ssh_agent_enabled", if v { "true" } else { "false" })?;
         }
         if let Some(days) = patch.snapshot_interval_days {
             self.storage

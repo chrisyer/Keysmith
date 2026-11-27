@@ -385,10 +385,13 @@ async function autofillBestMatchOnTab(tab) {
     type: 'FILL_CREDENTIALS',
     username: item.username || '',
     password: item.password || '',
-    totp
+    totp,
+    ssoProvider: item.ssoProvider || ''
   });
   if (fillRes?.ok) {
-    if (totp && autoCopyTotp) {
+    if (fillRes.ssoClicked && item.ssoProvider) {
+      await showToastInTab(tab.id, t('ddSsoTriggered', { provider: item.ssoProvider }), 'success');
+    } else if (totp && autoCopyTotp) {
       await rpcRaw('clipboard_copy', {
         value: totp,
         label: `${item.title || t('ddUnnamed')} 2FA`,
@@ -757,11 +760,101 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.origin) {
           try {
             await chrome.storage.session.remove(`pendingSave:${message.origin}`);
+            await chrome.storage.session.remove(`pendingSso:${message.origin}`);
           } catch {
             // Ignore
           }
         }
         sendResponse({ ok: true });
+        break;
+      }
+      case 'RECORD_PENDING_SSO': {
+        const origin = message.origin || '';
+        const provider = (message.provider || '').trim();
+        if (origin && provider) {
+          const neverList = await getNeverSaveOrigins();
+          if (!neverList.includes(origin)) {
+            await chrome.storage.session.set({
+              [`pendingSso:${origin}`]: {
+                origin,
+                url: message.url || origin,
+                loginPath: message.loginPath || '/',
+                provider,
+                username: message.username || '',
+                savedAt: Date.now()
+              }
+            });
+          }
+        }
+        sendResponse({ ok: true });
+        break;
+      }
+      case 'CHECK_PENDING_SSO': {
+        const origin = message.origin || '';
+        if (!origin) {
+          sendResponse({ shouldPrompt: false });
+          break;
+        }
+        const key = `pendingSso:${origin}`;
+        const data = await chrome.storage.session.get(key);
+        const entry = data[key];
+        if (!entry || Date.now() - (entry.savedAt || 0) > 300000) {
+          if (entry) await chrome.storage.session.remove(key);
+          sendResponse({ shouldPrompt: false });
+          break;
+        }
+        if (Date.now() - (entry.savedAt || 0) < 900) {
+          sendResponse({ shouldPrompt: false, waiting: true });
+          break;
+        }
+        const neverList = await getNeverSaveOrigins();
+        if (neverList.includes(origin)) {
+          await chrome.storage.session.remove(key);
+          sendResponse({ shouldPrompt: false });
+          break;
+        }
+        const check = await rpcRaw('check_sso_save', {
+          url: entry.url || origin,
+          provider: entry.provider
+        });
+        if (!check.ok || !check.result?.shouldPrompt) {
+          if (check.ok && check.result?.reason === 'already_saved') {
+            await chrome.storage.session.remove(key);
+          }
+          sendResponse({ shouldPrompt: false, reason: check.result?.reason });
+          break;
+        }
+        sendResponse({
+          shouldPrompt: true,
+          info: check.result,
+          entry
+        });
+        break;
+      }
+      case 'CLEAR_PENDING_SSO': {
+        if (message.origin) {
+          await chrome.storage.session.remove(`pendingSso:${message.origin}`);
+        }
+        sendResponse({ ok: true });
+        break;
+      }
+      case 'SAVE_SSO_LOGIN': {
+        const res = await rpcRaw('save_sso_login', {
+          url: message.url || '',
+          provider: message.provider || '',
+          title: message.title || '',
+          username: message.username || '',
+          itemId: message.itemId || undefined
+        });
+        if (res.ok && message.origin) {
+          try {
+            await chrome.storage.session.remove(`pendingSso:${message.origin}`);
+          } catch {
+            // Ignore
+          }
+        }
+        await refreshActiveTabBadge();
+        sendResponse(res);
         break;
       }
       case 'PENDING_SAVE_SET': {
@@ -885,7 +978,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           type: 'FILL_CREDENTIALS',
           username: message.username || '',
           password: message.password || '',
-          totp: message.totp || ''
+          totp: message.totp || '',
+          ssoProvider: message.ssoProvider || ''
         });
         if (fillRes?.ok && message.totp) {
           const st = await rpcRaw('status', {});

@@ -1,4 +1,4 @@
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, Fingerprint, Globe, KeyRound, Loader2, Server } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Eye, EyeOff, Globe, KeyRound, Loader2, Server } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
 import { evaluatePasswordStrength } from '../../services/generator';
@@ -6,7 +6,6 @@ import { isTauriRuntime, KeysmithIpcError, tauriClient } from '../../services/ta
 import { useSessionStore } from '../../stores/sessionStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
-import type { AccountPasskey } from '../../types/domain';
 
 export function AuthScreen() {
   const inTauri = isTauriRuntime();
@@ -18,7 +17,6 @@ export function AuthScreen() {
   const cancelAddingAccount = useSessionStore((s) => s.cancelAddingAccount);
   const switchAccount = useSessionStore((s) => s.switchAccount);
   const login = useSessionStore((s) => s.login);
-  const loginWithPasskey = useSessionStore((s) => s.loginWithPasskey);
   const register = useSessionStore((s) => s.register);
   const getFilter = useUiStore((s) => s.getFilter);
   const refreshAll = useVaultStore((s) => s.refreshAll);
@@ -42,9 +40,6 @@ export function AuthScreen() {
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [passkeyLoading, setPasskeyLoading] = useState(false);
-  const [accountPasskeys, setAccountPasskeys] = useState<AccountPasskey[]>([]);
-  const [selectedPasskeyId, setSelectedPasskeyId] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   const canCancelBack = addingAccount || savedAccounts.length > 0;
@@ -89,22 +84,6 @@ export function AuthScreen() {
     [serverUrl],
   );
 
-  useEffect(() => {
-    if (addingAccount) {
-      setAccountPasskeys([]);
-      return;
-    }
-    void tauriClient
-      .accountPasskeyList()
-      .then((res) => {
-        setAccountPasskeys(res.credentials);
-        if (res.credentials[0]) setSelectedPasskeyId(res.credentials[0].id);
-      })
-      .catch(() => {
-        setAccountPasskeys([]);
-      });
-  }, [inTauri, addingAccount]);
-
   const probePrelogin = async () => {
     const cleanServer = serverUrl.trim();
     const cleanEmail = email.trim();
@@ -113,19 +92,6 @@ export function AuthScreen() {
       await tauriClient.authPrelogin(cleanServer, cleanEmail);
     } catch {
       // Silent on blur; handleSubmit surfaces errors
-    }
-  };
-
-  const handlePasskeyLogin = async () => {
-    setError(null);
-    setPasskeyLoading(true);
-    try {
-      await loginWithPasskey(selectedPasskeyId || undefined);
-      await refreshAll(getFilter());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Passkey error');
-    } finally {
-      setPasskeyLoading(false);
     }
   };
 
@@ -489,39 +455,6 @@ export function AuthScreen() {
               {tab === 'login' ? dict.auth.signInBtn : dict.auth.registerBtn}
             </button>
           </div>
-
-          {!addingAccount && tab === 'login' && accountPasskeys.length > 0 && (
-            <div className="pt-2.5 border-t border-[var(--border-subtle)] flex flex-col gap-2">
-              <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
-                <span>{dict.auth.orPasskey}</span>
-                <select
-                  value={selectedPasskeyId}
-                  onChange={(e) => setSelectedPasskeyId(e.target.value)}
-                  aria-label="Passkey"
-                  className="ks-select-sm min-w-[110px]"
-                >
-                  {accountPasskeys.map((pk) => (
-                    <option key={pk.id} value={pk.id}>
-                      {pk.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="button"
-                disabled={passkeyLoading}
-                onClick={() => void handlePasskeyLogin()}
-                className="w-full py-2.5 rounded-lg bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[13px] font-medium text-[var(--text-primary)] flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                {passkeyLoading ? (
-                  <Loader2 size={15} className="animate-spin text-[var(--accent-primary)]" />
-                ) : (
-                  <Fingerprint size={16} className="text-[var(--accent-primary)]" />
-                )}
-                {passkeyLoading ? dict.auth.verifyingPasskey : dict.auth.usePasskeyBtn}
-              </button>
-            </div>
-          )}
 
           {!inTauri && (
             <p className="text-xs text-center text-[var(--text-muted)]">

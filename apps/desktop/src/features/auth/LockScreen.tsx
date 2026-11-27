@@ -1,7 +1,7 @@
-import { ArrowRight, Fingerprint, Globe, KeyRound, Loader2, Lock, LogOut, UserPlus } from 'lucide-react';
+import { ArrowRight, Fingerprint, Globe, Loader2, Lock, LogOut, UserPlus } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
-import { isTauriRuntime, tauriClient } from '../../services/tauriClient';
+import { isTauriRuntime } from '../../services/tauriClient';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
@@ -18,7 +18,6 @@ export function LockScreen() {
   const savedAccounts = useSessionStore((s) => s.savedAccounts);
   const unlockWithPassword = useSessionStore((s) => s.unlockWithPassword);
   const unlockWithBiometric = useSessionStore((s) => s.unlockWithBiometric);
-  const loginWithPasskey = useSessionStore((s) => s.loginWithPasskey);
   const switchAccount = useSessionStore((s) => s.switchAccount);
   const startAddingAccount = useSessionStore((s) => s.startAddingAccount);
   const logout = useSessionStore((s) => s.logout);
@@ -31,23 +30,10 @@ export function LockScreen() {
   const [shaking, setShaking] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [touchScanning, setTouchScanning] = useState(false);
-  const [passkeyScanning, setPasskeyScanning] = useState(false);
-  const [hasAccountPasskeys, setHasAccountPasskeys] = useState(!inTauri);
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   const hasAutoPromptedRef = useRef(false);
   const passwordInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    void tauriClient
-      .accountPasskeyList()
-      .then((res) => {
-        setHasAccountPasskeys(res.credentials.length > 0);
-      })
-      .catch(() => {
-        setHasAccountPasskeys(false);
-      });
-  }, [accountId]);
 
   const triggerShake = () => {
     setShaking(false);
@@ -92,20 +78,6 @@ export function LockScreen() {
     [dict.lock.biometricFailedFallback, getFilter, refreshAll, unlockWithBiometric],
   );
 
-  const handlePasskeyUnlock = async () => {
-    setPasskeyScanning(true);
-    setError(null);
-    try {
-      await loginWithPasskey();
-      await refreshAll(getFilter());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Passkey unlock failed');
-      window.setTimeout(() => passwordInputRef.current?.focus(), 60);
-    } finally {
-      setPasskeyScanning(false);
-    }
-  };
-
   useEffect(() => {
     if (!inTauri || !biometricEnabled || hasAutoPromptedRef.current) return;
 
@@ -129,7 +101,7 @@ export function LockScreen() {
   }, [inTauri, biometricEnabled, handleTouchId]);
 
   const initials = (displayName || email || 'K').slice(0, 2).toUpperCase();
-  const hasQuickUnlock = biometricEnabled || hasAccountPasskeys;
+  const hasQuickUnlock = biometricEnabled;
 
   const content = (
     <div
@@ -204,7 +176,7 @@ export function LockScreen() {
           </div>
         )}
 
-        {/* Default Primary Unlock: Touch ID & Passkey / Hello Key */}
+        {/* Default Primary Unlock: Touch ID / Windows Hello */}
         {biometricEnabled && (
           <button
             type="button"
@@ -218,31 +190,6 @@ export function LockScreen() {
               <Fingerprint size={17} />
             )}
             {touchScanning ? dict.lock.touchIdVerifying : dict.lock.touchIdBtn}
-          </button>
-        )}
-
-        {hasAccountPasskeys && (
-          <button
-            type="button"
-            onClick={() => void handlePasskeyUnlock()}
-            disabled={passkeyScanning}
-            className={`${biometricEnabled ? 'mt-2.5' : 'mt-5'} w-full h-10 rounded-lg text-[13px] font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer ${
-              biometricEnabled
-                ? 'bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[var(--text-primary)]'
-                : 'bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white font-semibold h-11'
-            }`}
-          >
-            <KeyRound
-              size={15}
-              className={
-                passkeyScanning
-                  ? 'animate-pulse'
-                  : biometricEnabled
-                    ? 'text-[var(--accent-primary)]'
-                    : 'text-white'
-              }
-            />
-            {passkeyScanning ? dict.lock.passkeyVerifying : dict.lock.passkeyBtn}
           </button>
         )}
 

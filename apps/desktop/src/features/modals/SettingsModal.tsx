@@ -15,13 +15,13 @@ import {
   Monitor,
   Moon,
   Palette,
-  Pencil,
   Plane,
   Plus,
   RefreshCw,
   RotateCcw,
   Shield,
   Sun,
+  Terminal,
   Trash2,
   UserPlus,
   X,
@@ -30,18 +30,12 @@ import { useEffect, useState } from 'react';
 import { ModalDialog } from '../../components/ModalDialog';
 import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
 import { AboutContent } from './AboutModal';
-import {
-  detectPasskeyCapabilities,
-  resolveAaguidProvider,
-  syncAcceptedCredentials,
-  syncCurrentUserDetails,
-} from '../../services/passkey';
+import { syncCurrentUserDetails } from '../../services/passkey';
 import { tauriClient } from '../../services/tauriClient';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import type {
-  AccountPasskey,
   AccountSummary,
   AppUpdateInfo,
   BrowserIntegrationStatus,
@@ -50,6 +44,7 @@ import type {
   ImportSummary,
   LocalSnapshotInfo,
   MaskedEmailProvider,
+  SshAgentStatus,
 } from '../../types/domain';
 import { formatDateTime } from '../../utils/format';
 import { openExternalUrl } from '../../utils/opener';
@@ -117,18 +112,16 @@ export function SettingsModal() {
   const setVaultTravelSafe = useVaultStore((s) => s.setVaultTravelSafe);
 
   const [tab, setTab] = useState<
-    'appearance' | 'security' | 'passkeys' | 'browser' | 'import_export' | 'sync' | 'shortcuts' | 'about'
+    'appearance' | 'security' | 'ssh' | 'browser' | 'import_export' | 'sync' | 'shortcuts' | 'about'
   >('appearance');
   const [browserStatus, setBrowserStatus] = useState<BrowserIntegrationStatus | null>(null);
   const [browserBusy, setBrowserBusy] = useState(false);
   const [extraExtId, setExtraExtId] = useState('');
   const [copiedExtId, setCopiedExtId] = useState(false);
-  const [passkeyRpId, setPasskeyRpId] = useState('');
-  const [passkeyUserId, setPasskeyUserId] = useState('');
-  const [accountPasskeys, setAccountPasskeys] = useState<AccountPasskey[]>([]);
-  const [passkeySupported, setPasskeySupported] = useState(true);
-  const [editingPasskeyId, setEditingPasskeyId] = useState<string | null>(null);
-  const [editingPasskeyName, setEditingPasskeyName] = useState('');
+  const [sshStatus, setSshStatus] = useState<SshAgentStatus | null>(null);
+  const [sshBusy, setSshBusy] = useState(false);
+  const [copiedSshSocket, setCopiedSshSocket] = useState(false);
+  const [copiedSshSnippet, setCopiedSshSnippet] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState(displayName);
 
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
@@ -199,24 +192,20 @@ export function SettingsModal() {
   }, [open]);
 
   useEffect(() => {
-    if (!open || tab !== 'passkeys') return;
+    if (!open || tab !== 'ssh') return;
     let active = true;
-    void Promise.all([tauriClient.accountPasskeyList(), detectPasskeyCapabilities()])
-      .then(([res, caps]) => {
-        if (!active) return;
-        setPasskeyRpId(res.rpId);
-        setPasskeyUserId(res.userId);
-        setAccountPasskeys(res.credentials);
-        setPasskeySupported(caps.supported && caps.platformAuthenticator);
-        void syncAcceptedCredentials(res.rpId, res.userId, res.credentials);
+    void tauriClient
+      .sshAgentGetStatus()
+      .then((res) => {
+        if (active) setSshStatus(res);
       })
       .catch(() => {
-        if (active) setAccountPasskeys([]);
+        if (active) setSshStatus(null);
       });
     return () => {
       active = false;
     };
-  }, [open, tab]);
+  }, [open, tab, appSettings.sshAgentEnabled, sshBiometricConfirm]);
 
   useEffect(() => {
     if (!open || tab !== 'browser') return;
@@ -249,30 +238,6 @@ export function SettingsModal() {
       active = false;
     };
   }, [open, tab]);
-
-  const handleRegisterPasskey = async (deviceType: 'multiDevice' | 'singleDevice') => {
-    const label = deviceType === 'multiDevice' ? 'MacBook Passkey' : 'Security Key';
-    await tauriClient.accountPasskeyRegister(label, deviceType);
-    const updated = await tauriClient.accountPasskeyList();
-    setAccountPasskeys(updated.credentials);
-    showToast({ label: dict.settings.tabs.passkeys, text: label, kind: 'info' });
-  };
-
-  const handleRenamePasskey = async (id: string) => {
-    if (!editingPasskeyName.trim()) return;
-    await tauriClient.accountPasskeyRename(id, editingPasskeyName);
-    const updated = await tauriClient.accountPasskeyList();
-    setAccountPasskeys(updated.credentials);
-    setEditingPasskeyId(null);
-  };
-
-  const handleDeletePasskey = async (id: string) => {
-    await tauriClient.accountPasskeyDelete(id);
-    const updated = await tauriClient.accountPasskeyList();
-    setAccountPasskeys(updated.credentials);
-    void syncAcceptedCredentials(updated.rpId, updated.userId, updated.credentials);
-    showToast({ label: dict.settings.tabs.passkeys, text: dict.common.remove, kind: 'info' });
-  };
 
   const handleProfileSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -480,7 +445,7 @@ export function SettingsModal() {
               [
                 { id: 'appearance', label: dict.settings.tabs.appearance, icon: Palette },
                 { id: 'security', label: dict.settings.tabs.security, icon: Shield },
-                { id: 'passkeys', label: dict.settings.tabs.passkeys, icon: Fingerprint },
+                { id: 'ssh', label: dict.settings.tabs.ssh, icon: Terminal },
                 { id: 'browser', label: dict.settings.tabs.browser, icon: Globe },
                 { id: 'import_export', label: dict.settings.tabs.import_export, icon: ArrowDownToLine },
                 { id: 'sync', label: dict.settings.tabs.sync, icon: RefreshCw },
@@ -712,19 +677,6 @@ export function SettingsModal() {
                   />
                 </label>
 
-                <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
-                  <div>
-                    <div className="font-medium text-[var(--text-primary)]">{dict.settings.sshAgentTitle}</div>
-                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.sshAgentDesc}</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={sshBiometricConfirm}
-                    onChange={(e) => void updatePreferences({ sshBiometricConfirm: e.target.checked })}
-                    className="ks-checkbox"
-                  />
-                </label>
-
                 <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
                   <div>
                     <div className="font-medium text-[var(--text-primary)]">{dict.settings.trashPurgeTitle}</div>
@@ -859,141 +811,264 @@ export function SettingsModal() {
               </div>
             )}
 
-            {tab === 'passkeys' && (
-              <div className="flex flex-col gap-4 text-xs">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
-                      {dict.settings.tabs.passkeys}
-                    </h2>
-                    <p className="text-[11px] text-[var(--text-muted)] mt-0.5 font-mono-tabular">
-                      {passkeyRpId} · {passkeyUserId.slice(0, 12)}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {passkeySupported && (
+            {tab === 'ssh' && (
+              <div className="flex flex-col gap-3.5 text-[13px]">
+                {/* 1. SSH Agent Service Toggle + Live Status + Socket Path */}
+                <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-3">
+                  <label className="flex items-start justify-between gap-4 cursor-pointer">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <Terminal size={16} className="text-[var(--accent-primary)] shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-[var(--text-primary)]">
+                            {dict.settings.sshSection.serviceTitle}
+                          </span>
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                              (appSettings.sshAgentEnabled ?? true)
+                                ? 'bg-[var(--status-success)]/12 text-[var(--status-success)]'
+                                : 'bg-[var(--bg-detail)] text-[var(--text-muted)] border border-[var(--border-subtle)]'
+                            }`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                (appSettings.sshAgentEnabled ?? true)
+                                  ? 'bg-[var(--status-success)]'
+                                  : 'bg-[var(--text-muted)]'
+                              }`}
+                            />
+                            {(appSettings.sshAgentEnabled ?? true)
+                              ? fmt(dict.settings.sshSection.statusActive, {
+                                  count: sshStatus?.loadedKeyCount ?? 0,
+                                })
+                              : dict.settings.sshSection.statusDisabled}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">
+                          {dict.settings.sshSection.serviceDesc}
+                        </p>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={appSettings.sshAgentEnabled ?? true}
+                      onChange={async (e) => {
+                        const next = e.target.checked;
+                        await updateAppSettings({ sshAgentEnabled: next });
+                        const fresh = await tauriClient.sshAgentGetStatus().catch(() => null);
+                        if (fresh) setSshStatus(fresh);
+                      }}
+                      className="ks-checkbox shrink-0 mt-0.5"
+                      aria-label={dict.settings.sshSection.serviceTitle}
+                    />
+                  </label>
+
+                  <div className="pt-2.5 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
+                    <span className="text-xs text-[var(--text-secondary)] shrink-0">
+                      {dict.settings.sshSection.socketLabel}
+                    </span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <code className="font-mono-tabular text-[11px] px-2 py-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-primary)] truncate">
+                        {sshStatus?.socketPath ??
+                          '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock'}
+                      </code>
                       <button
                         type="button"
-                        onClick={() => void handleRegisterPasskey('multiDevice')}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white text-[11px] font-medium cursor-pointer"
+                        onClick={() => {
+                          const sock =
+                            sshStatus?.socketPath ??
+                            '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock';
+                          void tauriClient.clipboardCopySecret(
+                            sock,
+                            dict.settings.sshSection.socketLabel,
+                            false,
+                          );
+                          setCopiedSshSocket(true);
+                          setTimeout(() => setCopiedSshSocket(false), 1500);
+                        }}
+                        aria-label={dict.common.copy}
+                        className="p-1.5 rounded-md hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer shrink-0"
                       >
-                        <Plus size={12} />
-                        {dict.settings.platformPasskey}
+                        {copiedSshSocket ? (
+                          <Check size={13} className="text-[var(--status-success)]" />
+                        ) : (
+                          <Copy size={13} />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Biometric Sign Approval + Live Status */}
+                <label className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-start justify-between gap-4 cursor-pointer">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <Fingerprint size={16} className="text-[var(--accent-primary)] shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-[var(--text-primary)]">
+                          {dict.settings.sshSection.bioTitle}
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                            sshBiometricConfirm
+                              ? 'bg-[var(--status-success)]/12 text-[var(--status-success)]'
+                              : 'bg-[var(--bg-detail)] text-[var(--text-muted)] border border-[var(--border-subtle)]'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              sshBiometricConfirm ? 'bg-[var(--status-success)]' : 'bg-[var(--text-muted)]'
+                            }`}
+                          />
+                          {sshBiometricConfirm
+                            ? dict.settings.sshSection.bioStatusOn
+                            : dict.settings.sshSection.bioStatusOff}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">
+                        {dict.settings.sshSection.bioDesc}
+                      </p>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={sshBiometricConfirm}
+                    onChange={(e) => void updatePreferences({ sshBiometricConfirm: e.target.checked })}
+                    className="ks-checkbox shrink-0 mt-0.5"
+                    aria-label={dict.settings.sshSection.bioTitle}
+                  />
+                </label>
+
+                {/* 3. 1Password-style One-Click ~/.ssh/config Setup */}
+                <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                          {dict.settings.sshSection.configTitle}
+                        </h2>
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                            sshStatus?.sshConfigConfigured
+                              ? 'bg-[var(--status-success)]/12 text-[var(--status-success)]'
+                              : 'bg-[var(--status-warning)]/12 text-[var(--status-warning)]'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              sshStatus?.sshConfigConfigured
+                                ? 'bg-[var(--status-success)]'
+                                : 'bg-[var(--status-warning)]'
+                            }`}
+                          />
+                          {sshStatus?.sshConfigConfigured
+                            ? dict.settings.sshSection.configStatusConfigured
+                            : dict.settings.sshSection.configStatusUnconfigured}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">
+                        {dict.settings.sshSection.configDesc}
+                      </p>
+                    </div>
+                  </div>
+
+                  <pre className="p-3 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] font-mono-tabular text-[11.5px] leading-relaxed text-[var(--text-primary)] overflow-x-auto select-all">{`Host *\n  IdentityAgent "${sshStatus?.socketPath ?? '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock'}"`}</pre>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {!sshStatus?.sshConfigConfigured ? (
+                      <button
+                        type="button"
+                        disabled={sshBusy}
+                        onClick={async () => {
+                          setSshBusy(true);
+                          try {
+                            if (appSettings.sshAgentEnabled === false) {
+                              await updateAppSettings({ sshAgentEnabled: true });
+                            }
+                            const next = await tauriClient.sshAgentConfigureSshConfig(true);
+                            setSshStatus(next);
+                            showToast({
+                              label: dict.settings.tabs.ssh,
+                              text: dict.settings.sshSection.configuredToast,
+                              kind: 'info',
+                            });
+                          } catch (err) {
+                            showToast({
+                              label: dict.settings.tabs.ssh,
+                              text: err instanceof Error ? err.message : String(err),
+                              kind: 'warning',
+                            });
+                          } finally {
+                            setSshBusy(false);
+                          }
+                        }}
+                        className="min-h-[36px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-white text-[13px] font-medium cursor-pointer"
+                      >
+                        <Terminal size={14} />
+                        {dict.settings.sshSection.configureBtn}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={sshBusy}
+                        onClick={async () => {
+                          setSshBusy(true);
+                          try {
+                            const next = await tauriClient.sshAgentConfigureSshConfig(false);
+                            setSshStatus(next);
+                            showToast({
+                              label: dict.settings.tabs.ssh,
+                              text: dict.settings.sshSection.removedConfigToast,
+                              kind: 'info',
+                            });
+                          } catch (err) {
+                            showToast({
+                              label: dict.settings.tabs.ssh,
+                              text: err instanceof Error ? err.message : String(err),
+                              kind: 'warning',
+                            });
+                          } finally {
+                            setSshBusy(false);
+                          }
+                        }}
+                        className="min-h-[36px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--status-danger)]/10 border border-[var(--border-strong)] hover:border-[var(--status-danger)]/40 text-[13px] font-medium text-[var(--text-primary)] hover:text-[var(--status-danger)] cursor-pointer"
+                      >
+                        <Trash2 size={14} />
+                        {dict.settings.sshSection.removeConfigBtn}
                       </button>
                     )}
+
                     <button
                       type="button"
-                      onClick={() => void handleRegisterPasskey('singleDevice')}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[var(--border-strong)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] text-[11px] font-medium cursor-pointer"
+                      onClick={() => {
+                        const sock =
+                          sshStatus?.socketPath ??
+                          '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock';
+                        const snippet = `Host *\n  IdentityAgent "${sock}"\n`;
+                        void tauriClient.clipboardCopySecret(
+                          snippet,
+                          dict.settings.sshSection.copySnippetBtn,
+                          false,
+                        );
+                        setCopiedSshSnippet(true);
+                        setTimeout(() => setCopiedSshSnippet(false), 1500);
+                        showToast({
+                          label: dict.settings.tabs.ssh,
+                          text: dict.settings.sshSection.copySnippetBtn,
+                          kind: 'info',
+                        });
+                      }}
+                      className="min-h-[36px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[13px] font-medium text-[var(--text-primary)] cursor-pointer"
                     >
-                      <Plus size={12} />
-                      {dict.settings.hardwareKey}
+                      {copiedSshSnippet ? (
+                        <Check size={14} className="text-[var(--status-success)]" />
+                      ) : (
+                        <Copy size={14} />
+                      )}
+                      {dict.settings.sshSection.copySnippetBtn}
                     </button>
                   </div>
                 </div>
-
-                <div className="flex flex-col gap-2">
-                  {accountPasskeys.length === 0 ? (
-                    <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] text-center text-[var(--text-muted)]">
-                      {dict.common.none}
-                    </div>
-                  ) : (
-                    accountPasskeys.map((cred) => {
-                      const provider = resolveAaguidProvider(cred.aaguid);
-                      const isRenaming = editingPasskeyId === cred.id;
-                      return (
-                        <div
-                          key={cred.id}
-                          className="p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between gap-3"
-                        >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div
-                              className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0"
-                              style={{ backgroundColor: provider.color }}
-                              title={provider.name}
-                            >
-                              {provider.badgeText}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              {isRenaming ? (
-                                <div className="flex items-center gap-1.5">
-                                  <input
-                                    type="text"
-                                    value={editingPasskeyName}
-                                    onChange={(e) => setEditingPasskeyName(e.target.value)}
-                                    className="px-2 py-1 rounded bg-[var(--bg-input)] border border-[var(--accent-primary)] text-xs text-[var(--text-primary)]"
-                                    autoFocus
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleRenamePasskey(cred.id)}
-                                    aria-label={dict.common.save}
-                                    className="p-1 rounded bg-[var(--accent-primary)] text-white cursor-pointer"
-                                  >
-                                    <Check size={12} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="font-medium text-[var(--text-primary)] truncate block">
-                                  {cred.name}
-                                </span>
-                              )}
-                              <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                                {provider.name} · {new Date(cred.registeredAt).toLocaleDateString()}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingPasskeyId(cred.id);
-                                setEditingPasskeyName(cred.name);
-                              }}
-                              aria-label={dict.common.edit}
-                              className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer"
-                            >
-                              <Pencil size={13} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleDeletePasskey(cred.id)}
-                              aria-label={dict.common.delete}
-                              className="p-1.5 rounded-lg hover:bg-[var(--status-danger)]/10 text-[var(--text-secondary)] hover:text-[var(--status-danger)] cursor-pointer"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                <form
-                  onSubmit={(e) => void handleProfileSave(e)}
-                  className="p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-end justify-between gap-3"
-                >
-                  <div className="flex-1">
-                    <label htmlFor="pk-profile-name" className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1">
-                      {dict.auth.displayName}
-                    </label>
-                    <input
-                      id="pk-profile-name"
-                      type="text"
-                      value={profileNameDraft}
-                      onChange={(e) => setProfileNameDraft(e.target.value)}
-                      className="ks-input w-full border-[var(--border-strong)]"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="min-h-[34px] px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer shrink-0"
-                  >
-                    {dict.common.save}
-                  </button>
-                </form>
               </div>
             )}
 
@@ -1660,6 +1735,30 @@ export function SettingsModal() {
                     </span>
                   </div>
                 </div>
+
+                <form
+                  onSubmit={(e) => void handleProfileSave(e)}
+                  className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-end justify-between gap-3"
+                >
+                  <div className="flex-1">
+                    <label htmlFor="sync-profile-name" className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+                      {dict.auth.displayName}
+                    </label>
+                    <input
+                      id="sync-profile-name"
+                      type="text"
+                      value={profileNameDraft}
+                      onChange={(e) => setProfileNameDraft(e.target.value)}
+                      className="ks-input w-full border-[var(--border-strong)]"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="min-h-[34px] px-3.5 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-medium text-[var(--text-primary)] cursor-pointer shrink-0"
+                  >
+                    {dict.common.save}
+                  </button>
+                </form>
 
                 {accounts.length > 0 && (
                   <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-2">

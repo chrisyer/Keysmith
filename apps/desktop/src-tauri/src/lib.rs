@@ -965,6 +965,8 @@ pub fn run() {
             commands::watchtower_scan,
             commands::ssh_generate_ed25519,
             commands::ssh_agent_socket_path,
+            commands::ssh_agent_get_status,
+            commands::ssh_agent_configure_ssh_config,
             commands::autofill_auto_type,
             commands::favicon_fetch,
             commands::clipboard_copy_secret,

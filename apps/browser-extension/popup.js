@@ -227,15 +227,22 @@ async function autofillSummaryItem(item, isVaultSummary = false) {
     }
   }
 
+  const ssoProvider =
+    detail.ssoProvider || detail.payload?.ssoProvider || item.ssoProvider || '';
   const res = await sendBg({
     type: 'FILL_ACTIVE_TAB',
     tabId: activeTab.id,
     username: detail.username || '',
     password: detail.password || '',
-    totp
+    totp,
+    ssoProvider
   });
   if (res.ok) {
-    showToast(t('toastAutofilled'));
+    showToast(
+      res.ssoClicked && ssoProvider
+        ? t('ddSsoTriggered', { provider: ssoProvider })
+        : t('toastAutofilled')
+    );
     setTimeout(() => window.close(), 420);
   } else {
     showToast(res.error || t('toastNoLoginFields'));
@@ -331,7 +338,13 @@ async function openDetailView(itemId, fallbackSummary = null, cardOrIdent = null
     };
   }
 
-  const canFillLogin = Boolean(detail.username || detail.password || detail.hasTotp);
+  const canFillLogin = Boolean(
+    detail.username ||
+      detail.password ||
+      detail.hasTotp ||
+      detail.ssoProvider ||
+      detail.payload?.ssoProvider
+  );
   const canFillCard = detail.category === 'credit_card' || cardOrIdent?.kind === 'card';
   const canFillIdent = detail.category === 'identity' || cardOrIdent?.kind === 'identity';
   detailFillBtn.classList.toggle('hidden', !canFillLogin && !canFillCard && !canFillIdent);

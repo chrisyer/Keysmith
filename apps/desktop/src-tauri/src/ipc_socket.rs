@@ -290,6 +290,8 @@ async fn dispatch_rpc(
         "cards_and_identities" => rpc_cards_and_identities(core),
         "check_login_save" => rpc_check_login_save(core, params),
         "save_or_update_login" => rpc_save_or_update_login(app, core, params).await,
+        "check_sso_save" => rpc_check_sso_save(core, params),
+        "save_sso_login" => rpc_save_sso_login(app, core, params).await,
         "passkey_list_for_rp" => rpc_passkey_list_for_rp(core, params),
         "passkey_create" => rpc_passkey_create(app, core, params).await,
         "passkey_assert" => rpc_passkey_assert(app, core, params).await,
@@ -339,6 +341,13 @@ async fn dispatch_rpc(
             Ok(json!({ "focused": true }))
         }
         "ssh_list_keys" => {
+            if !core
+                .app_settings_get()
+                .map(|s| s.ssh_agent_enabled)
+                .unwrap_or(true)
+            {
+                return Ok(json!({ "keys": [] }));
+            }
             let identities = core.ssh_list_identities().map_err(|e| e.to_string())?;
             let keys: Vec<Value> = identities
                 .into_iter()
@@ -619,6 +628,9 @@ async fn rpc_get(core: &AppCore, params: &Value) -> Result<Value, String> {
     let mut val = serde_json::to_value(&item).map_err(|e| e.to_string())?;
     if let Some(obj) = val.as_object_mut() {
         obj.insert("hasTotp".to_string(), Value::Bool(totp.is_some()));
+        if let Some(ref sso) = item.payload.sso_provider {
+            obj.insert("ssoProvider".to_string(), Value::String(sso.clone()));
+        }
         if let Some(u) = username {
             obj.insert("username".to_string(), Value::String(u));
         }
@@ -1405,6 +1417,268 @@ async fn rpc_save_or_update_login(
     }))
 }
 
+fn rpc_check_sso_save(core: &AppCore, params: &Value) -> Result<Value, String> {
+    if core.session_get_state().status != AuthStatus::Unlocked {
+        return Ok(json!({ "shouldPrompt": false, "reason": "locked" }));
+    }
+    let raw_url = params
+        .get("url")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "缺少 url 参数".to_string())?;
+    let provider = params
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "缺少 provider 参数".to_string())?;
+
+    let Some((target_url, target_host)) = parse_url_host(raw_url) else {
+        return Ok(json!({ "shouldPrompt": false, "reason": "invalid_url" }));
+    };
+
+    let settings = core.app_settings_get().unwrap_or_default();
+    if is_domain_autofill_disabled(&target_host, &settings.disabled_autofill_domains) {
+        return Ok(json!({ "shouldPrompt": false, "reason": "site_disabled" }));
+    }
+
+    let summaries = core
+        .item_list(ItemFilter {
+            trashed: Some(false),
+            archived: Some(false),
+            ..Default::default()
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut attach_candidate: Option<(String, String, Option<String>)> = None;
+    for sum in summaries {
+        if sum.category != ItemCategory::Login
+            && sum.category != ItemCategory::Password
+            && sum.category != ItemCategory::Passkey
+        {
+            continue;
+        }
+        let Ok(Some(item)) = core.item_get(&sum.id) else {
+            continue;
+        };
+        if !item_matches_url(
+            &item,
+            raw_url,
+            &target_url,
+            &target_host,
+            &settings.custom_equivalent_domains,
+        ) {
+            continue;
+        }
+        if let Some(ref existing_sso) = item.payload.sso_provider {
+            if existing_sso.trim().eq_ignore_ascii_case(provider) {
+                return Ok(json!({
+                    "shouldPrompt": false,
+                    "reason": "already_saved",
+                    "itemId": item.id,
+                }));
+            }
+        } else if attach_candidate.is_none() && sum.category == ItemCategory::Login {
+            let (u, _, _) = extract_credentials(&item);
+            attach_candidate = Some((item.id, item.title, u));
+        }
+    }
+
+    if let Some((item_id, title, existing_u)) = attach_candidate {
+        return Ok(json!({
+            "shouldPrompt": true,
+            "mode": "attach",
+            "itemId": item_id,
+            "title": title,
+            "existingUsername": existing_u,
+            "provider": provider,
+            "suggestedTitle": extract_domain(raw_url),
+        }));
+    }
+
+    Ok(json!({
+        "shouldPrompt": true,
+        "mode": "create",
+        "provider": provider,
+        "suggestedTitle": extract_domain(raw_url),
+    }))
+}
+
+async fn rpc_save_sso_login(
+    app: &AppHandle,
+    core: &Arc<AppCore>,
+    params: &Value,
+) -> Result<Value, String> {
+    require_unlocked(core)?;
+
+    let raw_url = params
+        .get("url")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "缺少 url 参数".to_string())?;
+    let provider = params
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "缺少 provider 参数".to_string())?
+        .to_string();
+    let username = params
+        .get("username")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let title_param = params
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let item_id = params
+        .get("itemId")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let host = extract_domain(raw_url);
+    let normalized_url = if raw_url.contains("://") {
+        Url::parse(raw_url)
+            .map(|u| format!("{}://{}", u.scheme(), u.host_str().unwrap_or(&host)))
+            .unwrap_or_else(|_| raw_url.to_string())
+    } else {
+        format!("https://{host}")
+    };
+
+    if let Some(id) = item_id {
+        let existing = core
+            .item_get(id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("未找到条目: {id}"))?;
+        let mut draft = existing.to_draft();
+        draft.sso_provider = Some(provider.clone());
+        if let Some(t) = title_param {
+            draft.title = t;
+        }
+        if !username.is_empty() {
+            upsert_section_field(
+                &mut draft.sections,
+                FieldPurpose::Username,
+                "用户名",
+                FieldType::Text,
+                false,
+                &username,
+            );
+        }
+        if let Some((target_url, target_host)) = parse_url_host(raw_url) {
+            let custom_equiv = core
+                .app_settings_get()
+                .map(|s| s.custom_equivalent_domains)
+                .unwrap_or_default();
+            let already_has_url = draft.urls.iter().any(|u| {
+                url_matches_target(
+                    &u.uri,
+                    u.match_rule,
+                    raw_url,
+                    &target_url,
+                    &target_host,
+                    &custom_equiv,
+                )
+            });
+            if !already_has_url {
+                draft.urls.push(ItemUrl {
+                    id: format!("u-{}", new_uuid()),
+                    uri: normalized_url,
+                    label: None,
+                    match_rule: UrlMatchRule::Domain,
+                });
+            }
+        }
+        let saved = core
+            .item_update(&existing.id, draft)
+            .await
+            .map_err(|e| e.to_string())?;
+        emit_data_changed(app, false, vec![saved.id.clone()], Vec::new());
+        let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+        return Ok(json!({
+            "action": "updated",
+            "itemId": saved.id,
+            "title": saved.title,
+            "ssoProvider": provider,
+        }));
+    }
+
+    let title = title_param.unwrap_or_else(|| {
+        if host.is_empty() {
+            format!("{provider} SSO")
+        } else {
+            host.clone()
+        }
+    });
+
+    let mut fields = Vec::new();
+    if !username.is_empty() {
+        fields.push(ItemField {
+            id: format!("f-user-{}", new_uuid()),
+            label: "用户名".to_string(),
+            field_type: FieldType::Text,
+            value: username,
+            sensitive: false,
+            copyable: true,
+            purpose: Some(FieldPurpose::Username),
+        });
+    }
+
+    let draft = ItemDraft {
+        id: None,
+        vault_id: DEFAULT_PERSONAL_VAULT_ID.to_string(),
+        title,
+        favorite: false,
+        category: ItemCategory::Login,
+        subtitle: None,
+        icon: if host.is_empty() {
+            None
+        } else {
+            Some(ItemIcon::Domain { host })
+        },
+        tags: Vec::new(),
+        urls: vec![ItemUrl {
+            id: format!("u-{}", new_uuid()),
+            uri: normalized_url,
+            label: None,
+            match_rule: UrlMatchRule::Domain,
+        }],
+        sections: vec![ItemSection {
+            id: format!("sec-{}", new_uuid()),
+            title: "登录信息".to_string(),
+            fields,
+        }],
+        passkeys: Vec::new(),
+        notes: String::new(),
+        password_history: Vec::new(),
+        watchtower: WatchtowerFlags::default(),
+        archived: false,
+        reprompt: false,
+        sso_provider: Some(provider.clone()),
+        ..Default::default()
+    };
+
+    let saved = core
+        .item_create(draft)
+        .await
+        .map_err(|e| e.to_string())?;
+    emit_data_changed(app, false, vec![saved.id.clone()], Vec::new());
+    let _ = app.emit(EVENT_SYNC_STATUS, core.sync_get_status());
+    Ok(json!({
+        "action": "created",
+        "itemId": saved.id,
+        "title": saved.title,
+        "ssoProvider": provider,
+    }))
+}
+
 fn extract_str_array(val: Option<&Value>) -> Vec<String> {
     val.and_then(|v| v.as_array())
         .map(|arr| {
@@ -1976,6 +2250,13 @@ fn ssh_approval_cache() -> &'static Mutex<HashMap<String, Instant>> {
 }
 
 async fn rpc_ssh_sign_ed25519(core: &Arc<AppCore>, params: &Value) -> Result<Value, String> {
+    if !core
+        .app_settings_get()
+        .map(|s| s.ssh_agent_enabled)
+        .unwrap_or(true)
+    {
+        return Err("Keysmith SSH Agent 已在设置中关闭".to_string());
+    }
     let session = core.session_get_state();
     if session.status != AuthStatus::Unlocked {
         return Err("Keysmith 保险库已锁定，请先解锁".to_string());
@@ -2137,31 +2418,43 @@ async fn handle_ssh_agent_client(mut stream: tokio::net::UnixStream, core: Arc<A
         let mut payload = &body[1..];
 
         let reply: Vec<u8> = match msg_type {
-            SSH_AGENTC_REQUEST_IDENTITIES => match core.ssh_list_identities() {
-                Ok(idents) => {
-                    let mut entries: Vec<(Vec<u8>, String)> = Vec::new();
-                    for ident in idents {
-                        if let Some(b64_part) = ident.public_key.split_whitespace().nth(1) {
-                            if let Ok(blob) = B64.decode(b64_part) {
-                                entries.push((blob, ident.title));
-                            }
-                        }
-                    }
-                    let mut out = Vec::new();
-                    out.push(SSH_AGENT_IDENTITIES_ANSWER);
-                    out.extend_from_slice(&(entries.len() as u32).to_be_bytes());
-                    for (blob, comment) in entries {
-                        ssh_write_string(&mut out, &blob);
-                        ssh_write_string(&mut out, comment.as_bytes());
-                    }
-                    out
-                }
-                Err(_) => {
+            SSH_AGENTC_REQUEST_IDENTITIES => {
+                let agent_enabled = core
+                    .app_settings_get()
+                    .map(|s| s.ssh_agent_enabled)
+                    .unwrap_or(true);
+                if !agent_enabled {
                     let mut out = vec![SSH_AGENT_IDENTITIES_ANSWER];
                     out.extend_from_slice(&0u32.to_be_bytes());
                     out
+                } else {
+                    match core.ssh_list_identities() {
+                        Ok(idents) => {
+                            let mut entries: Vec<(Vec<u8>, String)> = Vec::new();
+                            for ident in idents {
+                                if let Some(b64_part) = ident.public_key.split_whitespace().nth(1) {
+                                    if let Ok(blob) = B64.decode(b64_part) {
+                                        entries.push((blob, ident.title));
+                                    }
+                                }
+                            }
+                            let mut out = Vec::new();
+                            out.push(SSH_AGENT_IDENTITIES_ANSWER);
+                            out.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+                            for (blob, comment) in entries {
+                                ssh_write_string(&mut out, &blob);
+                                ssh_write_string(&mut out, comment.as_bytes());
+                            }
+                            out
+                        }
+                        Err(_) => {
+                            let mut out = vec![SSH_AGENT_IDENTITIES_ANSWER];
+                            out.extend_from_slice(&0u32.to_be_bytes());
+                            out
+                        }
+                    }
                 }
-            },
+            }
             SSH_AGENTC_SIGN_REQUEST => {
                 match (ssh_read_string(&mut payload), ssh_read_string(&mut payload)) {
                     (Some(key_blob), Some(data)) if !key_blob.is_empty() => {

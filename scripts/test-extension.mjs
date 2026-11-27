@@ -54,6 +54,12 @@ const testKeys = [
   'ddGenMaskedTitle',
   'ddCopiedFilledAlias',
   'ssoBadgePrefix',
+  'bannerSsoSaveTitle',
+  'bannerSsoAttachTitle',
+  'bannerSsoBtnSave',
+  'bannerSsoToastSaved',
+  'ddSsoTriggered',
+  'errNoSsoButton',
 ];
 await i18nSandbox.KeysmithI18n.ready();
 for (const loc of locales) {
@@ -495,6 +501,149 @@ const contentCode = fs.readFileSync('apps/browser-extension/content.js', 'utf8')
     otpContainer.boxes.map((b) => b.value),
     ['4', '8', '2', '9', '1', '7'],
   );
+}
+
+// 7. Verify content.js detects third-party SSO buttons (click -> RECORD_PENDING_SSO) and one-click SSO autofill on OAuth-only pages
+{
+  let runtimeMessageListener = null;
+  let docClickListener = null;
+  const sentMessages = [];
+
+  class FakeSsoButton {
+    constructor(text, attrs = {}) {
+      this.tagName = 'BUTTON';
+      this.textContent = text;
+      this.disabled = false;
+      this.readOnly = false;
+      this.isConnected = true;
+      this.clicked = 0;
+      this._attrs = attrs;
+    }
+    getAttribute(attr) {
+      return this._attrs[attr] || '';
+    }
+    querySelectorAll() {
+      return [];
+    }
+    closest() {
+      return this;
+    }
+    getBoundingClientRect() {
+      return { left: 40, right: 260, top: 200, bottom: 242, width: 220, height: 42 };
+    }
+    click() {
+      this.clicked += 1;
+    }
+  }
+
+  const googleBtn = new FakeSsoButton('Continue with Google');
+  const githubBtn = new FakeSsoButton('使用 GitHub 登录');
+  const shareBtn = new FakeSsoButton('Share to Twitter');
+
+  const ssoSandbox = {
+    window: null,
+    globalThis: null,
+    KeysmithI18n: i18nSandbox.KeysmithI18n,
+    HTMLInputElement: class {},
+    HTMLSelectElement: class {},
+    HTMLTextAreaElement: class {},
+    Event: class {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    KeyboardEvent: class {},
+    MutationObserver: class {
+      observe() {}
+    },
+    WeakMap,
+    Set,
+    Array,
+    URL,
+    setTimeout,
+    clearTimeout,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    postMessage: () => {},
+    requestAnimationFrame: () => {},
+    getComputedStyle: () => ({ display: 'flex', visibility: 'visible', opacity: '1' }),
+    innerWidth: 1200,
+    innerHeight: 800,
+    location: {
+      protocol: 'https:',
+      href: 'https://vercel.com/login',
+      origin: 'https://vercel.com',
+      hostname: 'vercel.com',
+      pathname: '/login',
+      search: '',
+      hash: '',
+    },
+    document: {
+      readyState: 'complete',
+      title: 'Login - Vercel',
+      documentElement: null,
+      body: {},
+      addEventListener: (ev, fn) => {
+        if (ev === 'click') docClickListener = fn;
+      },
+      querySelector: () => null,
+      querySelectorAll: (sel) => {
+        if (sel.includes('button')) return [shareBtn, googleBtn, githubBtn];
+        return [];
+      },
+    },
+    chrome: {
+      runtime: {
+        lastError: null,
+        sendMessage: (msg, cb) => {
+          sentMessages.push(JSON.parse(JSON.stringify(msg)));
+          if (cb) cb({ ok: true, connected: false, status: 'Disconnected', matches: [] });
+        },
+        onMessage: {
+          addListener: (fn) => {
+            runtimeMessageListener = fn;
+          },
+        },
+      },
+    },
+  };
+  ssoSandbox.window = ssoSandbox;
+  ssoSandbox.globalThis = ssoSandbox;
+  vm.runInNewContext(contentCode, ssoSandbox);
+
+  assert.ok(docClickListener, 'Expected click capture listener in content.js');
+  // Clicking "Share to Twitter" must NOT record SSO
+  docClickListener({ target: shareBtn });
+  assert.equal(
+    sentMessages.some((m) => m.type === 'RECORD_PENDING_SSO'),
+    false,
+    'Share button must not trigger SSO capture',
+  );
+
+  // Clicking "使用 GitHub 登录" MUST record pending GitHub SSO
+  docClickListener({ target: githubBtn });
+  const recorded = sentMessages.find((m) => m.type === 'RECORD_PENDING_SSO');
+  assert.ok(recorded, 'Expected RECORD_PENDING_SSO message');
+  assert.equal(recorded.provider, 'GitHub');
+  assert.equal(recorded.origin, 'https://vercel.com');
+  assert.equal(recorded.loginPath, '/login');
+
+  // Autofilling an SSO item on an OAuth-only page (0 inputs) clicks the matching provider button
+  let ssoFillResp = null;
+  runtimeMessageListener(
+    { type: 'FILL_CREDENTIALS', username: '', password: '', totp: '', ssoProvider: 'Google' },
+    {},
+    (resp) => {
+      ssoFillResp = resp;
+    },
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(ssoFillResp)), {
+    ok: true,
+    filled: 1,
+    ssoClicked: true,
+    ssoProvider: 'Google',
+  });
+  assert.equal(googleBtn.clicked, 1);
 }
 
 console.log('Extension test suite passed successfully.');

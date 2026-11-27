@@ -9,8 +9,8 @@ use keysmith_core::domain::{
     FieldPurpose, FieldType, GeneratorHistoryEntry, GeneratorOptions, GeneratorResult,
     ImportSummary, ItemAttachment, ItemDetail, ItemDraft, ItemFilter, ItemStats, ItemSummary,
     LocalSnapshotInfo, OrganizationInfo, SendCreateFileInput, SendCreateTextInput, SendItem,
-    SendUpdateInput, ServerCheckResult, SessionPreferencesPatch, SessionState, SshKeyPair,
-    SyncStateKind, SyncStatus, TotpCode, Vault, WatchtowerFlagsPatch, WatchtowerReport,
+    SendUpdateInput, ServerCheckResult, SessionPreferencesPatch, SessionState, SshAgentStatus,
+    SshKeyPair, SyncStateKind, SyncStatus, TotpCode, Vault, WatchtowerFlagsPatch, WatchtowerReport,
 };
 use keysmith_core::error::CoreError;
 use keysmith_core::protocol::check_github_latest_release;
@@ -1156,7 +1156,169 @@ pub async fn ssh_generate_ed25519(
 pub async fn ssh_agent_socket_path() -> Result<String, CoreError> {
     let dir = crate::ipc_socket::resolve_app_data_dir()
         .ok_or_else(|| CoreError::Internal("无法解析应用数据目录".to_string()))?;
-    Ok(dir.join("ssh-agent.sock").to_string_lossy().to_string())
+    Ok(format_portable_home_path(&dir.join("ssh-agent.sock")))
+}
+
+const SSH_CONFIG_BEGIN_MARKER: &str = "# --- Keysmith SSH Agent BEGIN ---";
+const SSH_CONFIG_END_MARKER: &str = "# --- Keysmith SSH Agent END ---";
+
+fn resolve_user_home_dir() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("USERPROFILE").map(std::path::PathBuf::from)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var_os("HOME").map(std::path::PathBuf::from)
+    }
+}
+
+fn format_portable_home_path(path: &std::path::Path) -> String {
+    if let Some(home) = resolve_user_home_dir() {
+        if let Ok(rel) = path.strip_prefix(&home) {
+            let rel_slash = rel.to_string_lossy().replace('\\', "/");
+            return format!("~/{rel_slash}");
+        }
+    }
+    path.to_string_lossy().to_string()
+}
+
+pub(crate) fn is_ssh_config_configured(content: &str, socket_display_path: &str) -> bool {
+    if content.contains(SSH_CONFIG_BEGIN_MARKER) {
+        return true;
+    }
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed.to_ascii_lowercase().starts_with("identityagent")
+            && (trimmed.contains("dev.keysmith.desktop/ssh-agent.sock")
+                || (!socket_display_path.is_empty() && trimmed.contains(socket_display_path)))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+pub(crate) fn update_ssh_config_managed_block(
+    existing: &str,
+    socket_display_path: &str,
+    enable: bool,
+) -> String {
+    let mut kept_lines: Vec<&str> = Vec::new();
+    let mut in_managed = false;
+    for line in existing.lines() {
+        if line.trim() == SSH_CONFIG_BEGIN_MARKER {
+            in_managed = true;
+            continue;
+        }
+        if in_managed {
+            if line.trim() == SSH_CONFIG_END_MARKER {
+                in_managed = false;
+            }
+            continue;
+        }
+        kept_lines.push(line);
+    }
+
+    while kept_lines.last().map(|l| l.trim().is_empty()).unwrap_or(false) {
+        kept_lines.pop();
+    }
+
+    let mut out = kept_lines.join("\n");
+    if enable {
+        let escaped = socket_display_path.replace('"', "\\\"");
+        let block = format!(
+            "{SSH_CONFIG_BEGIN_MARKER}\nHost *\n  IdentityAgent \"{escaped}\"\n{SSH_CONFIG_END_MARKER}"
+        );
+        if out.is_empty() {
+            out = format!("{block}\n");
+        } else {
+            out = format!("{out}\n\n{block}\n");
+        }
+    } else if !out.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
+fn compute_ssh_agent_status(core: &AppCore) -> Result<SshAgentStatus, CoreError> {
+    let settings = core.app_settings_get().unwrap_or_default();
+    let session = core.session_get_state();
+    let app_dir = crate::ipc_socket::resolve_app_data_dir()
+        .ok_or_else(|| CoreError::Internal("无法解析应用数据目录".to_string()))?;
+    let raw_sock_path = app_dir.join("ssh-agent.sock");
+    let socket_path = format_portable_home_path(&raw_sock_path);
+
+    let home = resolve_user_home_dir()
+        .ok_or_else(|| CoreError::Internal("无法解析用户主目录".to_string()))?;
+    let ssh_config_file = home.join(".ssh").join("config");
+    let ssh_config_path = format_portable_home_path(&ssh_config_file);
+    let existing_cfg = std::fs::read_to_string(&ssh_config_file).unwrap_or_default();
+    let ssh_config_configured = is_ssh_config_configured(&existing_cfg, &socket_path);
+
+    let enabled = settings.ssh_agent_enabled;
+    let socket_listening = cfg!(unix) && enabled && raw_sock_path.exists();
+    let loaded_key_count = if enabled && session.status == AuthStatus::Unlocked {
+        core.ssh_list_identities().map(|v| v.len()).unwrap_or(0)
+    } else {
+        0
+    };
+
+    Ok(SshAgentStatus {
+        enabled,
+        biometric_confirm: session.ssh_biometric_confirm,
+        socket_listening,
+        socket_path,
+        ssh_config_path,
+        ssh_config_configured,
+        loaded_key_count,
+    })
+}
+
+#[tauri::command]
+pub async fn ssh_agent_get_status(state: State<'_, AppState>) -> Result<SshAgentStatus, CoreError> {
+    let core = Arc::clone(&state.core);
+    run_blocking(move || compute_ssh_agent_status(&core)).await?
+}
+
+#[tauri::command]
+pub async fn ssh_agent_configure_ssh_config(
+    state: State<'_, AppState>,
+    enable: bool,
+) -> Result<SshAgentStatus, CoreError> {
+    let core = Arc::clone(&state.core);
+    run_blocking(move || {
+        let app_dir = crate::ipc_socket::resolve_app_data_dir()
+            .ok_or_else(|| CoreError::Internal("无法解析应用数据目录".to_string()))?;
+        let socket_display = format_portable_home_path(&app_dir.join("ssh-agent.sock"));
+        let home = resolve_user_home_dir()
+            .ok_or_else(|| CoreError::Internal("无法解析用户主目录".to_string()))?;
+        let ssh_dir = home.join(".ssh");
+        let existed_dir = ssh_dir.exists();
+        std::fs::create_dir_all(&ssh_dir)
+            .map_err(|e| CoreError::Storage(format!("创建 ~/.ssh 目录失败: {e}")))?;
+        #[cfg(unix)]
+        if !existed_dir {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&ssh_dir, std::fs::Permissions::from_mode(0o700));
+        }
+
+        let cfg_file = ssh_dir.join("config");
+        let existing = std::fs::read_to_string(&cfg_file).unwrap_or_default();
+        let updated = update_ssh_config_managed_block(&existing, &socket_display, enable);
+        std::fs::write(&cfg_file, updated.as_bytes())
+            .map_err(|e| CoreError::Storage(format!("写入 ~/.ssh/config 失败: {e}")))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&cfg_file, std::fs::Permissions::from_mode(0o600));
+        }
+        compute_ssh_agent_status(&core)
+    })
+    .await?
 }
 
 #[tauri::command]
@@ -1655,4 +1817,31 @@ pub async fn app_settings_update(
     }
     let _ = app.emit(EVENT_UI_SETTINGS_CHANGED, &updated);
     Ok(updated)
+}
+
+#[cfg(test)]
+mod ssh_config_tests {
+    use super::*;
+
+    #[test]
+    fn managed_ssh_config_preserves_user_hosts_and_toggles_idempotently() {
+        let sock = "~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock";
+        let user_cfg = "Host prod-bastion\n  HostName 10.0.0.5\n  User ubuntu\n";
+
+        assert!(!is_ssh_config_configured(user_cfg, sock));
+
+        let enabled_once = update_ssh_config_managed_block(user_cfg, sock, true);
+        assert!(is_ssh_config_configured(&enabled_once, sock));
+        assert!(enabled_once.starts_with("Host prod-bastion\n  HostName 10.0.0.5\n  User ubuntu\n"));
+        assert!(enabled_once.contains("IdentityAgent \"~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock\""));
+
+        // Applying a second time is strictly idempotent
+        let enabled_twice = update_ssh_config_managed_block(&enabled_once, sock, true);
+        assert_eq!(enabled_once, enabled_twice);
+
+        // Removing restores original user rules cleanly without leaving marker debris
+        let removed = update_ssh_config_managed_block(&enabled_twice, sock, false);
+        assert!(!is_ssh_config_configured(&removed, sock));
+        assert_eq!(removed, user_cfg);
+    }
 }
