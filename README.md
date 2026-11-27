@@ -30,6 +30,7 @@
   </p>
 
   <p>
+    <a href="https://chrisyer.github.io/Keysmith/">Website</a> •
     <a href="#features">Features</a> •
     <a href="#installation">Installation</a> •
     <a href="#browser-extension">Browser Extension</a> •
