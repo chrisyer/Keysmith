@@ -14,6 +14,31 @@ function isEditableElement(el: Element | null): boolean {
   return false;
 }
 
+function hasOpenPopoverOrDropdown(): boolean {
+  if (document.querySelector('[data-ks-dropdown-open="true"]')) return true;
+  try {
+    return Boolean(document.querySelector('[popover]:popover-open, [popover].\\:popover-open'));
+  } catch {
+    return false;
+  }
+}
+
+function findOpenSelect(e: KeyboardEvent): HTMLSelectElement | null {
+  try {
+    const open = document.querySelector('select:open');
+    if (open instanceof HTMLSelectElement) return open;
+  } catch {
+    // Ignore unsupported :open selector on older webviews.
+  }
+  if (document.activeElement instanceof HTMLOptionElement) {
+    return document.activeElement.closest('select');
+  }
+  if (e.target instanceof HTMLOptionElement) {
+    return e.target.closest('select');
+  }
+  return null;
+}
+
 export function useKeyboardShortcuts(searchInputRef: React.RefObject<HTMLInputElement | null>) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -96,11 +121,15 @@ export function useKeyboardShortcuts(searchInputRef: React.RefObject<HTMLInputEl
       }
 
       if (e.key === 'Escape' && ui.isEditing) {
-        if (
-          document.querySelector(
-            '[popover]:popover-open, [popover].\\:popover-open, [data-ks-dropdown-open="true"]',
-          )
-        ) {
+        if (e.defaultPrevented) return;
+        if (hasOpenPopoverOrDropdown()) return;
+        const openSelect = findOpenSelect(e);
+        if (openSelect) {
+          window.setTimeout(() => {
+            if (document.activeElement === openSelect) {
+              openSelect.blur();
+            }
+          }, 0);
           return;
         }
         if (document.activeElement instanceof HTMLSelectElement) {

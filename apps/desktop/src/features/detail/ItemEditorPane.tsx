@@ -216,6 +216,14 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
     left: number;
     maxHeight: number;
   } | null>(null);
+  const [vaultMenuState, setVaultMenuState] = useState<{
+    top?: number;
+    bottom?: number;
+    left: number;
+    minWidth: number;
+    maxHeight: number;
+  } | null>(null);
+  const [vaultMenuHighlightIdx, setVaultMenuHighlightIdx] = useState(0);
   const [pointerDrag, setPointerDrag] = useState<{
     sectionId: string;
     fromIdx: number;
@@ -229,8 +237,29 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
   } | null>(null);
   const draftRef = useRef(draft);
   const addMenuRef = useRef<HTMLDivElement>(null);
+  const vaultMenuRef = useRef<HTMLDivElement>(null);
+  const vaultTriggerRef = useRef<HTMLButtonElement>(null);
   const fieldCardRefs = useRef(new Map<string, HTMLDivElement>());
   draftRef.current = draft;
+
+  const vaults = useVaultStore((s) => s.vaults);
+  const allItems = useVaultStore((s) => s.items);
+  const tagCounts = useVaultStore((s) => s.tagCounts);
+  const createItem = useVaultStore((s) => s.createItem);
+  const updateItem = useVaultStore((s) => s.updateItem);
+
+  const getFilter = useUiStore((s) => s.getFilter);
+  const stopEditing = useUiStore((s) => s.stopEditing);
+  const showToast = useUiStore((s) => s.showToast);
+
+  const selectableVaults = useMemo(
+    () => vaults.filter((v) => !v.isOrganization || v.id === draft.vaultId),
+    [vaults, draft.vaultId],
+  );
+  const selectedVault = useMemo(
+    () => selectableVaults.find((v) => v.id === draft.vaultId) ?? selectableVaults[0] ?? null,
+    [selectableVaults, draft.vaultId],
+  );
 
   const isDirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(initialDraft),
@@ -239,9 +268,15 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
   const isDirtyRef = useRef(isDirty);
   const confirmDiscardRef = useRef(confirmDiscard);
   const addMenuStateRef = useRef(addMenuState);
+  const vaultMenuStateRef = useRef(vaultMenuState);
+  const vaultMenuHighlightIdxRef = useRef(vaultMenuHighlightIdx);
+  const selectableVaultsRef = useRef(selectableVaults);
   isDirtyRef.current = isDirty;
   confirmDiscardRef.current = confirmDiscard;
   addMenuStateRef.current = addMenuState;
+  vaultMenuStateRef.current = vaultMenuState;
+  vaultMenuHighlightIdxRef.current = vaultMenuHighlightIdx;
+  selectableVaultsRef.current = selectableVaults;
 
   useEffect(() => {
     setDraft(structuredClone(initialDraft));
@@ -249,6 +284,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
     setLinkedSearch('');
     setConfirmDiscard(false);
     setAddMenuState(null);
+    setVaultMenuState(null);
     setPointerDrag(null);
     pointerDragRef.current = null;
   }, [initialDraft]);
@@ -271,6 +307,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
+        e.stopImmediatePropagation();
         setAddMenuState(null);
       }
     };
@@ -285,18 +322,64 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
     };
   }, [addMenuState]);
 
-  const vaults = useVaultStore((s) => s.vaults);
-  const allItems = useVaultStore((s) => s.items);
-  const tagCounts = useVaultStore((s) => s.tagCounts);
-  const createItem = useVaultStore((s) => s.createItem);
-  const updateItem = useVaultStore((s) => s.updateItem);
-
-  const getFilter = useUiStore((s) => s.getFilter);
-  const stopEditing = useUiStore((s) => s.stopEditing);
-  const showToast = useUiStore((s) => s.showToast);
+  useEffect(() => {
+    if (!vaultMenuState) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (target && vaultMenuRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest('[data-vault-select-trigger="true"]')) return;
+      setVaultMenuState(null);
+    };
+    const onKeyDownCapture = (e: KeyboardEvent) => {
+      const list = selectableVaultsRef.current;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setVaultMenuState(null);
+        vaultTriggerRef.current?.blur();
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        setVaultMenuHighlightIdx((i) => (list.length ? (i + 1) % list.length : 0));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        setVaultMenuHighlightIdx((i) => (list.length ? (i - 1 + list.length) % list.length : 0));
+        return;
+      }
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        const chosen = list[vaultMenuHighlightIdxRef.current];
+        if (chosen) {
+          setDraft((p) => ({ ...p, vaultId: chosen.id }));
+        }
+        setVaultMenuState(null);
+      }
+    };
+    const onResize = () => setVaultMenuState(null);
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDownCapture, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDownCapture, true);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [vaultMenuState]);
 
   useEffect(() => {
     const onRequestCancel = () => {
+      if (vaultMenuStateRef.current) {
+        setVaultMenuState(null);
+        vaultTriggerRef.current?.blur();
+        return;
+      }
       if (addMenuStateRef.current) {
         setAddMenuState(null);
         return;
@@ -312,11 +395,46 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
   }, [stopEditing]);
 
   const requestCancel = () => {
+    setVaultMenuState(null);
+    setAddMenuState(null);
     if (!isDirty) {
       stopEditing();
       return;
     }
     setConfirmDiscard(true);
+  };
+
+  const toggleVaultMenu = () => {
+    if (vaultMenuState) {
+      setVaultMenuState(null);
+      return;
+    }
+    setAddMenuState(null);
+    setConfirmDiscard(false);
+    const trigger = vaultTriggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const minWidth = Math.max(rect.width, 168);
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - minWidth - 12));
+    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    const spaceAbove = rect.top - 12;
+    const curIdx = selectableVaults.findIndex((v) => v.id === draft.vaultId);
+    setVaultMenuHighlightIdx(curIdx >= 0 ? curIdx : 0);
+    if (spaceBelow >= 160 || spaceBelow >= spaceAbove) {
+      setVaultMenuState({
+        top: rect.bottom + 4,
+        left,
+        minWidth,
+        maxHeight: Math.max(120, Math.min(260, spaceBelow)),
+      });
+    } else {
+      setVaultMenuState({
+        bottom: window.innerHeight - rect.top + 4,
+        left,
+        minWidth,
+        maxHeight: Math.max(120, Math.min(260, spaceAbove)),
+      });
+    }
   };
 
   const tpl = TEMPLATE_MAP[draft.category] ?? TEMPLATE_MAP.login;
@@ -432,6 +550,7 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
     e: React.MouseEvent<HTMLButtonElement>,
     sectionId: string,
   ) => {
+    setVaultMenuState(null);
     if (addMenuState?.sectionId === sectionId) {
       setAddMenuState(null);
       return;
@@ -792,20 +911,30 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
         <div className="px-5 pl-[64px] pt-2 pb-3 flex items-center flex-wrap gap-x-2.5 gap-y-1.5">
           <span className="text-[11px] text-[var(--text-muted)]">{dict.categories[draft.category] ?? tpl.label}</span>
           <span className="text-[var(--text-muted)]">·</span>
-          <select
-            value={draft.vaultId}
-            onChange={(e) => setDraft((p) => ({ ...p, vaultId: e.target.value }))}
+          <button
+            type="button"
+            ref={vaultTriggerRef}
+            data-vault-select-trigger="true"
+            aria-haspopup="listbox"
+            aria-expanded={Boolean(vaultMenuState)}
             aria-label={dict.editor.vaultSelectAria}
-            className="ks-select-sm min-w-[84px] text-[var(--text-primary)]"
+            onClick={toggleVaultMenu}
+            onKeyDown={(e) => {
+              if (!vaultMenuState && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                e.preventDefault();
+                toggleVaultMenu();
+              }
+            }}
+            className="inline-flex items-center justify-between gap-1.5 min-h-[30px] min-w-[84px] max-w-[220px] px-2.5 py-1 rounded-[6px] border border-[var(--border-strong)] bg-[var(--bg-input)] hover:bg-[var(--bg-hover)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/20 text-xs text-[var(--text-primary)] cursor-pointer transition-colors"
           >
-            {vaults
-              .filter((v) => !v.isOrganization || v.id === draft.vaultId)
-              .map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
-          </select>
+            <span className="truncate">{selectedVault?.name ?? ''}</span>
+            <ChevronDown
+              size={12}
+              className={`shrink-0 text-[var(--text-muted)] transition-transform ${
+                vaultMenuState ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
           <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)] cursor-pointer ml-1 whitespace-nowrap shrink-0">
             <input
               type="checkbox"
@@ -1546,6 +1675,57 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                         preset.fieldType}
                     </span>
                   )}
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
+
+      {vaultMenuState &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={vaultMenuRef}
+            role="listbox"
+            aria-label={dict.editor.vaultSelectAria}
+            data-ks-dropdown-open="true"
+            style={{
+              position: 'fixed',
+              left: vaultMenuState.left,
+              top: vaultMenuState.top,
+              bottom: vaultMenuState.bottom,
+              minWidth: vaultMenuState.minWidth,
+              maxWidth: 280,
+              maxHeight: vaultMenuState.maxHeight,
+              zIndex: 70,
+            }}
+            className="rounded-xl border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-2xl overflow-y-auto ks-scroll p-1 flex flex-col gap-0.5 text-xs"
+          >
+            {selectableVaults.map((v, idx) => {
+              const isSelected = v.id === draft.vaultId;
+              const isHighlighted = idx === vaultMenuHighlightIdx;
+              return (
+                <button
+                  key={v.id}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  onMouseEnter={() => setVaultMenuHighlightIdx(idx)}
+                  onClick={() => {
+                    setDraft((p) => ({ ...p, vaultId: v.id }));
+                    setVaultMenuState(null);
+                  }}
+                  className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-left cursor-pointer ${
+                    isSelected
+                      ? 'bg-[var(--bg-selected)] text-[var(--accent-primary)] font-medium'
+                      : isHighlighted
+                        ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]'
+                        : 'hover:bg-[var(--bg-hover)] text-[var(--text-primary)]'
+                  }`}
+                >
+                  <span className="truncate">{v.name}</span>
+                  {isSelected && <Check size={12} className="shrink-0 text-[var(--accent-primary)]" />}
                 </button>
               );
             })}
