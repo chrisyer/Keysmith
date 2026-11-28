@@ -56,6 +56,50 @@ public enum KeysmithColors {
     }
 }
 
+/// Brand mark rendered using the bundled `AppLogo` image asset with graceful fallback.
+public struct KSAppLogoView: View {
+    public var size: CGFloat
+
+    public init(size: CGFloat = 68) {
+        self.size = size
+    }
+
+    public var body: some View {
+        let shape = RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+        Group {
+            #if canImport(UIKit)
+            if let img = UIImage(named: "AppLogo") {
+                Image(uiImage: img)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(shape)
+                    .overlay(
+                        shape.strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                    )
+            } else {
+                fallbackBadge(shape: shape)
+            }
+            #else
+            fallbackBadge(shape: shape)
+            #endif
+        }
+        .shadow(color: KeysmithColors.accent.opacity(0.22), radius: 12, y: 5)
+        .accessibilityHidden(true)
+    }
+
+    private func fallbackBadge(shape: RoundedRectangle) -> some View {
+        ZStack {
+            shape.fill(KeysmithColors.accent)
+            Image(systemName: "key.fill")
+                .font(.system(size: size * 0.44, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: size, height: size)
+    }
+}
+
 public struct KSItemIconBadge: View {
     public let title: String
     public let icon: KSItemIcon?

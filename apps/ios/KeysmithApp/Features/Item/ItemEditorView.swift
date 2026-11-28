@@ -22,6 +22,7 @@ public struct ItemEditorView: View {
     public init(
         store: KeysmithStore,
         existingItem: KSItemDetail? = nil,
+        initialDraft: KSItemDraft? = nil,
         defaultVaultId: String? = nil,
         onSaved: @escaping (KSItemDetail) -> Void,
         onCancel: @escaping () -> Void
@@ -33,6 +34,8 @@ public struct ItemEditorView: View {
 
         if let existingItem {
             _draft = State(initialValue: existingItem.toDraft())
+        } else if let initialDraft {
+            _draft = State(initialValue: initialDraft)
         } else {
             let fallbackVault = defaultVaultId ?? store.vaults.first(where: { $0.isDefault })?.id ?? store.vaults.first?.id ?? "personal"
             let usernameLabel = store.l10n.t(zhCN: "用户名", en: "Username")
@@ -74,7 +77,7 @@ public struct ItemEditorView: View {
                 }
 
                 Toggle(store.l10n.t(zhCN: "星标收藏", en: "Favorite"), isOn: $draft.favorite)
-                Toggle(store.l10n.t(zhCN: "查看前需二次验证", en: "Require Master Password Reprompt"), isOn: $draft.reprompt)
+                Toggle(store.l10n.t(zhCN: "查看前需二次验证", en: "Require Identity Reprompt"), isOn: $draft.reprompt)
             }
 
             ForEach($draft.sections) { $section in
@@ -174,11 +177,10 @@ public struct ItemEditorView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+                        .submitLabel(.done)
+                        .onSubmit { commitPendingUrl() }
                     Button(store.l10n.t(zhCN: "添加", en: "Add")) {
-                        let trimmed = newUrlString.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { return }
-                        draft.urls.append(KSItemUrl(uri: trimmed))
-                        newUrlString = ""
+                        commitPendingUrl()
                     }
                 }
             }
@@ -195,6 +197,10 @@ public struct ItemEditorView: View {
                         .foregroundStyle(KeysmithColors.danger)
                 }
             }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .onChange(of: draft.category) { _, newCategory in
+            applyTemplateIfEmpty(for: newCategory)
         }
         .navigationTitle(existingItem == nil
             ? store.l10n.t(zhCN: "新建条目", en: "New Item")
@@ -228,7 +234,7 @@ public struct ItemEditorView: View {
             )
         }
         .sheet(item: $generatorFieldLocation) { loc in
-            ItemPasswordGeneratorSheet(store: store) { generatedValue in
+            KeysmithPasswordGeneratorSheet(store: store) { generatedValue in
                 if loc.sectionIndex < draft.sections.count,
                    loc.fieldIndex < draft.sections[loc.sectionIndex].fields.count {
                     draft.sections[loc.sectionIndex].fields[loc.fieldIndex].value = generatedValue
@@ -243,8 +249,8 @@ public struct ItemEditorView: View {
         sectionId: String,
         fieldIndex: Int
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
                 TextField(store.l10n.t(zhCN: "字段名称", en: "Label"), text: field.label)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -261,7 +267,7 @@ public struct ItemEditorView: View {
             }
 
             Group {
-                if field.wrappedValue.fieldType == .multiline {
+                if field.wrappedValue.fieldType == .multiline || field.wrappedValue.fieldType == .sshPrivateKey {
                     TextEditor(text: field.value)
                         .font(.system(.footnote, design: .monospaced))
                         .frame(minHeight: 72)
@@ -276,16 +282,16 @@ public struct ItemEditorView: View {
             .padding(.vertical, 9)
             .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            if field.wrappedValue.fieldType == .password {
-                HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                if field.wrappedValue.fieldType == .password {
                     Button {
                         let generated = LocalGeneratorEngine.generate(options: store.generatorOptions)
                         field.wrappedValue.value = generated.value
                     } label: {
                         Label(store.l10n.t(zhCN: "随机生成", en: "Generate"), systemImage: "wand.and.stars")
                             .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
                             .background(KeysmithColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                             .foregroundStyle(KeysmithColors.accent)
                     }
@@ -296,39 +302,54 @@ public struct ItemEditorView: View {
                             generatorFieldLocation = FieldLocation(sectionIndex: secIdx, fieldIndex: fieldIndex)
                         }
                     } label: {
-                        Label(store.l10n.t(zhCN: "生成要求与选项", en: "Options"), systemImage: "slider.horizontal.3")
+                        Label(store.l10n.t(zhCN: "选项", en: "Options"), systemImage: "slider.horizontal.3")
                             .font(.caption.weight(.medium))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
                             .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
-            }
 
-            if field.wrappedValue.fieldType == .totp {
-                Button {
-                    if let secIdx = draft.sections.firstIndex(where: { $0.id == sectionId }) {
-                        scanningFieldLocation = FieldLocation(sectionIndex: secIdx, fieldIndex: fieldIndex)
+                if field.wrappedValue.fieldType == .totp {
+                    Button {
+                        if let secIdx = draft.sections.firstIndex(where: { $0.id == sectionId }) {
+                            scanningFieldLocation = FieldLocation(sectionIndex: secIdx, fieldIndex: fieldIndex)
+                        }
+                    } label: {
+                        Label(store.l10n.t(zhCN: "扫二维码", en: "Scan QR"), systemImage: "qrcode.viewfinder")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(KeysmithColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .foregroundStyle(KeysmithColors.accent)
                     }
+                    .buttonStyle(.plain)
+                }
+
+                Spacer(minLength: 4)
+
+                Button {
+                    field.wrappedValue.sensitive.toggle()
                 } label: {
-                    Label(store.l10n.t(zhCN: "扫二维码", en: "Scan QR"), systemImage: "qrcode.viewfinder")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(KeysmithColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                        .foregroundStyle(KeysmithColors.accent)
+                    let masked = field.wrappedValue.sensitive
+                    Label(
+                        masked ? store.l10n.t(zhCN: "掩码", en: "Masked") : store.l10n.t(zhCN: "明文", en: "Plain"),
+                        systemImage: masked ? "lock.fill" : "lock.open"
+                    )
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(masked ? KeysmithColors.symbol : .secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        (masked ? KeysmithColors.symbol : Color.secondary).opacity(0.12),
+                        in: Capsule()
+                    )
                 }
                 .buttonStyle(.plain)
             }
-
-            Divider()
-
-            Toggle(store.l10n.t(zhCN: "敏感掩码", en: "Mask Secret"), isOn: field.sensitive)
-                .font(.subheadline)
-                .padding(.top, 2)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
     }
 
     private func presetChip(label: String, color: Color, action: @escaping () -> Void) -> some View {
@@ -354,26 +375,77 @@ public struct ItemEditorView: View {
         }
     }
 
+    private func commitPendingUrl() {
+        let trimmed = newUrlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        draft.urls.append(KSItemUrl(uri: trimmed))
+        newUrlString = ""
+    }
+
+    private func applyTemplateIfEmpty(for category: KSItemCategory) {
+        guard existingItem == nil else { return }
+        let allValuesEmpty = draft.sections.allSatisfy { sec in
+            sec.fields.allSatisfy { $0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        }
+        guard allValuesEmpty else { return }
+
+        let fields: [KSItemField]
+        switch category {
+        case .creditCard:
+            fields = [
+                KSItemField(label: store.l10n.t(zhCN: "持卡人", en: "Cardholder"), fieldType: .text, value: "", sensitive: false),
+                KSItemField(label: store.l10n.t(zhCN: "卡号", en: "Card Number"), fieldType: .number, value: "", sensitive: true, purpose: .cardNumber),
+                KSItemField(label: store.l10n.t(zhCN: "有效期", en: "Expiry"), fieldType: .monthYear, value: "", sensitive: false, purpose: .cardExpiry),
+                KSItemField(label: "CVV", fieldType: .password, value: "", sensitive: true, purpose: .cardCvv),
+            ]
+        case .sshKey:
+            fields = [
+                KSItemField(label: store.l10n.t(zhCN: "公钥", en: "Public Key"), fieldType: .sshPublicKey, value: "", sensitive: false),
+                KSItemField(label: store.l10n.t(zhCN: "私钥", en: "Private Key"), fieldType: .sshPrivateKey, value: "", sensitive: true),
+            ]
+        case .apiCredential:
+            fields = [
+                KSItemField(label: "API Key / Client ID", fieldType: .text, value: "", sensitive: false),
+                KSItemField(label: "Secret / Token", fieldType: .password, value: "", sensitive: true, purpose: .password),
+            ]
+        case .database, .server:
+            fields = [
+                KSItemField(label: store.l10n.t(zhCN: "主机地址", en: "Host"), fieldType: .url, value: "", sensitive: false),
+                KSItemField(label: store.l10n.t(zhCN: "用户名", en: "Username"), fieldType: .text, value: "", sensitive: false, purpose: .username),
+                KSItemField(label: store.l10n.t(zhCN: "密码", en: "Password"), fieldType: .password, value: "", sensitive: true, purpose: .password),
+            ]
+        case .secureNote:
+            fields = []
+        default:
+            fields = [
+                KSItemField(label: store.l10n.t(zhCN: "用户名", en: "Username"), fieldType: .text, value: "", sensitive: false, purpose: .username),
+                KSItemField(label: store.l10n.t(zhCN: "密码", en: "Password"), fieldType: .password, value: "", sensitive: true, purpose: .password),
+            ]
+        }
+        draft.sections = fields.isEmpty ? [] : [KSItemSection(id: UUID().uuidString, title: "", fields: fields)]
+    }
+
     private func fieldTypeLabel(_ type: KSFieldType) -> String {
         switch type {
-        case .text: return "Text"
-        case .password: return "Password"
-        case .email: return "Email"
-        case .url: return "URL"
+        case .text: return store.l10n.t(zhCN: "文本", en: "Text")
+        case .password: return store.l10n.t(zhCN: "密码", en: "Password")
+        case .email: return store.l10n.t(zhCN: "邮箱", en: "Email")
+        case .url: return store.l10n.t(zhCN: "网址", en: "URL")
         case .totp: return "TOTP"
-        case .date: return "Date"
-        case .monthYear: return "MM/YY"
-        case .phone: return "Phone"
-        case .number: return "Number"
-        case .address: return "Address"
-        case .multiline: return "Multiline"
-        case .sshPrivateKey: return "SSH Private"
-        case .sshPublicKey: return "SSH Public"
-        case .keyValue: return "Key-Value"
+        case .date: return store.l10n.t(zhCN: "日期", en: "Date")
+        case .monthYear: return store.l10n.t(zhCN: "年月 (MM/YY)", en: "MM/YY")
+        case .phone: return store.l10n.t(zhCN: "电话", en: "Phone")
+        case .number: return store.l10n.t(zhCN: "数字", en: "Number")
+        case .address: return store.l10n.t(zhCN: "地址", en: "Address")
+        case .multiline: return store.l10n.t(zhCN: "多行文本", en: "Multiline")
+        case .sshPrivateKey: return store.l10n.t(zhCN: "SSH 私钥", en: "SSH Private")
+        case .sshPublicKey: return store.l10n.t(zhCN: "SSH 公钥", en: "SSH Public")
+        case .keyValue: return store.l10n.t(zhCN: "键值对", en: "Key-Value")
         }
     }
 
     private func save() async {
+        commitPendingUrl()
         errorMessage = nil
         isSaving = true
         defer { isSaving = false }
@@ -391,16 +463,21 @@ public struct ItemEditorView: View {
     }
 }
 
-private struct ItemPasswordGeneratorSheet: View {
-    @Bindable var store: KeysmithStore
-    let onUsePassword: (String) -> Void
+public struct KeysmithPasswordGeneratorSheet: View {
+    @Bindable public var store: KeysmithStore
+    public var onUsePassword: ((String) -> Void)?
     @Environment(\.dismiss) private var dismiss
+
+    public init(store: KeysmithStore, onUsePassword: ((String) -> Void)? = nil) {
+        self.store = store
+        self.onUsePassword = onUsePassword
+    }
 
     private var clampedLength: Int {
         min(64, max(8, store.generatorOptions.length))
     }
 
-    var body: some View {
+    public var body: some View {
         NavigationStack {
             Form {
                 Section(store.l10n.t(zhCN: "预览", en: "Preview")) {
@@ -438,10 +515,23 @@ private struct ItemPasswordGeneratorSheet: View {
                         .buttonStyle(.bordered)
 
                         Button {
-                            onUsePassword(store.generatorResult.value)
-                            dismiss()
+                            if let onUsePassword {
+                                onUsePassword(store.generatorResult.value)
+                                dismiss()
+                            } else {
+                                store.copyToClipboard(
+                                    store.generatorResult.value,
+                                    label: store.l10n.t(zhCN: "生成的密码", en: "Generated Password"),
+                                    isSensitive: true
+                                )
+                            }
                         } label: {
-                            Label(store.l10n.t(zhCN: "填入密码", en: "Use Password"), systemImage: "checkmark")
+                            Label(
+                                onUsePassword != nil
+                                    ? store.l10n.t(zhCN: "填入密码", en: "Use Password")
+                                    : store.l10n.t(zhCN: "复制密码", en: "Copy Password"),
+                                systemImage: onUsePassword != nil ? "checkmark" : "doc.on.doc"
+                            )
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)

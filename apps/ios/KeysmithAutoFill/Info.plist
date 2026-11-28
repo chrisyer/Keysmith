@@ -21,7 +21,7 @@
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>使用 Face ID 解锁 Keysmith 保险库以安全自动填充密码、通行密钥与验证码。</string>
+	<string>Unlock your Keysmith vault to securely auto-fill passwords, passkeys, and verification codes.</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>

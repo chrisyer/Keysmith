@@ -11,15 +11,20 @@ public struct ItemDetailView: View {
     @State private var revealedFieldIDs: Set<String> = []
     @State private var repromptUnlocked: Bool = false
     @State private var repromptPassword: String = ""
+    @State private var isRepromptPasswordVisible: Bool = false
+    @State private var isVerifyingReprompt: Bool = false
     @State private var repromptError: String?
     @State private var largeTypeTarget: LargeTypePayload?
     @State private var recentlyCopiedFieldID: String?
+    @State private var showNavTitle: Bool = false
     @Environment(\.openURL) private var openURL
 
     private struct LargeTypePayload: Identifiable {
         let id = UUID()
         let title: String
         let secret: String
+        let copyable: Bool
+        let isSensitive: Bool
     }
 
     public init(
@@ -72,7 +77,16 @@ public struct ItemDetailView: View {
             }
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle(detail?.title ?? "")
+        .onScrollGeometryChange(for: Bool.self) { geo in
+            geo.contentOffset.y > 56
+        } action: { _, collapsed in
+            if showNavTitle != collapsed {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    showNavTitle = collapsed
+                }
+            }
+        }
+        .navigationTitle(showNavTitle ? (detail?.title ?? "") : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let detail {
@@ -120,11 +134,24 @@ public struct ItemDetailView: View {
             }
         }
         .sheet(item: $largeTypeTarget) { payload in
-            LargeTypeSheet(title: payload.title, secret: payload.secret, closeTitle: store.l10n.close)
+            LargeTypeSheet(
+                title: payload.title,
+                secret: payload.secret,
+                closeTitle: store.l10n.close,
+                copyTitle: payload.copyable ? store.l10n.copy : nil,
+                onCopy: payload.copyable ? {
+                    store.copyToClipboard(payload.secret, label: payload.title, isSensitive: payload.isSensitive)
+                } : nil
+            )
         }
-        .task(id: itemId) {
+        .onChange(of: itemId) { _, _ in
             repromptUnlocked = false
+            repromptPassword = ""
+            repromptError = nil
             revealedFieldIDs.removeAll()
+            showNavTitle = false
+        }
+        .task(id: "\(itemId)-\(store.itemDetailRefreshToken)") {
             await loadDetail()
         }
     }
@@ -177,7 +204,9 @@ public struct ItemDetailView: View {
     }
 
     private func repromptGateCard(_ detail: KSItemDetail) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let biometry = AppleBiometricKeyStore.shared.currentBiometryKind()
+        let biometryName = store.l10n.biometryName(biometry)
+        return VStack(alignment: .leading, spacing: 12) {
             Label(
                 store.l10n.t(zhCN: "此条目已启用二次身份验证", en: "Identity verification required"),
                 systemImage: "lock.shield.fill"
@@ -186,8 +215,8 @@ public struct ItemDetailView: View {
             .foregroundStyle(KeysmithColors.symbol)
 
             Text(store.l10n.t(
-                zhCN: "查看或复制敏感字段前，请先通过 Face ID 或主密码验证。",
-                en: "Verify with Face ID or master password before viewing or copying secrets."
+                zhCN: "查看或复制敏感字段前，请先通过 \(biometryName) 或主密码验证。",
+                en: "Verify with \(biometryName) or master password before viewing or copying secrets."
             ))
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -205,7 +234,7 @@ public struct ItemDetailView: View {
                     }
                 }
             } label: {
-                Label(store.l10n.t(zhCN: "Face ID 验证", en: "Verify with Face ID"), systemImage: "faceid")
+                Label(store.l10n.verifyWithBiometry(biometry), systemImage: biometry.systemImage)
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
@@ -213,16 +242,46 @@ public struct ItemDetailView: View {
                     .background(KeysmithColors.accent, in: RoundedRectangle(cornerRadius: 12))
             }
 
-            HStack {
-                SecureField(store.l10n.masterPasswordPlaceholder, text: $repromptPassword)
-                    .textFieldStyle(.roundedBorder)
-                Button(store.l10n.unlock) {
-                    if !repromptPassword.isEmpty {
-                        repromptUnlocked = true
-                        repromptPassword = ""
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Group {
+                        if isRepromptPasswordVisible {
+                            TextField(store.l10n.masterPasswordPlaceholder, text: $repromptPassword)
+                        } else {
+                            SecureField(store.l10n.masterPasswordPlaceholder, text: $repromptPassword)
+                        }
+                    }
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .onSubmit {
+                        Task { await verifyRepromptPassword() }
+                    }
+
+                    Button {
+                        isRepromptPasswordVisible.toggle()
+                    } label: {
+                        Image(systemName: isRepromptPasswordVisible ? "eye.slash" : "eye")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                Button {
+                    Task { await verifyRepromptPassword() }
+                } label: {
+                    if isVerifyingReprompt {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text(store.l10n.unlock)
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .tint(KeysmithColors.accent)
+                .disabled(isVerifyingReprompt || repromptPassword.isEmpty)
             }
 
             if let repromptError {
@@ -233,6 +292,19 @@ public struct ItemDetailView: View {
         }
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func verifyRepromptPassword() async {
+        repromptError = nil
+        isVerifyingReprompt = true
+        defer { isVerifyingReprompt = false }
+        do {
+            try await store.verifyMasterPassword(repromptPassword)
+            repromptPassword = ""
+            repromptUnlocked = true
+        } catch {
+            repromptError = error.localizedDescription
+        }
     }
 
     private func fieldsCards(_ detail: KSItemDetail) -> some View {
@@ -277,7 +349,7 @@ public struct ItemDetailView: View {
         let isRevealed = !field.sensitive || (revealedFieldIDs.contains(field.id) && !shouldMaskForCapture)
         let isCopied = recentlyCopiedFieldID == field.id
 
-        return HStack(alignment: .center, spacing: 10) {
+        return HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(field.label)
                     .font(.caption)
@@ -297,9 +369,20 @@ public struct ItemDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if field.copyable && !field.value.isEmpty {
+                    triggerFieldCopy(
+                        id: field.id,
+                        value: field.value,
+                        label: field.label,
+                        isSensitive: field.sensitive
+                    )
+                }
+            }
 
             if !field.value.isEmpty {
-                HStack(spacing: 6) {
+                HStack(spacing: 4) {
                     if field.sensitive {
                         Button {
                             if revealedFieldIDs.contains(field.id) {
@@ -310,9 +393,9 @@ public struct ItemDetailView: View {
                         } label: {
                             Image(systemName: isRevealed ? "eye.slash" : "eye")
                                 .font(.subheadline)
-                                .foregroundStyle(.primary)
-                                .frame(width: 38, height: 38)
-                                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 34, height: 34)
+                                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(isRevealed ? store.l10n.hide : store.l10n.reveal)
@@ -330,10 +413,10 @@ public struct ItemDetailView: View {
                             Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(isCopied ? KeysmithColors.success : KeysmithColors.accent)
-                                .frame(width: 38, height: 38)
+                                .frame(width: 34, height: 34)
                                 .background(
                                     (isCopied ? KeysmithColors.success : KeysmithColors.accent).opacity(0.14),
-                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
                                 )
                         }
                         .buttonStyle(.plain)
@@ -368,7 +451,12 @@ public struct ItemDetailView: View {
                             }
                         }
                         Button {
-                            largeTypeTarget = LargeTypePayload(title: field.label, secret: field.value)
+                            largeTypeTarget = LargeTypePayload(
+                                title: field.label,
+                                secret: field.value,
+                                copyable: field.copyable,
+                                isSensitive: field.sensitive
+                            )
                         } label: {
                             Label(store.l10n.largeType, systemImage: "textformat.size.larger")
                         }
@@ -376,8 +464,8 @@ public struct ItemDetailView: View {
                         Image(systemName: "ellipsis")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .frame(width: 34, height: 38)
-                            .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .frame(width: 32, height: 34)
+                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     }
                     .accessibilityLabel(store.l10n.largeType)
                 }
@@ -416,7 +504,12 @@ public struct ItemDetailView: View {
             }
             if !field.value.isEmpty {
                 Button {
-                    largeTypeTarget = LargeTypePayload(title: field.label, secret: field.value)
+                    largeTypeTarget = LargeTypePayload(
+                        title: field.label,
+                        secret: field.value,
+                        copyable: field.copyable,
+                        isSensitive: field.sensitive
+                    )
                 } label: {
                     Label(store.l10n.largeType, systemImage: "textformat.size.larger")
                 }

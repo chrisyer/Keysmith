@@ -10,11 +10,17 @@ struct TextInsertPickerView: View {
     @State private var isUnlocked = false
     @State private var isBusy = false
     @State private var masterPassword = ""
+    @State private var useMasterPassword = false
     @State private var query = ""
     @State private var candidates: [KSTextInsertCandidate] = []
     @State private var errorMessage: String?
 
+    private let l10n = KSLocalizedStrings(languageCode: "system")
     private let accentColor = Color(red: 5.0 / 255.0, green: 114.0 / 255.0, blue: 236.0 / 255.0)
+
+    private var biometryKind: KSBiometryKind {
+        AppleBiometricKeyStore.shared.currentBiometryKind()
+    }
 
     var body: some View {
         NavigationStack {
@@ -25,11 +31,11 @@ struct TextInsertPickerView: View {
                     candidatesList
                 }
             }
-            .navigationTitle("插入 Keysmith 字段")
+            .navigationTitle(l10n.t(zhCN: "插入 Keysmith 字段", en: "Insert Keysmith Field"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") {
+                    Button(l10n.cancel) {
                         Task { await onCancel() }
                     }
                     .disabled(isBusy)
@@ -42,39 +48,82 @@ struct TextInsertPickerView: View {
     }
 
     private var unlockView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 18) {
             Spacer()
             Image(systemName: "text.insert")
                 .font(.system(size: 40))
                 .foregroundStyle(accentColor)
-            Text("解锁后选择银行卡、身份或安全字段注入")
+            Text(l10n.t(zhCN: "解锁后选择银行卡、身份或安全字段注入", en: "Unlock to insert card, identity, or secure fields"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
-            if sessionState.biometricEnabled {
+            if sessionState.biometricEnabled && !useMasterPassword {
                 Button {
                     Task { await unlockWithBiometric() }
                 } label: {
-                    Label("使用 Face ID 解锁", systemImage: "faceid")
-                        .frame(maxWidth: .infinity)
+                    Label(l10n.unlockWithBiometry(biometryKind), systemImage: biometryKind.systemImage)
+                        .font(.body.weight(.semibold))
+                        .frame(minWidth: 190, maxWidth: 240)
                 }
                 .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .controlSize(.large)
                 .tint(accentColor)
-                .padding(.horizontal, 24)
-            }
 
-            HStack(spacing: 8) {
-                SecureField("输入主密码", text: $masterPassword)
-                    .textFieldStyle(.roundedBorder)
-                Button("解锁") {
-                    Task { await unlockWithPassword() }
+                Button {
+                    errorMessage = nil
+                    useMasterPassword = true
+                } label: {
+                    Text(l10n.t(zhCN: "改用主密码解锁", en: "Use Master Password"))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(accentColor)
                 }
-                .buttonStyle(.bordered)
-                .disabled(masterPassword.isEmpty)
+                .buttonStyle(.plain)
+            } else {
+                VStack(spacing: 12) {
+                    VStack(spacing: 12) {
+                        SecureField(l10n.masterPasswordPlaceholder, text: $masterPassword)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 11)
+                            .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .onSubmit {
+                                Task { await unlockWithPassword() }
+                            }
+                        Button {
+                            Task { await unlockWithPassword() }
+                        } label: {
+                            Text(l10n.unlock)
+                                .font(.body.weight(.semibold))
+                                .frame(minWidth: 160, maxWidth: 220)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.large)
+                        .tint(accentColor)
+                        .disabled(masterPassword.isEmpty)
+                    }
+                    .padding(16)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(.horizontal, 24)
+
+                    if sessionState.biometricEnabled {
+                        Button {
+                            errorMessage = nil
+                            useMasterPassword = false
+                            Task { await unlockWithBiometric() }
+                        } label: {
+                            Label(l10n.unlockWithBiometry(biometryKind), systemImage: biometryKind.systemImage)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(accentColor)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
-            .padding(.horizontal, 24)
 
             if let errorMessage {
                 Text(errorMessage)
@@ -83,6 +132,7 @@ struct TextInsertPickerView: View {
             }
             Spacer()
         }
+        .background(Color(.systemGroupedBackground))
         .disabled(isBusy)
     }
 
@@ -90,9 +140,12 @@ struct TextInsertPickerView: View {
         List {
             if filteredCandidates.isEmpty {
                 ContentUnavailableView(
-                    "暂无可插入字段",
+                    l10n.t(zhCN: "暂无可插入字段", en: "No Insertable Fields"),
                     systemImage: "creditcard",
-                    description: Text("请确认保险库中存在银行卡、身份信息或安全备注条目。")
+                    description: Text(l10n.t(
+                        zhCN: "请确认保险库中存在银行卡、身份信息或安全备注条目。",
+                        en: "Make sure your vault contains cards, identities, or secure notes."
+                    ))
                 )
             } else {
                 ForEach(groupedItemTitles, id: \.self) { itemTitle in
@@ -123,7 +176,7 @@ struct TextInsertPickerView: View {
                 }
             }
         }
-        .searchable(text: $query, prompt: "搜索卡号、姓名或字段")
+        .searchable(text: $query, prompt: l10n.t(zhCN: "搜索卡号、姓名或字段", en: "Search card, name, or field"))
         .disabled(isBusy)
     }
 

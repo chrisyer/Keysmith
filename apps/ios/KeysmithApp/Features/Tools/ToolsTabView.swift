@@ -4,45 +4,146 @@ import SwiftUI
 /// and encrypted Send share manager.
 public struct ToolsTabView: View {
     @Bindable var store: KeysmithStore
+    let isEmbeddedInNavigationStack: Bool
     let onOpenSettings: () -> Void
+    let onSelectItem: ((String) -> Void)?
+    let onScanTotp: (() -> Void)?
 
     @State private var showCreateSendSheet = false
+    @State private var showGeneratorSheet = false
     @State private var checkHibpOnScan = false
     @State private var isScanningWatchtower = false
+    @State private var selectedIssueFilter: KSWatchtowerIssue? = nil
 
-    public init(store: KeysmithStore, onOpenSettings: @escaping () -> Void) {
+    public init(
+        store: KeysmithStore,
+        isEmbeddedInNavigationStack: Bool = false,
+        onOpenSettings: @escaping () -> Void,
+        onSelectItem: ((String) -> Void)? = nil,
+        onScanTotp: (() -> Void)? = nil
+    ) {
         self.store = store
+        self.isEmbeddedInNavigationStack = isEmbeddedInNavigationStack
         self.onOpenSettings = onOpenSettings
+        self.onSelectItem = onSelectItem
+        self.onScanTotp = onScanTotp
     }
 
     public var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    watchtowerCard
-                    sendCard
+        Group {
+            if isEmbeddedInNavigationStack {
+                mainContent
+            } else {
+                NavigationStack {
+                    mainContent
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle(store.l10n.tabTools)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: onOpenSettings) {
-                        Image(systemName: "gearshape")
+        }
+        .sheet(isPresented: $showCreateSendSheet) {
+            CreateTextSendSheet(store: store)
+        }
+        .sheet(isPresented: $showGeneratorSheet) {
+            KeysmithPasswordGeneratorSheet(store: store)
+        }
+    }
+
+    private var mainContent: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                quickToolsCard
+                watchtowerCard
+                sendCard
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .background(Color(.systemGroupedBackground))
+        .refreshable {
+            await store.runWatchtowerScan(checkHibp: checkHibpOnScan)
+            await store.loadSends()
+        }
+        .navigationTitle(store.l10n.tabTools)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel(store.l10n.settings)
+            }
+        }
+        .task {
+            if store.watchtowerReport == nil && store.session.status == .unlocked {
+                await store.runWatchtowerScan(checkHibp: false)
+            }
+            await store.loadSends()
+        }
+    }
+
+    // MARK: - Quick Security Tools (Generator & TOTP Scanner)
+
+    private var quickToolsCard: some View {
+        let cols = onScanTotp == nil
+            ? [GridItem(.flexible())]
+            : [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+        return LazyVGrid(columns: cols, spacing: 10) {
+            Button {
+                showGeneratorSheet = true
+            } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(KeysmithColors.accent.opacity(0.14))
+                        Image(systemName: "wand.and.stars")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(KeysmithColors.accent)
                     }
-                    .accessibilityLabel(store.l10n.settings)
+                    .frame(width: 36, height: 36)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(store.l10n.t(zhCN: "密码生成器", zhTW: "密碼產生器", en: "Generator"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(store.l10n.t(zhCN: "强密码 / 短语 / PIN", en: "Passwords & PIN"))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
                 }
+                .padding(12)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
-            .task {
-                if store.watchtowerReport == nil && store.session.status == .unlocked {
-                    await store.runWatchtowerScan(checkHibp: false)
+            .buttonStyle(.plain)
+
+            if let onScanTotp {
+                Button(action: onScanTotp) {
+                    HStack(spacing: 10) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(KeysmithColors.success.opacity(0.14))
+                            Image(systemName: "qrcode.viewfinder")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(KeysmithColors.success)
+                        }
+                        .frame(width: 36, height: 36)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(store.l10n.t(zhCN: "扫 2FA 二维码", zhTW: "掃描 2FA QR 碼", en: "Scan 2FA QR"))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text(store.l10n.t(zhCN: "扫描并保存新条目", en: "Create TOTP item"))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
-                await store.loadSends()
-            }
-            .sheet(isPresented: $showCreateSendSheet) {
-                CreateTextSendSheet(store: store)
+                .buttonStyle(.plain)
             }
         }
     }
@@ -99,29 +200,99 @@ public struct ToolsTabView: View {
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 watchtowerMetricTile(
+                    issue: .weak,
                     title: store.l10n.t(zhCN: "弱密码", zhTW: "弱密碼", en: "Weak"),
                     count: report?.count(for: .weak) ?? 0,
                     icon: "exclamationmark.shield",
                     color: KeysmithColors.warning
                 )
                 watchtowerMetricTile(
+                    issue: .reused,
                     title: store.l10n.t(zhCN: "重复使用", zhTW: "重複使用", en: "Reused"),
                     count: report?.count(for: .reused) ?? 0,
                     icon: "doc.on.doc.fill",
                     color: KeysmithColors.symbol
                 )
                 watchtowerMetricTile(
+                    issue: .missing2fa,
                     title: store.l10n.t(zhCN: "未开 2FA", zhTW: "未啟用 2FA", en: "Missing 2FA"),
                     count: report?.count(for: .missing2fa) ?? 0,
                     icon: "lock.trianglebadge.exclamationmark",
                     color: KeysmithColors.accent
                 )
                 watchtowerMetricTile(
+                    issue: .breached,
                     title: store.l10n.t(zhCN: "已泄露 (HIBP)", zhTW: "已洩漏 (HIBP)", en: "Compromised"),
                     count: report?.count(for: .breached) ?? 0,
                     icon: "flame.fill",
                     color: KeysmithColors.danger
                 )
+            }
+
+            if let report {
+                let flagged = flaggedItems(in: report)
+                if !flagged.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(selectedIssueFilter.map { issueLabel($0) }
+                                 ?? store.l10n.t(zhCN: "待处理风险条目", en: "Flagged Items"))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            if selectedIssueFilter != nil {
+                                Button(store.l10n.t(zhCN: "显示全部", en: "Show All")) {
+                                    selectedIssueFilter = nil
+                                }
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(KeysmithColors.accent)
+                            }
+                        }
+
+                        VStack(spacing: 0) {
+                            ForEach(Array(flagged.enumerated()), id: \.element.item.id) { idx, entry in
+                                if idx > 0 {
+                                    Divider().padding(.leading, 48)
+                                }
+                                Button {
+                                    onSelectItem?(entry.item.id)
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        KSItemFaviconBadge(
+                                            store: store,
+                                            title: entry.item.title,
+                                            icon: entry.item.icon,
+                                            primaryUrl: entry.item.primaryUrl,
+                                            category: entry.item.category,
+                                            size: 32
+                                        )
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(entry.item.title)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(1)
+                                            Text(entry.issues.map { issueLabel($0) }.joined(separator: " · "))
+                                                .font(.caption2)
+                                                .foregroundStyle(KeysmithColors.warning)
+                                                .lineLimit(1)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 9)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color(.tertiarySystemGroupedBackground))
+                        )
+                    }
+                }
             }
 
             HStack {
@@ -158,30 +329,77 @@ public struct ToolsTabView: View {
         .background(cardBackground)
     }
 
-    private func watchtowerMetricTile(title: String, count: Int, icon: String, color: Color) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(count > 0 ? color : KeysmithColors.success)
-                .frame(width: 28)
+    private func watchtowerMetricTile(
+        issue: KSWatchtowerIssue,
+        title: String,
+        count: Int,
+        icon: String,
+        color: Color
+    ) -> some View {
+        let isSelected = selectedIssueFilter == issue
+        return Button {
+            selectedIssueFilter = isSelected ? nil : issue
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundStyle(count > 0 ? color : KeysmithColors.success)
+                    .frame(width: 28)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(count)")
-                    .font(.headline.monospacedDigit())
-                    .foregroundStyle(count > 0 ? color : .primary)
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(count)")
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(count > 0 ? color : .primary)
+                    Text(title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
             }
-
-            Spacer(minLength: 0)
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.tertiarySystemGroupedBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(isSelected ? color : Color.clear, lineWidth: 1.5)
+            )
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
-        )
+        .buttonStyle(.plain)
+    }
+
+    private func flaggedItems(in report: KSWatchtowerReport) -> [(item: KSItemSummary, issues: [KSWatchtowerIssue])] {
+        let targetIds: Set<String>
+        if let selected = selectedIssueFilter {
+            targetIds = Set(report.itemIdsByIssue[selected.rawValue] ?? [])
+        } else {
+            var union = Set(report.itemIssues.keys)
+            for ids in report.itemIdsByIssue.values {
+                union.formUnion(ids)
+            }
+            targetIds = union
+        }
+        return store.visibleItems
+            .filter { targetIds.contains($0.id) }
+            .map { item in
+                let issues = report.itemIssues[item.id] ?? item.issues
+                return (item, issues)
+            }
+    }
+
+    private func issueLabel(_ issue: KSWatchtowerIssue) -> String {
+        switch issue {
+        case .weak: return store.l10n.t(zhCN: "弱密码", zhTW: "弱密碼", en: "Weak")
+        case .reused: return store.l10n.t(zhCN: "重复使用", zhTW: "重複使用", en: "Reused")
+        case .missing2fa: return store.l10n.t(zhCN: "未开 2FA", zhTW: "未啟用 2FA", en: "Missing 2FA")
+        case .unsecuredUrl: return store.l10n.t(zhCN: "不安全链接", en: "Insecure URL")
+        case .expiring: return store.l10n.t(zhCN: "即将过期", en: "Expiring")
+        case .breached: return store.l10n.t(zhCN: "已泄露", zhTW: "已洩漏", en: "Compromised")
+        case .passkeyAvailable: return store.l10n.t(zhCN: "可升级 Passkey", en: "Passkey Available")
+        }
     }
 
     // MARK: - Send Encrypted Share Manager
@@ -298,16 +516,16 @@ public struct ToolsTabView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
+                .fill(Color(.tertiarySystemGroupedBackground))
         )
     }
 
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color(.systemBackground))
+            .fill(Color(.secondarySystemGroupedBackground))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                    .strokeBorder(Color.primary.opacity(0.05), lineWidth: 1)
             )
     }
 

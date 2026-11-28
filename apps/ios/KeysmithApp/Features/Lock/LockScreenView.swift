@@ -22,20 +22,16 @@ public struct LockScreenView: View {
         store.session.biometricEnabled || store.isDemoMode
     }
 
+    private var biometryKind: KSBiometryKind {
+        AppleBiometricKeyStore.shared.currentBiometryKind()
+    }
+
     public var body: some View {
         VStack(spacing: 24) {
             Spacer()
 
             VStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(KeysmithColors.accent)
-                        .frame(width: 68, height: 68)
-                    Image(systemName: "key.fill")
-                        .font(.system(size: 30, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                .shadow(color: KeysmithColors.accent.opacity(0.25), radius: 14, y: 6)
+                KSAppLogoView(size: 68)
 
                 Text(store.l10n.vaultLockedTitle)
                     .font(.title3.weight(.bold))
@@ -125,9 +121,9 @@ public struct LockScreenView: View {
                         ProgressView()
                             .tint(.white)
                     } else {
-                        Image(systemName: "faceid")
+                        Image(systemName: biometryKind.systemImage)
                     }
-                    Text(store.l10n.unlockWithFaceID)
+                    Text(store.l10n.unlockWithBiometry(biometryKind))
                         .font(.body.weight(.semibold))
                 }
                 .frame(minWidth: 210, maxWidth: 260)
@@ -222,7 +218,7 @@ public struct LockScreenView: View {
                     }
                     Task { await unlockBiometric() }
                 } label: {
-                    Label(store.l10n.unlockWithFaceID, systemImage: "faceid")
+                    Label(store.l10n.unlockWithBiometry(biometryKind), systemImage: biometryKind.systemImage)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(KeysmithColors.accent)
                         .padding(.vertical, 6)

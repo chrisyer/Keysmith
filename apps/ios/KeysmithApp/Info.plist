@@ -38,9 +38,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
-	<string>使用 Face ID 安全解锁本地 Keysmith 保险库并确认敏感通行密钥访问。</string>
+	<string>Unlock your local Keysmith vault and verify sensitive passkey or item access.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>仅用于本地实时扫描 TOTP 双重验证二维码，图像绝不上传。</string>
+	<string>Scan TOTP 2FA QR codes locally in memory. Images are never uploaded or written to disk.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

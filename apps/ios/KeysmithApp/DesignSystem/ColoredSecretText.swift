@@ -24,7 +24,7 @@ public struct ColoredSecretText: View {
             Text(String(repeating: "•", count: max(8, min(16, text.count))))
                 .font(font)
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("Hidden secret")
+                .accessibilityLabel(KSLocalizedStrings(languageCode: "system").t(zhCN: "已隐藏的机密内容", en: "Hidden secret"))
         } else {
             Text(attributedSecret)
                 .font(font)

@@ -9,12 +9,26 @@ public struct AuthView: View {
         var id: String { rawValue }
     }
 
+    private enum AuthField: Hashable {
+        case serverUrl
+        case displayName
+        case email
+        case masterPassword
+        case confirmPassword
+        case passwordHint
+        case twoFactorCode
+    }
+
+    @FocusState private var focusedField: AuthField?
+
     @State private var tab: AuthTab = .login
-    @State private var serverUrl: String = "https://vault.bitwarden.com"
+    @State private var serverUrl: String = ""
     @State private var email: String = ""
     @State private var displayName: String = ""
     @State private var masterPassword: String = ""
     @State private var confirmPassword: String = ""
+    @State private var isPasswordVisible: Bool = false
+    @State private var isConfirmVisible: Bool = false
     @State private var passwordHint: String = ""
 
     @State private var allowInsecureHttp: Bool = false
@@ -25,7 +39,7 @@ public struct AuthView: View {
     @State private var serverCheckMessage: String?
     @State private var serverCheckOk: Bool = false
     @State private var registrationDisabled: Bool = false
-    @State private var weakKdfIterations: Int?
+    @State private var weakKdfWarning: String?
     @State private var errorMessage: String?
     @State private var isSubmitting: Bool = false
 
@@ -37,6 +51,37 @@ public struct AuthView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    HStack {
+                        Spacer()
+                        Menu {
+                            ForEach(KSLanguageMode.allCases) { mode in
+                                Button {
+                                    Task {
+                                        try? await store.updateAppSettings(.init(language: mode.rawValue))
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(mode == .system ? store.l10n.t(zhCN: "跟随系统", zhTW: "跟隨系統", en: "System") : mode.nativeName)
+                                        if store.appSettings.languageMode == mode {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label(
+                                store.appSettings.languageMode == .system
+                                    ? store.l10n.t(zhCN: "语言", zhTW: "語言", en: "Language")
+                                    : store.appSettings.languageMode.nativeName,
+                                systemImage: "globe"
+                            )
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color(.secondarySystemGroupedBackground), in: Capsule())
+                        }
+                    }
+
                     headerCard
 
                     Picker("", selection: $tab) {
@@ -55,8 +100,8 @@ public struct AuthView: View {
                         insecureHttpWarningCard
                     }
 
-                    if let iters = weakKdfIterations {
-                        weakKdfWarningCard(iterations: iters)
+                    if let warning = weakKdfWarning {
+                        weakKdfWarningCard(message: warning)
                     }
 
                     if let err = errorMessage {
@@ -75,10 +120,16 @@ public struct AuthView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(Color(.systemGroupedBackground))
+            .scrollDismissesKeyboard(.interactively)
             .navigationBarHidden(true)
             .onAppear {
                 if let last = store.appSettings.lastServerUrl, !last.isEmpty {
                     serverUrl = last
+                }
+            }
+            .onChange(of: focusedField) { oldField, newField in
+                if oldField == .email && newField != .email && tab == .login {
+                    Task { await checkPreloginKdf() }
                 }
             }
         }
@@ -86,14 +137,7 @@ public struct AuthView: View {
 
     private var headerCard: some View {
         VStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(KeysmithColors.accent)
-                    .frame(width: 64, height: 64)
-                Image(systemName: "key.fill")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(.white)
-            }
+            KSAppLogoView(size: 68)
             Text("Keysmith")
                 .font(.title2.weight(.bold))
             Text(store.l10n.t(
@@ -142,7 +186,7 @@ public struct AuthView: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(12)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
@@ -154,7 +198,7 @@ public struct AuthView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(store.l10n.t(zhCN: "服务器地址", en: "Server URL"))
-                        .font(.caption.weight(.medium))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button(store.l10n.t(zhCN: "检查连接", en: "Test Connection")) {
@@ -167,7 +211,14 @@ public struct AuthView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-                    .textFieldStyle(.roundedBorder)
+                    .submitLabel(.next)
+                    .focused($focusedField, equals: .serverUrl)
+                    .onSubmit {
+                        focusedField = (tab == .register) ? .displayName : .email
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 if let msg = serverCheckMessage {
                     Text(msg)
@@ -185,44 +236,111 @@ public struct AuthView: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(store.l10n.t(zhCN: "显示名称", en: "Display Name"))
-                        .font(.caption.weight(.medium))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     TextField("Cherry Wang", text: $displayName)
-                        .textFieldStyle(.roundedBorder)
+                        .submitLabel(.next)
+                        .focused($focusedField, equals: .displayName)
+                        .onSubmit { focusedField = .email }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(store.l10n.t(zhCN: "邮箱", en: "Email"))
-                    .font(.caption.weight(.medium))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 TextField("you@example.com", text: $email)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.emailAddress)
-                    .textFieldStyle(.roundedBorder)
+                    .textContentType(.emailAddress)
+                    .submitLabel(.next)
+                    .focused($focusedField, equals: .email)
                     .onSubmit {
+                        focusedField = .masterPassword
                         if tab == .login {
                             Task { await checkPreloginKdf() }
                         }
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(store.l10n.t(zhCN: "主密码", en: "Master Password"))
-                    .font(.caption.weight(.medium))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                SecureField(store.l10n.masterPasswordPlaceholder, text: $masterPassword)
-                    .textFieldStyle(.roundedBorder)
+                HStack(spacing: 8) {
+                    Group {
+                        if isPasswordVisible {
+                            TextField(store.l10n.masterPasswordPlaceholder, text: $masterPassword)
+                        } else {
+                            SecureField(store.l10n.masterPasswordPlaceholder, text: $masterPassword)
+                        }
+                    }
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(tab == .register ? .next : .go)
+                    .focused($focusedField, equals: .masterPassword)
+                    .onSubmit {
+                        if tab == .register {
+                            focusedField = .confirmPassword
+                        } else if twoFactorRequired {
+                            focusedField = .twoFactorCode
+                        } else {
+                            Task { await submit() }
+                        }
+                    }
+
+                    Button {
+                        isPasswordVisible.toggle()
+                    } label: {
+                        Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 26, height: 26)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
 
             if tab == .register {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(store.l10n.t(zhCN: "确认主密码", en: "Confirm Master Password"))
-                        .font(.caption.weight(.medium))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    SecureField(store.l10n.t(zhCN: "再次输入主密码", en: "Confirm password"), text: $confirmPassword)
-                        .textFieldStyle(.roundedBorder)
+                    HStack(spacing: 8) {
+                        Group {
+                            if isConfirmVisible {
+                                TextField(store.l10n.t(zhCN: "再次输入主密码", en: "Confirm password"), text: $confirmPassword)
+                            } else {
+                                SecureField(store.l10n.t(zhCN: "再次输入主密码", en: "Confirm password"), text: $confirmPassword)
+                            }
+                        }
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.next)
+                        .focused($focusedField, equals: .confirmPassword)
+                        .onSubmit { focusedField = .passwordHint }
+
+                        Button {
+                            isConfirmVisible.toggle()
+                        } label: {
+                            Image(systemName: isConfirmVisible ? "eye.slash" : "eye")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 26, height: 26)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                     Text(store.l10n.t(
                         zhCN: "规则：至少 12 个字符，且包含至少两类字符（大小写字母、数字或符号）",
@@ -234,28 +352,36 @@ public struct AuthView: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(store.l10n.t(zhCN: "密码提示（可选）", en: "Master Password Hint (Optional)"))
-                        .font(.caption.weight(.medium))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     TextField(store.l10n.t(zhCN: "留空则不设置", en: "Optional hint"), text: $passwordHint)
-                        .textFieldStyle(.roundedBorder)
+                        .submitLabel(.go)
+                        .focused($focusedField, equals: .passwordHint)
+                        .onSubmit { Task { await submit() } }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
 
             if tab == .login && twoFactorRequired {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(store.l10n.t(zhCN: "两步验证码", en: "Two-Factor Code"))
-                        .font(.caption.weight(.medium))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(KeysmithColors.accent)
                     TextField("123456", text: $twoFactorCode)
                         .keyboardType(.numberPad)
-                        .textFieldStyle(.roundedBorder)
+                        .focused($focusedField, equals: .twoFactorCode)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     Toggle(store.l10n.t(zhCN: "记住此设备", en: "Remember this device"), isOn: $twoFactorRemember)
                         .font(.caption)
                 }
             }
         }
-        .padding(16)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(18)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private var insecureHttpWarningCard: some View {
@@ -283,12 +409,9 @@ public struct AuthView: View {
         .background(KeysmithColors.danger.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private func weakKdfWarningCard(iterations: Int) -> some View {
+    private func weakKdfWarningCard(message: String) -> some View {
         Label(
-            store.l10n.t(
-                zhCN: "检测到较弱的 KDF 配置（PBKDF2 仅 \(iterations) 次迭代，低于建议值 600,000），建议在服务端提高 KDF 强度。",
-                en: "Weak KDF detected (PBKDF2 \(iterations) iterations < 600,000). Recommend upgrading server KDF."
-            ),
+            message,
             systemImage: "shield.lefthalf.filled.trianglebadge.exclamationmark"
         )
         .font(.caption)
@@ -321,16 +444,18 @@ public struct AuthView: View {
             .tint(KeysmithColors.accent)
             .disabled(isSubmitting || (tab == .register && registrationDisabled))
 
+            #if DEBUG
             Button {
                 store.enterDemoMode()
             } label: {
                 Label(store.l10n.enterDemoMode, systemImage: "sparkles")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(KeysmithColors.accent)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
             }
             .buttonStyle(.plain)
+            #endif
         }
         .frame(maxWidth: .infinity)
     }
@@ -381,9 +506,18 @@ public struct AuthView: View {
         if isNonLoopbackHTTP && !allowInsecureHttp { return }
         if let kdf = try? await store.prelogin(serverUrl: serverUrl, email: cleanEmail, allowInsecureHttp: allowInsecureHttp) {
             if kdf.kdf == 0 && kdf.kdfIterations < 600_000 {
-                weakKdfIterations = kdf.kdfIterations
+                weakKdfWarning = store.l10n.t(
+                    zhCN: "检测到较弱的 KDF 配置（PBKDF2 仅 \(kdf.kdfIterations) 次迭代，低于建议值 600,000），建议在服务端提高 KDF 强度。",
+                    en: "Weak KDF detected (PBKDF2 \(kdf.kdfIterations) iterations < 600,000). Recommend upgrading server KDF."
+                )
+            } else if kdf.kdf == 1 && (kdf.kdfIterations < 3 || (kdf.kdfMemory ?? 64) < 64) {
+                let mem = kdf.kdfMemory ?? 64
+                weakKdfWarning = store.l10n.t(
+                    zhCN: "检测到较弱的 Argon2id KDF 配置（迭代 \(kdf.kdfIterations) 次、内存 \(mem) MiB），建议至少设为 3 次迭代与 64 MiB 内存。",
+                    en: "Weak Argon2id KDF detected (\(kdf.kdfIterations) iterations, \(mem) MiB memory). Recommend at least 3 iterations and 64 MiB."
+                )
             } else {
-                weakKdfIterations = nil
+                weakKdfWarning = nil
             }
         }
     }

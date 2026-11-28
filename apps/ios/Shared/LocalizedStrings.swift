@@ -140,7 +140,51 @@ public struct KSLocalizedStrings: Sendable {
         t(zhCN: "Keysmith 保险库已锁定", zhTW: "Keysmith 保險庫已鎖定", en: "Keysmith Vault Locked", ja: "Keysmith はロックされています", ko: "Keysmith 금고 잠김", de: "Keysmith-Tresor gesperrt", fr: "Coffre verrouillé", es: "Bóveda bloqueada")
     }
     public var unlockWithFaceID: String {
-        t(zhCN: "使用 Face ID 解锁", zhTW: "使用 Face ID 解鎖", en: "Unlock with Face ID", ja: "Face ID でロック解除", ko: "Face ID로 잠금 해제", de: "Mit Face ID entsperren", fr: "Déverrouiller avec Face ID", es: "Desbloquear con Face ID")
+        unlockWithBiometry(.faceID)
+    }
+    public func biometryName(_ kind: KSBiometryKind) -> String {
+        switch kind {
+        case .faceID: return "Face ID"
+        case .touchID: return "Touch ID"
+        case .opticID: return "Optic ID"
+        case .passcode:
+            return t(
+                zhCN: "设备密码",
+                zhTW: "裝置密碼",
+                en: "Device Passcode",
+                ja: "パスコード",
+                ko: "기기 암호",
+                de: "Gerätecode",
+                fr: "Code de l'appareil",
+                es: "Código del dispositivo"
+            )
+        }
+    }
+    public func unlockWithBiometry(_ kind: KSBiometryKind) -> String {
+        let name = biometryName(kind)
+        return t(
+            zhCN: "使用 \(name) 解锁",
+            zhTW: "使用 \(name) 解鎖",
+            en: "Unlock with \(name)",
+            ja: "\(name) でロック解除",
+            ko: "\(name)로 잠금 해제",
+            de: "Mit \(name) entsperren",
+            fr: "Déverrouiller avec \(name)",
+            es: "Desbloquear con \(name)"
+        )
+    }
+    public func verifyWithBiometry(_ kind: KSBiometryKind) -> String {
+        let name = biometryName(kind)
+        return t(
+            zhCN: "\(name) 验证",
+            zhTW: "\(name) 驗證",
+            en: "Verify with \(name)",
+            ja: "\(name) で確認",
+            ko: "\(name) 인증",
+            de: "Mit \(name) prüfen",
+            fr: "Vérifier avec \(name)",
+            es: "Verificar con \(name)"
+        )
     }
     public var masterPasswordPlaceholder: String {
         t(zhCN: "输入主密码", zhTW: "輸入主密碼", en: "Enter master password", ja: "マスターパスワードを入力", ko: "마스터 비밀번호 입력", de: "Master-Passwort eingeben", fr: "Mot de passe principal", es: "Contraseña maestra")

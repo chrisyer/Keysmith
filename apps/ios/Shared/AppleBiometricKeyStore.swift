@@ -39,6 +39,26 @@ public final class AppleBiometricKeyStore: @unchecked Sendable {
         return context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
     }
 
+    public func currentBiometryKind() -> KSBiometryKind {
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+            return .passcode
+        }
+        switch context.biometryType {
+        case .faceID:
+            return .faceID
+        case .touchID:
+            return .touchID
+        case .opticID:
+            return .opticID
+        case .none:
+            return .passcode
+        @unknown default:
+            return .passcode
+        }
+    }
+
     public func saveUnlockKey(accountId: String, key: Data) throws {
         guard !key.isEmpty else {
             throw KSBiometricError.invalidKeyData
@@ -103,8 +123,6 @@ public final class AppleBiometricKeyStore: @unchecked Sendable {
         context.localizedReason = reason
         context.localizedFallbackTitle = ""
 
-        try verifyUserSync(context: context, reason: reason)
-
         var query = baseKeychainQuery(accountId: accountId)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -119,6 +137,7 @@ public final class AppleBiometricKeyStore: @unchecked Sendable {
         }
         #if targetEnvironment(simulator)
         if status == errSecMissingEntitlement || status == errSecItemNotFound {
+            try verifyUserSync(context: context, reason: reason)
             let simQuery: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service,
@@ -135,6 +154,12 @@ public final class AppleBiometricKeyStore: @unchecked Sendable {
         }
         #endif
 
+        if status == errSecUserCanceled {
+            throw KSBiometricError.authenticationFailed("Biometric verification cancelled")
+        }
+        if status == errSecAuthFailed {
+            throw KSBiometricError.authenticationFailed("Biometric verification failed")
+        }
         guard status == errSecSuccess, let data = result as? Data else {
             throw KSBiometricError.keychainError(status)
         }

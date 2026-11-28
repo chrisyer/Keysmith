@@ -19,12 +19,18 @@ struct AutoFillSessionView: View {
     @State private var isBusy = false
     @State private var sessionState = KSSessionState()
     @State private var masterPassword = ""
+    @State private var useMasterPassword = false
     @State private var searchQuery = ""
     @State private var items: [KSItemSummary] = []
     @State private var passkeys: [KSPasskeyListCandidate] = []
     @State private var errorMessage: String?
 
+    private let l10n = KSLocalizedStrings(languageCode: "system")
     private let accentColor = Color(red: 5.0 / 255.0, green: 114.0 / 255.0, blue: 236.0 / 255.0)
+
+    private var biometryKind: KSBiometryKind {
+        AppleBiometricKeyStore.shared.currentBiometryKind()
+    }
 
     var body: some View {
         NavigationStack {
@@ -35,11 +41,13 @@ struct AutoFillSessionView: View {
                     credentialListView
                 }
             }
-            .navigationTitle(oneTimeCodeOnly ? "选择验证码" : "Keysmith 自动填充")
+            .navigationTitle(oneTimeCodeOnly
+                             ? l10n.t(zhCN: "选择验证码", en: "Choose Verification Code")
+                             : l10n.t(zhCN: "Keysmith 自动填充", en: "Keysmith AutoFill"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") {
+                    Button(l10n.cancel) {
                         Task { await onCancel() }
                     }
                     .disabled(isBusy)
@@ -52,20 +60,20 @@ struct AutoFillSessionView: View {
     }
 
     private var unlockGateView: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 20) {
             Spacer()
 
             ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(accentColor)
-                Text("K")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                Image(systemName: "key.fill")
+                    .font(.system(size: 26, weight: .bold))
                     .foregroundStyle(.white)
             }
             .frame(width: 60, height: 60)
 
             VStack(spacing: 4) {
-                Text("解锁 Keysmith 保险库")
+                Text(l10n.t(zhCN: "解锁 Keysmith 保险库", en: "Unlock Keysmith Vault"))
                     .font(.headline)
                 if !serviceHosts.isEmpty {
                     Text(serviceHosts.joined(separator: " · "))
@@ -75,35 +83,80 @@ struct AutoFillSessionView: View {
             }
 
             if sessionState.status == .unauthenticated {
-                Text("请先打开 Keysmith 主应用登录账号后再使用自动填充。")
+                Text(l10n.t(
+                    zhCN: "请先打开 Keysmith 主应用登录账号后再使用自动填充。",
+                    en: "Please open the Keysmith app and sign in before using AutoFill."
+                ))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
+            } else if sessionState.biometricEnabled && !useMasterPassword {
+                VStack(spacing: 14) {
+                    Button {
+                        Task { await unlockWithBiometric() }
+                    } label: {
+                        Label(l10n.unlockWithBiometry(biometryKind), systemImage: biometryKind.systemImage)
+                            .font(.body.weight(.semibold))
+                            .frame(minWidth: 200, maxWidth: 250)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.large)
+                    .tint(accentColor)
+
+                    Button {
+                        errorMessage = nil
+                        useMasterPassword = true
+                    } label: {
+                        Text(l10n.t(zhCN: "改用主密码解锁", en: "Use Master Password"))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(accentColor)
+                    }
+                    .buttonStyle(.plain)
+                }
             } else {
                 VStack(spacing: 12) {
-                    if sessionState.biometricEnabled {
+                    VStack(spacing: 12) {
+                        SecureField(l10n.masterPasswordPlaceholder, text: $masterPassword)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 11)
+                            .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .onSubmit {
+                                Task { await unlockWithPassword() }
+                            }
                         Button {
-                            Task { await unlockWithBiometric() }
+                            Task { await unlockWithPassword() }
                         } label: {
-                            Label("使用 Face ID 解锁并填充", systemImage: "faceid")
-                                .frame(maxWidth: .infinity)
+                            Text(l10n.unlock)
+                                .font(.body.weight(.semibold))
+                                .frame(minWidth: 160, maxWidth: 220)
                         }
                         .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.large)
                         .tint(accentColor)
-                    }
-
-                    HStack(spacing: 8) {
-                        SecureField("输入主密码", text: $masterPassword)
-                            .textFieldStyle(.roundedBorder)
-                        Button("解锁") {
-                            Task { await unlockWithPassword() }
-                        }
-                        .buttonStyle(.bordered)
                         .disabled(masterPassword.isEmpty)
                     }
+                    .padding(16)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(.horizontal, 24)
+
+                    if sessionState.biometricEnabled {
+                        Button {
+                            errorMessage = nil
+                            useMasterPassword = false
+                            Task { await unlockWithBiometric() }
+                        } label: {
+                            Label(l10n.unlockWithBiometry(biometryKind), systemImage: biometryKind.systemImage)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(accentColor)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .padding(.horizontal, 24)
             }
 
             if let errorMessage {
@@ -116,13 +169,17 @@ struct AutoFillSessionView: View {
 
             Spacer()
         }
+        .background(Color(.systemGroupedBackground))
         .disabled(isBusy)
     }
 
     private var credentialListView: some View {
         List {
             if let passkeyParameters, !passkeys.isEmpty {
-                Section("通行密钥 Passkeys (\(passkeyParameters.relyingPartyIdentifier))") {
+                Section(l10n.t(
+                    zhCN: "通行密钥 Passkeys (\(passkeyParameters.relyingPartyIdentifier))",
+                    en: "Passkeys (\(passkeyParameters.relyingPartyIdentifier))"
+                )) {
                     ForEach(passkeys) { pk in
                         Button {
                             Task {
@@ -131,8 +188,14 @@ struct AutoFillSessionView: View {
                             }
                         } label: {
                             HStack(spacing: 10) {
-                                Image(systemName: "person.badge.key.fill")
-                                    .foregroundStyle(.teal)
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(Color.teal)
+                                    Image(systemName: "person.badge.key.fill")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                }
+                                .frame(width: 30, height: 30)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(pk.itemTitle)
                                         .font(.subheadline.weight(.semibold))
@@ -147,38 +210,56 @@ struct AutoFillSessionView: View {
                 }
             }
 
-            Section(serviceHosts.isEmpty ? "全部可用凭证" : "匹配站点与全部凭证") {
-                ForEach(filteredItems) { item in
-                    Button {
-                        Task { await pickItem(item) }
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: item.hasTotp && oneTimeCodeOnly ? "key.viewfinder" : item.category.systemImage)
-                                .foregroundStyle(accentColor)
-                                .frame(width: 24)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.title)
-                                    .font(.subheadline.weight(.semibold))
-                                Text(item.subtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if item.hasTotp {
-                                Text("2FA")
-                                    .font(.caption2.weight(.semibold))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(accentColor.opacity(0.14), in: Capsule())
-                                    .foregroundStyle(accentColor)
+            if filteredItems.isEmpty && passkeys.isEmpty {
+                ContentUnavailableView(
+                    l10n.t(zhCN: "未找到匹配凭证", en: "No Matching Credentials"),
+                    systemImage: "key.slash",
+                    description: Text(l10n.t(
+                        zhCN: "请在 Keysmith 主应用中添加条目或更换搜索关键词。",
+                        en: "Add items in the Keysmith app or try a different search."
+                    ))
+                )
+            } else if !filteredItems.isEmpty {
+                Section(serviceHosts.isEmpty
+                        ? l10n.t(zhCN: "全部可用凭证", en: "All Credentials")
+                        : l10n.t(zhCN: "匹配站点与全部凭证", en: "Matching & All Credentials")) {
+                    ForEach(filteredItems) { item in
+                        Button {
+                            Task { await pickItem(item) }
+                        } label: {
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(accentColor)
+                                    Image(systemName: item.hasTotp && oneTimeCodeOnly ? "key.viewfinder" : item.category.systemImage)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                }
+                                .frame(width: 30, height: 30)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(item.subtitle)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if item.hasTotp {
+                                    Text("2FA")
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(accentColor.opacity(0.14), in: Capsule())
+                                        .foregroundStyle(accentColor)
+                                }
                             }
                         }
+                        .foregroundStyle(.primary)
                     }
-                    .foregroundStyle(.primary)
                 }
             }
         }
-        .searchable(text: $searchQuery, prompt: "搜索标题或账号")
+        .searchable(text: $searchQuery, prompt: l10n.t(zhCN: "搜索标题或账号", en: "Search title or username"))
         .disabled(isBusy)
     }
 
@@ -203,10 +284,18 @@ struct AutoFillSessionView: View {
     }
 
     private func matchesHost(_ item: KSItemSummary) -> Bool {
-        guard let url = item.primaryUrl?.lowercased() else { return false }
-        return serviceHosts.contains { host in
-            let h = host.lowercased()
-            return url.contains(h) || h.contains(url)
+        guard let raw = item.primaryUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return false
+        }
+        let parsedHost = URL(string: raw)?.host?.lowercased()
+            ?? URL(string: "https://\(raw)")?.host?.lowercased()
+        guard let itemHost = parsedHost, !itemHost.isEmpty else { return false }
+        return serviceHosts.contains { rawHost in
+            let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !host.isEmpty else { return false }
+            return itemHost == host
+                || itemHost.hasSuffix(".\(host)")
+                || host.hasSuffix(".\(itemHost)")
         }
     }
 
@@ -285,12 +374,12 @@ struct AutoFillSessionView: View {
         defer { isBusy = false }
         do {
             guard let detail = try await adapter.itemGet(id: item.id) else {
-                errorMessage = "无法读取该条目详情"
+                errorMessage = l10n.t(zhCN: "无法读取该条目详情", en: "Unable to load item details")
                 return
             }
             if oneTimeCodeOnly {
                 guard let totp = detail.primaryTotp else {
-                    errorMessage = "该条目未配置 TOTP"
+                    errorMessage = l10n.t(zhCN: "该条目未配置 TOTP", en: "No TOTP configured for this item")
                     return
                 }
                 let code = try await adapter.totpCompute(secretOrUri: totp)
@@ -317,7 +406,8 @@ struct AutoFillConfigurationView: View {
     let adapter: KeysmithCoreAdapter
     let onDone: () async -> Void
 
-    @State private var statusText = "Keysmith AutoFill 已配置就绪，支持密码、Passkey、2FA 验证码与任意文本插入。"
+    private let l10n = KSLocalizedStrings(languageCode: "system")
+    @State private var needsSignIn = false
 
     var body: some View {
         NavigationStack {
@@ -327,12 +417,20 @@ struct AutoFillConfigurationView: View {
                     .foregroundStyle(.teal)
                 Text("Keysmith AutoFill")
                     .font(.title2.bold())
-                Text(statusText)
+                Text(needsSignIn
+                     ? l10n.t(
+                        zhCN: "请打开 Keysmith 主应用登录后再使用自动填充。",
+                        en: "Please open the Keysmith app and sign in before using AutoFill."
+                     )
+                     : l10n.t(
+                        zhCN: "Keysmith AutoFill 已配置就绪，支持密码、Passkey、2FA 验证码与任意文本插入。",
+                        en: "Keysmith AutoFill is ready for passwords, passkeys, 2FA verification codes, and text insertion."
+                     ))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
-                Button("完成") {
+                Button(l10n.done) {
                     Task { await onDone() }
                 }
                 .buttonStyle(.borderedProminent)
@@ -341,7 +439,7 @@ struct AutoFillConfigurationView: View {
             .task {
                 try? await adapter.initializeIfNeeded()
                 if let state = try? await adapter.sessionGetState(), state.status == .unauthenticated {
-                    statusText = "请打开 Keysmith 主应用登录后再完成自动填充。"
+                    needsSignIn = true
                 }
             }
         }

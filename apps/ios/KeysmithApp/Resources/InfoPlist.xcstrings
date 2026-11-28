@@ -1,0 +1,112 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "NSCameraUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scannen Sie TOTP-2FA-QR-Codes lokal im Arbeitsspeicher. Bilder werden niemals hochgeladen oder auf das Gerät gespeichert."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan TOTP 2FA QR codes locally in memory. Images are never uploaded or written to disk."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escanea códigos QR TOTP 2FA localmente en memoria. Las imágenes nunca se suben ni se guardan en disco."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scannez les QR codes 2FA TOTP localement en mémoire. Les images ne sont jamais envoyées ni écrites sur le disque."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TOTP 2FA QRコードをメモリ上でローカルスキャンします。画像はアップロードや保存を一切行いません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TOTP 2FA QR 코드를 메모리에서 로컬로 스캔합니다. 이미지는 업로드되거나 디스크에 저장되지 않습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅用于在本地内存中实时扫描 TOTP 双重验证二维码，图像绝不上传或落盘。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "僅用於在本地記憶體中即時掃描 TOTP 雙重驗證 QR 碼，影像絕不上傳或寫入磁碟。"
+          }
+        }
+      }
+    },
+    "NSFaceIDUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entsperren Sie Ihren lokalen Keysmith-Tresor und bestätigen Sie den Zugriff auf Passkeys und sensible Einträge."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlock your local Keysmith vault and verify sensitive passkey or item access."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desbloquea tu bóveda local de Keysmith y verifica el acceso a passkeys y elementos confidenciales."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Déverrouillez votre coffre Keysmith local et vérifiez l'accès aux clés d'accès et éléments sensibles."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ローカルの Keysmith 保管庫をロック解除し、パスキーや機密項目へのアクセスを確認します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로컬 Keysmith 금고를 잠금 해제하고 패스키 및 민감한 항목 접근을 확인합니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于安全解锁本地 Keysmith 保险库并确认敏感通行密钥或条目访问。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用於安全解鎖本地 Keysmith 保險庫並確認敏感通行密鑰或項目存取。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

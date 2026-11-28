@@ -13,6 +13,26 @@ struct SettingsAutoFillGuideSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                #if KEYSMITH_PERSONAL_BUILD
+                Section(store.l10n.t(zhCN: "当前构建说明", en: "Personal Build Notice")) {
+                    Label(
+                        store.l10n.t(
+                            zhCN: "当前为 Personal Team 签名调试构建，未嵌入系统 AutoFill、Passkey Provider 与控制中心小组件扩展。",
+                            en: "This Personal Team build does not bundle the system AutoFill, Passkey Provider, or Control Widget extensions."
+                        ),
+                        systemImage: "info.circle.fill"
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(KeysmithColors.warning)
+
+                    Text(store.l10n.t(
+                        zhCN: "如需测试系统自动填充与 Passkey，请使用包含 App Group 权益的 KeysmithApp 目标编译。",
+                        en: "To use system AutoFill & Passkey extensions, build the KeysmithApp target with Apple Developer App Group entitlements."
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                #else
                 Section(store.l10n.t(zhCN: "当前扩展能力状态", en: "Extension Capabilities")) {
                     statusRow(
                         title: store.l10n.t(zhCN: "系统自动填充服务", en: "System AutoFill Service"),
@@ -54,6 +74,7 @@ struct SettingsAutoFillGuideSheet: View {
                         Label(store.l10n.t(zhCN: "重新同步系统凭证索引", en: "Resync System Credential Index"), systemImage: "arrow.triangle.2.circlepath")
                     }
                 }
+                #endif
             }
             .navigationTitle(store.l10n.t(zhCN: "自动填充与通行密钥", en: "AutoFill & Passkeys"))
             .navigationBarTitleDisplayMode(.inline)
@@ -484,10 +505,11 @@ struct SettingsVaultTransferSheet: View {
                 }
 
                 Section(store.l10n.t(zhCN: "导出保险库", en: "Export Vault")) {
+                    let bioName = store.l10n.biometryName(AppleBiometricKeyStore.shared.currentBiometryKind())
                     Button {
                         Task { await prepareExport() }
                     } label: {
-                        Label(store.l10n.t(zhCN: "导出 JSON 备份（需 Face ID 确认）", en: "Export JSON Backup (Face ID required)"), systemImage: "doc.text")
+                        Label(store.l10n.t(zhCN: "导出 JSON 备份（需\(bioName)确认）", en: "Export JSON Backup (\(bioName) required)"), systemImage: "doc.text")
                     }
 
                     if let exportedJson {

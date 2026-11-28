@@ -5,16 +5,26 @@ public struct LargeTypeSheet: View {
     public let title: String
     public let secret: String
     public var closeTitle: String
+    public var copyTitle: String?
+    public var onCopy: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     private let columns = [
         GridItem(.adaptive(minimum: 52, maximum: 72), spacing: 10)
     ]
 
-    public init(title: String, secret: String, closeTitle: String = "Close") {
+    public init(
+        title: String,
+        secret: String,
+        closeTitle: String = "Close",
+        copyTitle: String? = nil,
+        onCopy: (() -> Void)? = nil
+    ) {
         self.title = title
         self.secret = secret
         self.closeTitle = closeTitle
+        self.copyTitle = copyTitle
+        self.onCopy = onCopy
     }
 
     public var body: some View {
@@ -49,6 +59,33 @@ public struct LargeTypeSheet: View {
                             )
                         }
                     }
+
+                    HStack(spacing: 14) {
+                        legendDot(color: .primary, label: "Aa")
+                        legendDot(color: KeysmithColors.digit, label: "0-9")
+                        legendDot(color: KeysmithColors.symbol, label: "!@#")
+                        Spacer()
+                        Text("\(secret.count)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 4)
+
+                    if let onCopy {
+                        Button {
+                            onCopy()
+                            dismiss()
+                        } label: {
+                            Label(copyTitle ?? "Copy", systemImage: "doc.on.doc")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.large)
+                        .tint(KeysmithColors.accent)
+                        .padding(.top, 4)
+                    }
                 }
                 .padding()
             }
@@ -61,6 +98,17 @@ public struct LargeTypeSheet: View {
                     }
                 }
             }
+        }
+    }
+
+    private func legendDot(color: Color, label: String) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            Text(label)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
         }
     }
 

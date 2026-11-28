@@ -7,12 +7,19 @@ public struct iPhoneMainTabView: View {
     @State private var itemsFilterPreset: KSItemsFilterPreset = .all
     @State private var homeNavPath: [String] = []
     @State private var itemsNavPath: [String] = []
+    @State private var toolsNavPath: [String] = []
     @State private var searchNavPath: [String] = []
 
     @State private var editingItem: KSItemDetail?
+    @State private var pendingScannedDraft: IdentifiableDraft?
     @State private var isShowingNewItemSheet: Bool = false
     @State private var isShowingSettingsSheet: Bool = false
     @State private var isShowingScannerSheet: Bool = false
+
+    private struct IdentifiableDraft: Identifiable {
+        let id = UUID()
+        let draft: KSItemDraft
+    }
 
     public init(store: KeysmithStore) {
         self.store = store
@@ -27,6 +34,7 @@ public struct iPhoneMainTabView: View {
                         selectedVaultId: $selectedVaultId,
                         onSelectItem: { homeNavPath.append($0) },
                         onNewItem: { isShowingNewItemSheet = true },
+                        onScanTotp: { isShowingScannerSheet = true },
                         onOpenSettings: { isShowingSettingsSheet = true },
                         onJumpToItems: { preset in
                             itemsFilterPreset = preset
@@ -67,9 +75,23 @@ public struct iPhoneMainTabView: View {
             }
 
             Tab(store.l10n.tabTools, systemImage: "shield.lefthalf.filled", value: KSPhoneTab.tools) {
-                ToolsTabView(store: store, onOpenSettings: {
-                    isShowingSettingsSheet = true
-                })
+                NavigationStack(path: $toolsNavPath) {
+                    ToolsTabView(
+                        store: store,
+                        isEmbeddedInNavigationStack: true,
+                        onOpenSettings: { isShowingSettingsSheet = true },
+                        onSelectItem: { toolsNavPath.append($0) },
+                        onScanTotp: { isShowingScannerSheet = true }
+                    )
+                    .navigationDestination(for: String.self) { itemId in
+                        ItemDetailView(
+                            store: store,
+                            itemId: itemId,
+                            onEdit: { editingItem = $0 },
+                            onDeleted: { if !toolsNavPath.isEmpty { toolsNavPath.removeLast() } }
+                        )
+                    }
+                }
             }
 
             Tab(store.l10n.tabSearch, systemImage: "magnifyingglass", value: KSPhoneTab.search, role: .search) {
@@ -118,6 +140,19 @@ public struct iPhoneMainTabView: View {
                 )
             }
         }
+        .sheet(item: $pendingScannedDraft) { pending in
+            NavigationStack {
+                ItemEditorView(
+                    store: store,
+                    initialDraft: pending.draft,
+                    onSaved: { saved in
+                        pendingScannedDraft = nil
+                        store.showToast(store.l10n.t(zhCN: "已保存「\(saved.title)」", en: "Saved \(saved.title)"))
+                    },
+                    onCancel: { pendingScannedDraft = nil }
+                )
+            }
+        }
         .sheet(isPresented: $isShowingSettingsSheet) {
             SettingsView(store: store, isEmbeddedInSplitView: false) {
                 isShowingSettingsSheet = false
@@ -130,7 +165,13 @@ public struct iPhoneMainTabView: View {
                     try await store.parseTotpQrImage(data: data)
                 },
                 onScanned: { scannedUri in
-                    store.copyToClipboard(scannedUri, label: "TOTP URI", isSensitive: true)
+                    let vaultId = selectedVaultId
+                        ?? store.vaults.first(where: { $0.isDefault })?.id
+                        ?? store.vaults.first?.id
+                        ?? "personal"
+                    let draft = KSItemDraft.fromScannedTotpUri(scannedUri, vaultId: vaultId, l10n: store.l10n)
+                    isShowingScannerSheet = false
+                    pendingScannedDraft = IdentifiableDraft(draft: draft)
                 }
             )
         }
@@ -146,22 +187,8 @@ public struct iPhoneMainTabView: View {
                 store.isShowingTotpScannerFromDeepLink = false
             }
         }
-        .onChange(of: store.pendingRoute) { _, route in
-            guard let route else { return }
-            switch route {
-            case .settings:
-                isShowingSettingsSheet = true
-            case .search:
-                store.activePhoneTab = .search
-            case .scanTotp:
-                isShowingScannerSheet = true
-            case .item(let id):
-                store.activePhoneTab = .items
-                itemsNavPath.append(id)
-            case .lock:
-                break
-            }
-            store.pendingRoute = nil
+        .onChange(of: store.pendingRoute) { _, _ in
+            consumePendingRoute()
         }
         .onAppear {
             if store.isShowingSettingsModal {
@@ -172,7 +199,26 @@ public struct iPhoneMainTabView: View {
                 isShowingScannerSheet = true
                 store.isShowingTotpScannerFromDeepLink = false
             }
+            consumePendingRoute()
         }
+    }
+
+    private func consumePendingRoute() {
+        guard let route = store.pendingRoute else { return }
+        switch route {
+        case .settings:
+            isShowingSettingsSheet = true
+        case .search:
+            store.activePhoneTab = .search
+        case .scanTotp:
+            isShowingScannerSheet = true
+        case .item(let id):
+            store.activePhoneTab = .items
+            itemsNavPath.append(id)
+        case .lock:
+            break
+        }
+        store.pendingRoute = nil
     }
 }
 

@@ -1024,6 +1024,84 @@ public struct KSItemDraft: Sendable, Codable, Equatable {
     }
 }
 
+public extension KSItemDraft {
+    static func fromScannedTotpUri(_ uri: String, vaultId: String, l10n: KSLocalizedStrings) -> KSItemDraft {
+        let trimmed = uri.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = URLComponents(string: trimmed)
+        let queryIssuer = components?.queryItems?
+            .first(where: { $0.name.caseInsensitiveCompare("issuer") == .orderedSame })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let strippedPath = (components?.path ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let decodedPath = (strippedPath.removingPercentEncoding ?? strippedPath)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var labelIssuer: String?
+        var accountName = ""
+        if let colonIndex = decodedPath.firstIndex(of: ":") {
+            let prefix = String(decodedPath[..<colonIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let suffix = String(decodedPath[decodedPath.index(after: colonIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !prefix.isEmpty { labelIssuer = prefix }
+            accountName = suffix
+        } else {
+            accountName = decodedPath
+        }
+
+        let resolvedTitle = [queryIssuer, labelIssuer, accountName.isEmpty ? nil : accountName]
+            .compactMap { $0 }
+            .first(where: { !$0.isEmpty })
+            ?? l10n.t(zhCN: "双重验证 (2FA)", en: "2FA Authenticator")
+
+        let fields: [KSItemField] = [
+            KSItemField(
+                label: l10n.t(zhCN: "用户名", en: "Username"),
+                fieldType: .text,
+                value: accountName,
+                sensitive: false,
+                purpose: .username
+            ),
+            KSItemField(
+                label: l10n.t(zhCN: "密码", en: "Password"),
+                fieldType: .password,
+                value: "",
+                sensitive: true,
+                purpose: .password
+            ),
+            KSItemField(
+                label: l10n.t(zhCN: "一次性验证码", en: "One-Time Code"),
+                fieldType: .totp,
+                value: trimmed,
+                sensitive: true,
+                purpose: .totp
+            ),
+        ]
+
+        return KSItemDraft(
+            vaultId: vaultId,
+            title: resolvedTitle,
+            category: .login,
+            sections: [KSItemSection(id: UUID().uuidString, title: "", fields: fields)]
+        )
+    }
+}
+
+public enum KSBiometryKind: String, Sendable, Equatable {
+    case faceID
+    case touchID
+    case opticID
+    case passcode
+
+    public var systemImage: String {
+        switch self {
+        case .faceID: return "faceid"
+        case .touchID: return "touchid"
+        case .opticID: return "opticid"
+        case .passcode: return "lock.shield.fill"
+        }
+    }
+}
+
 public enum KSSortBy: String, Sendable, Codable, CaseIterable {
     case titleAsc = "title_asc"
     case titleDesc = "title_desc"

@@ -1,0 +1,149 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Immediately lock Keysmith and wipe decrypted keys from memory." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Sperrt Keysmith sofort und löscht entschlüsselte Schlüssel aus dem Speicher." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Immediately lock Keysmith and wipe decrypted keys from memory." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Bloquea Keysmith al instante y borra las claves descifradas de la memoria." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Verrouille immédiatement Keysmith et efface les clés déchiffrées de la mémoire." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith を直ちにロックし、メモリ内の復号鍵を消去します。" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith를 즉시 잠그고 메모리에서 복호화된 키를 지웁니다." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "立即锁定 Keysmith 并清除内存敏感密钥。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "立即鎖定 Keysmith 並清除記憶體敏感金鑰。" } }
+      }
+    },
+    "Keysmith Quick Search" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith Schnellsuche" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith Quick Search" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Búsqueda rápida de Keysmith" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Recherche rapide Keysmith" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith クイック検索" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith 빠른 검색" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith 快速搜索" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith 快速搜尋" } }
+      }
+    },
+    "Lock Vault" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Tresor sperren" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Lock Vault" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Bloquear bóveda" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Verrouiller le coffre" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "保管庫をロック" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "금고 잠금" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "锁定保险库" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "鎖定保險庫" } }
+      }
+    },
+    "Lock Vault Now" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Tresor jetzt sperren" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Lock Vault Now" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Bloquear bóveda ahora" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Verrouiller maintenant" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "今すぐ保管庫をロック" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "지금 금고 잠금" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "立即锁定保险库" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "立即鎖定保險庫" } }
+      }
+    },
+    "Open camera or photos to scan a TOTP QR code." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Öffnet Kamera oder Fotos zum Scannen eines TOTP-QR-Codes." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open camera or photos to scan a TOTP QR code." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Abre la cámara o fotos para escanear un código QR TOTP." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Ouvre l'appareil photo ou les photos pour scanner un QR code TOTP." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "カメラまたは写真を開いて TOTP QR コードをスキャンします。" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "카메라 또는 사진 앱을 열어 TOTP QR 코드를 스캔합니다." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "快速打开相机或相册扫描 TOTP 二维码。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "快速開啟相機或相簿掃描 TOTP QR 碼。" } }
+      }
+    },
+    "Open Keysmith and focus global vault search." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Öffnet Keysmith und fokussiert die globale Tresorsuche." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Keysmith and focus global vault search." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Abre Keysmith y enfoca la búsqueda global." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Ouvre Keysmith sur la recherche globale." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith を開き、グローバル検索にフォーカスします。" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith를 열고 전체 금고 검색으로 이동합니다." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开 Keysmith 并聚焦全局搜索。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "開啟 Keysmith 並聚焦全域搜尋。" } }
+      }
+    },
+    "Open Keysmith camera or photo picker to scan a TOTP QR code." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Öffnet Keysmith-Kamera oder -Fotoauswahl für TOTP-QR-Codes." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Keysmith camera or photo picker to scan a TOTP QR code." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Abre la cámara o selector de fotos de Keysmith para escanear TOTP." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Ouvre l'appareil photo ou la photothèque Keysmith pour scanner un QR TOTP." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith のカメラまたは写真ピッカーで TOTP QR コードをスキャンします。" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith 카메라 또는 사진 선택기를 열어 TOTP QR 코드를 스캔합니다." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开 Keysmith 相机或相册扫描 TOTP 二维码。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "開啟 Keysmith 相機或相簿掃描 TOTP QR 碼。" } }
+      }
+    },
+    "Open Keysmith global vault search with one tap." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Öffnet die globale Keysmith-Suche mit einem Tippen." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Keysmith global vault search with one tap." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Abre la búsqueda global de Keysmith con un toque." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Ouvre la recherche globale Keysmith en un toucher." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ワンタップで Keysmith のグローバル検索を開きます。" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "한 번의 탭으로 Keysmith 전체 검색을 엽니다." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "一键打开 Keysmith 全局搜索。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "一鍵開啟 Keysmith 全域搜尋。" } }
+      }
+    },
+    "Quick Search" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Schnellsuche" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quick Search" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Búsqueda rápida" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Recherche rapide" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "クイック検索" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "빠른 검색" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "快速搜索" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "快速搜尋" } }
+      }
+    },
+    "Scan 2FA" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "2FA scannen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Scan 2FA" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Escanear 2FA" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Scanner 2FA" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "2FA スキャン" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "2FA 스캔" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "扫 2FA" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "掃 2FA" } }
+      }
+    },
+    "Scan 2FA QR" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "2FA-QR scannen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Scan 2FA QR" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Escanear QR 2FA" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Scanner QR 2FA" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "2FA QR スキャン" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "2FA QR 스캔" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "扫一扫导入 2FA" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "掃一掃匯入 2FA" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

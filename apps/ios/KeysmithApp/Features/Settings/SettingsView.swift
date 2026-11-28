@@ -164,7 +164,7 @@ public struct SettingsView: View {
                 activeSheet = .accounts
             } label: {
                 let accCount = max(1, store.accounts.count)
-                LabeledContent(
+                sheetRowLabel(
                     store.l10n.t(zhCN: "切换 / 添加账号", zhTW: "切換 / 新增帳戶", en: "Switch / Add Account"),
                     value: store.l10n.t(zhCN: "\(accCount) 个账号", zhTW: "\(accCount) 個帳戶", en: "\(accCount) account\(accCount > 1 ? "s" : "")")
                 )
@@ -175,7 +175,7 @@ public struct SettingsView: View {
                 activeSheet = .vaults
             } label: {
                 let vCount = store.vaults.count
-                LabeledContent(
+                sheetRowLabel(
                     store.l10n.t(zhCN: "管理保险库与文件夹", zhTW: "管理保險庫與資料夾", en: "Manage Vaults & Folders"),
                     value: store.l10n.t(zhCN: "\(vCount) 个保险库", zhTW: "\(vCount) 個保險庫", en: "\(vCount) vault\(vCount == 1 ? "" : "s")")
                 )
@@ -185,7 +185,7 @@ public struct SettingsView: View {
             Button {
                 activeSheet = .emergencyKit
             } label: {
-                LabeledContent(
+                sheetRowLabel(
                     store.l10n.t(zhCN: "紧急恢复包（Emergency Kit）", zhTW: "緊急恢復包（Emergency Kit）", en: "Emergency Kit"),
                     value: store.l10n.t(zhCN: "查看 / 导出", en: "View / Export")
                 )
@@ -222,22 +222,37 @@ public struct SettingsView: View {
             ja: "セキュリティとロック",
             ko: "보안 및 잠금"
         )) {
-            Toggle(
-                store.l10n.t(zhCN: "Face ID / Touch ID 解锁", zhTW: "Face ID / Touch ID 解鎖", en: "Face ID / Touch ID Unlock"),
-                isOn: Binding(
-                    get: { store.session.biometricEnabled },
-                    set: { val in
-                        Task {
-                            do {
-                                try await store.updatePreferences(.init(biometricEnabled: val))
-                            } catch {
-                                store.errorBanner = error.localizedDescription
-                                store.showToast(error.localizedDescription)
+            let biometry = AppleBiometricKeyStore.shared.currentBiometryKind()
+            let biometryName = store.l10n.biometryName(biometry)
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(
+                    store.l10n.t(
+                        zhCN: "\(biometryName) 解锁",
+                        zhTW: "\(biometryName) 解鎖",
+                        en: "\(biometryName) Unlock"
+                    ),
+                    isOn: Binding(
+                        get: { store.session.biometricEnabled },
+                        set: { val in
+                            Task {
+                                do {
+                                    try await store.updatePreferences(.init(biometricEnabled: val))
+                                } catch {
+                                    store.errorBanner = error.localizedDescription
+                                    store.showToast(error.localizedDescription)
+                                }
                             }
                         }
-                    }
+                    )
                 )
-            )
+
+                Text(store.l10n.t(
+                    zhCN: "开启后会将解锁密钥受 Apple Data Protection Keychain（BiometryCurrentSet）保护写入系统钥匙串，可随时关闭。",
+                    en: "Stores your unlock key inside Apple Data Protection Keychain (BiometryCurrentSet) and can be turned off anytime."
+                ))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
 
             Picker(
                 store.l10n.t(zhCN: "免主密码最长周期", zhTW: "免主密碼最長週期", en: "Biometric Max Days"),
@@ -379,17 +394,26 @@ public struct SettingsView: View {
             Button {
                 activeSheet = .autofillGuide
             } label: {
-                HStack {
+                HStack(spacing: 6) {
                     Text(store.l10n.t(
                         zhCN: "系统 AutoFill、Passkey 与 TextToInsert",
                         en: "System AutoFill, Passkey & TextToInsert"
                     ))
                     Spacer()
+                    #if KEYSMITH_PERSONAL_BUILD
+                    Text(store.l10n.t(zhCN: "个人构建不含扩展", en: "Not in Personal Build"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    #else
                     Text(autoFillEnabled
                          ? store.l10n.t(zhCN: "已就绪", en: "Ready")
                          : store.l10n.t(zhCN: "去开启", en: "Setup"))
                         .font(.subheadline)
                         .foregroundStyle(autoFillEnabled ? KeysmithColors.success : KeysmithColors.warning)
+                    #endif
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
             }
             .foregroundStyle(.primary)
@@ -399,7 +423,7 @@ public struct SettingsView: View {
             } label: {
                 let ruleCount = store.appSettings.customEquivalentDomains.count
                     + store.appSettings.disabledAutofillDomains.count
-                LabeledContent(
+                sheetRowLabel(
                     store.l10n.t(zhCN: "等效域名与禁用填充站点", en: "Equivalent & Excluded Domains"),
                     value: store.l10n.t(zhCN: "\(ruleCount) 条规则", zhTW: "\(ruleCount) 條規則", en: "\(ruleCount) rule\(ruleCount == 1 ? "" : "s")")
                 )
@@ -409,7 +433,7 @@ public struct SettingsView: View {
             Button {
                 activeSheet = .cxfExchange
             } label: {
-                LabeledContent(
+                sheetRowLabel(
                     store.l10n.t(zhCN: "FIDO CXF 安全凭证互迁", en: "FIDO CXF Credential Exchange"),
                     value: store.l10n.t(zhCN: "导入 / 导出", en: "Import / Export")
                 )
@@ -486,7 +510,7 @@ public struct SettingsView: View {
                 activeSheet = .snapshots
             } label: {
                 let snapCount = store.snapshots.count
-                LabeledContent(
+                sheetRowLabel(
                     store.l10n.t(zhCN: "管理本地加密快照", en: "Manage Local Snapshots"),
                     value: store.l10n.t(zhCN: "\(snapCount) 份", zhTW: "\(snapCount) 份", en: "\(snapCount) snapshot\(snapCount == 1 ? "" : "s")")
                 )
@@ -496,7 +520,7 @@ public struct SettingsView: View {
             Button {
                 activeSheet = .vaultTransfer
             } label: {
-                LabeledContent(
+                sheetRowLabel(
                     store.l10n.t(zhCN: "导入 / 导出保险库", en: "Import / Export Vault"),
                     value: "JSON / CSV"
                 )
@@ -607,6 +631,19 @@ public struct SettingsView: View {
     }
 
     // MARK: - Helpers
+
+    private func sheetRowLabel(_ title: String, value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+            Spacer()
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+    }
 
     private var accountInitials: String {
         let base = store.session.displayName.isEmpty ? store.session.email : store.session.displayName

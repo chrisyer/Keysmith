@@ -27,7 +27,12 @@ struct PasskeyApprovalView: View {
     @State private var isBusy = false
     @State private var errorMessage: String?
 
+    private let l10n = KSLocalizedStrings(languageCode: "system")
     private let accentColor = Color(red: 5.0 / 255.0, green: 114.0 / 255.0, blue: 236.0 / 255.0)
+
+    private var biometryKind: KSBiometryKind {
+        AppleBiometricKeyStore.shared.currentBiometryKind()
+    }
 
     var body: some View {
         NavigationStack {
@@ -39,22 +44,25 @@ struct PasskeyApprovalView: View {
                 }
 
                 if sessionState.status != .unlocked {
-                    VStack(spacing: 10) {
+                    VStack(spacing: 12) {
                         if sessionState.biometricEnabled {
                             Button {
                                 Task { await unlockAndProceedWithBiometric() }
                             } label: {
-                                Label(confirmButtonTitle, systemImage: "faceid")
+                                Label(confirmButtonTitle, systemImage: biometryKind.systemImage)
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
                             .tint(accentColor)
                         }
 
                         HStack(spacing: 8) {
-                            SecureField("或输入主密码确认", text: $masterPassword)
-                                .textFieldStyle(.roundedBorder)
-                            Button("确认") {
+                            SecureField(l10n.t(zhCN: "或输入主密码确认", en: "Or enter master password"), text: $masterPassword)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            Button(l10n.t(zhCN: "确认", en: "Confirm")) {
                                 Task { await unlockAndProceedWithPassword() }
                             }
                             .buttonStyle(.bordered)
@@ -69,6 +77,7 @@ struct PasskeyApprovalView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                     .tint(accentColor)
                 }
 
@@ -82,11 +91,14 @@ struct PasskeyApprovalView: View {
                 Spacer()
             }
             .padding(20)
-            .navigationTitle(isRegistration ? "保存通行密钥" : "通行密钥登录")
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle(isRegistration
+                             ? l10n.t(zhCN: "保存通行密钥", en: "Save Passkey")
+                             : l10n.t(zhCN: "通行密钥登录", en: "Passkey Sign In"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") {
+                    Button(l10n.cancel) {
                         Task { await onCancel() }
                     }
                     .disabled(isBusy)
@@ -105,7 +117,15 @@ struct PasskeyApprovalView: View {
     }
 
     private var confirmButtonTitle: String {
-        isRegistration ? "使用 Face ID 创建并保存" : "使用 Face ID 验证并登录"
+        if sessionState.status != .unlocked && sessionState.biometricEnabled {
+            let bioName = l10n.biometryName(biometryKind)
+            return isRegistration
+                ? l10n.t(zhCN: "使用 \(bioName) 创建并保存", en: "Create & Save with \(bioName)")
+                : l10n.t(zhCN: "使用 \(bioName) 验证并登录", en: "Sign In with \(bioName)")
+        }
+        return isRegistration
+            ? l10n.t(zhCN: "创建并保存通行密钥", en: "Create & Save Passkey")
+            : l10n.t(zhCN: "确认并登录", en: "Sign In with Passkey")
     }
 
     private var headerCard: some View {
@@ -114,14 +134,16 @@ struct PasskeyApprovalView: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(accentColor)
-                    Text("K")
-                        .font(.headline.bold())
+                    Image(systemName: "person.badge.key.fill")
+                        .font(.headline)
                         .foregroundStyle(.white)
                 }
                 .frame(width: 40, height: 40)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(isRegistration ? "保存通行密钥到 Keysmith" : "使用 Keysmith 通行密钥登录")
+                    Text(isRegistration
+                         ? l10n.t(zhCN: "保存通行密钥到 Keysmith", en: "Save Passkey to Keysmith")
+                         : l10n.t(zhCN: "使用 Keysmith 通行密钥登录", en: "Sign In with Keysmith Passkey"))
                         .font(.subheadline.weight(.bold))
                     switch mode {
                     case .assertion(let rpId, let userName, _, _):
@@ -139,8 +161,8 @@ struct PasskeyApprovalView: View {
             Divider()
 
             Text(isRegistration
-                 ? "将生成 ECDSA P-256 通行密钥并写入 App Group 加密库，回主 App 后自动同步。"
-                 : "验证后使用 Apple clientDataHash 完成断言签名，并立即执行 session_lock 与 WAL checkpoint。")
+                 ? l10n.t(zhCN: "将生成 ECDSA P-256 通行密钥并写入 App Group 加密库，回主 App 后自动同步。", en: "Generates an ECDSA P-256 passkey stored in your encrypted vault and syncs automatically.")
+                 : l10n.t(zhCN: "验证后使用 Apple clientDataHash 完成断言签名，并立即锁定会话。", en: "Signs the WebAuthn assertion using Apple clientDataHash and immediately locks the extension session."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -153,12 +175,12 @@ struct PasskeyApprovalView: View {
 
     private func targetItemPicker(rpId: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("绑定到条目")
+            Text(l10n.t(zhCN: "绑定到条目", en: "Attach to Item"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            Picker("绑定到条目", selection: $selectedTargetItemId) {
-                Text("新建条目 (\(rpId))").tag(String?.none)
+            Picker(l10n.t(zhCN: "绑定到条目", en: "Attach to Item"), selection: $selectedTargetItemId) {
+                Text(l10n.t(zhCN: "新建条目 (\(rpId))", en: "Create New Item (\(rpId))")).tag(String?.none)
                 ForEach(loginItems) { item in
                     Text("\(item.title) (\(item.subtitle))").tag(Optional(item.id))
                 }

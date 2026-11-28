@@ -17,11 +17,11 @@ struct QuickSearchControlWidget: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {
             ControlWidgetButton(action: QuickSearchIntent()) {
-                Label("快速搜索", systemImage: "magnifyingglass")
+                Label("Quick Search", systemImage: "magnifyingglass")
             }
         }
-        .displayName("Keysmith 快速搜索")
-        .description("一键打开 Keysmith 全局搜索。")
+        .displayName("Keysmith Quick Search")
+        .description("Open Keysmith global vault search with one tap.")
     }
 }
 
@@ -31,11 +31,11 @@ struct ScanTotpControlWidget: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {
             ControlWidgetButton(action: ScanTotpIntent()) {
-                Label("扫 2FA", systemImage: "qrcode.viewfinder")
+                Label("Scan 2FA", systemImage: "qrcode.viewfinder")
             }
         }
-        .displayName("扫一扫导入 2FA")
-        .description("快速打开相机或相册扫描 TOTP 二维码。")
+        .displayName("Scan 2FA QR")
+        .description("Open camera or photos to scan a TOTP QR code.")
     }
 }
 
@@ -45,10 +45,10 @@ struct LockVaultControlWidget: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {
             ControlWidgetButton(action: LockVaultIntent()) {
-                Label("锁定保险库", systemImage: "lock.shield")
+                Label("Lock Vault", systemImage: "lock.shield")
             }
         }
-        .displayName("一键锁定保险库")
-        .description("立即锁定 Keysmith 并清除内存敏感密钥。")
+        .displayName("Lock Vault")
+        .description("Immediately lock Keysmith and wipe decrypted keys from memory.")
     }
 }

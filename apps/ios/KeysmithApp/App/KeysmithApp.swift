@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 public struct KeysmithApp: App {
-    @State private var store = KeysmithStore()
+    @State private var store = KeysmithStore.shared
     @Environment(\.scenePhase) private var scenePhase
 
     public init() {}

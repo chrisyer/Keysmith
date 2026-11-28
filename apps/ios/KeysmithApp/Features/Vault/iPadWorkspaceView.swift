@@ -16,6 +16,7 @@ public struct iPadWorkspaceView: View {
     private enum RightPaneMode: Equatable {
         case item
         case editor(KSItemDetail?)
+        case newDraft(KSItemDraft)
         case settings
         case tools
     }
@@ -26,7 +27,9 @@ public struct iPadWorkspaceView: View {
     @State private var rightPaneMode: RightPaneMode = .item
     @State private var searchText: String = ""
     @State private var isShowingScannerSheet: Bool = false
+    @State private var isConfirmingEmptyTrash: Bool = false
     @State private var cachedSections: [KSAlphabetSection] = []
+    @State private var cachedItemCount: Int = 0
 
     public init(store: KeysmithStore) {
         self.store = store
@@ -102,6 +105,11 @@ public struct iPadWorkspaceView: View {
                 rightPaneMode = .settings
                 store.isShowingSettingsModal = false
             }
+            if store.isShowingTotpScannerFromDeepLink {
+                isShowingScannerSheet = true
+                store.isShowingTotpScannerFromDeepLink = false
+            }
+            consumePendingRoute()
         }
         .onChange(of: store.isShowingSettingsModal) { _, newValue in
             if newValue {
@@ -109,22 +117,8 @@ public struct iPadWorkspaceView: View {
                 store.isShowingSettingsModal = false
             }
         }
-        .onChange(of: store.pendingRoute) { _, route in
-            guard let route else { return }
-            switch route {
-            case .settings:
-                rightPaneMode = .settings
-            case .item(let id):
-                selectedItemId = id
-                rightPaneMode = .item
-            case .search:
-                sidebarSelection = .all
-            case .scanTotp:
-                isShowingScannerSheet = true
-            case .lock:
-                break
-            }
-            store.pendingRoute = nil
+        .onChange(of: store.pendingRoute) { _, _ in
+            consumePendingRoute()
         }
         .onChange(of: store.isShowingTotpScannerFromDeepLink) { _, newValue in
             if newValue {
@@ -139,10 +133,36 @@ public struct iPadWorkspaceView: View {
                     try await store.parseTotpQrImage(data: data)
                 },
                 onScanned: { scannedUri in
-                    store.copyToClipboard(scannedUri, label: "TOTP URI", isSensitive: true)
+                    let vaultId: String = {
+                        if case .vault(let id) = sidebarSelection { return id }
+                        return store.vaults.first(where: { $0.isDefault })?.id
+                            ?? store.vaults.first?.id
+                            ?? "personal"
+                    }()
+                    let draft = KSItemDraft.fromScannedTotpUri(scannedUri, vaultId: vaultId, l10n: store.l10n)
+                    isShowingScannerSheet = false
+                    rightPaneMode = .newDraft(draft)
                 }
             )
         }
+    }
+
+    private func consumePendingRoute() {
+        guard let route = store.pendingRoute else { return }
+        switch route {
+        case .settings:
+            rightPaneMode = .settings
+        case .item(let id):
+            selectedItemId = id
+            rightPaneMode = .item
+        case .search:
+            sidebarSelection = .all
+        case .scanTotp:
+            isShowingScannerSheet = true
+        case .lock:
+            break
+        }
+        store.pendingRoute = nil
     }
 
     // MARK: - Left Sidebar (Liquid Glass)
@@ -195,12 +215,18 @@ public struct iPadWorkspaceView: View {
                     count: store.visibleItems.filter { $0.hasPasskey || $0.category == .passkey }.count,
                     tag: .passkeys
                 )
-                Label(store.l10n.tabTools, systemImage: "shield.lefthalf.filled")
-                    .tag(SidebarFilter.tools)
-                    .onTapGesture {
-                        sidebarSelection = .tools
-                        rightPaneMode = .tools
-                    }
+                sidebarRow(
+                    title: store.l10n.tabTools,
+                    icon: "shield.lefthalf.filled",
+                    count: store.watchtowerReport?.totalRiskItems ?? 0,
+                    tag: .tools
+                )
+                sidebarRow(
+                    title: store.l10n.t(zhCN: "废纸篓", en: "Trash"),
+                    icon: "trash",
+                    count: store.trashedItems.count,
+                    tag: .trash
+                )
             }
 
             Section(store.l10n.t(zhCN: "保险库", en: "Vaults")) {
@@ -270,12 +296,20 @@ public struct iPadWorkspaceView: View {
 
     // MARK: - Middle Item List Column
 
+    private var showIndexBar: Bool {
+        cachedSections.count > 1 && cachedItemCount >= 12
+    }
+
     private var itemSignature: String {
-        store.visibleItems.map(\.id).joined(separator: ",")
+        let visibleSig = store.visibleItems.map(\.id).joined(separator: ",")
+        let trashSig = store.trashedItems.map(\.id).joined(separator: ",")
+        return "\(visibleSig)|\(trashSig)"
     }
 
     private func rebuildSections() {
-        cachedSections = KSAlphabetIndexer.group(filteredItems)
+        let items = filteredItems
+        cachedItemCount = items.count
+        cachedSections = KSAlphabetIndexer.group(items)
     }
 
     private var contentColumn: some View {
@@ -337,9 +371,21 @@ public struct iPadWorkspaceView: View {
                                 .buttonStyle(.plain)
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: cachedSections.count > 1 ? 26 : 10))
-                                .swipeActions(edge: .trailing) {
-                                    if item.hasPassword && !item.reprompt {
+                                .listRowInsets(EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: showIndexBar ? 26 : 10))
+                                .swipeActions(edge: .trailing, allowsFullSwipe: item.deletedAt == nil) {
+                                    if item.deletedAt != nil {
+                                        Button(role: .destructive) {
+                                            Task { try? await store.deleteItemPermanently(id: item.id) }
+                                        } label: {
+                                            Label(store.l10n.t(zhCN: "彻底删除", en: "Delete"), systemImage: "trash.fill")
+                                        }
+                                        Button {
+                                            Task { try? await store.restoreItem(id: item.id) }
+                                        } label: {
+                                            Label(store.l10n.t(zhCN: "恢复", en: "Restore"), systemImage: "arrow.uturn.backward")
+                                        }
+                                        .tint(KeysmithColors.success)
+                                    } else if item.hasPassword && !item.reprompt {
                                         Button {
                                             Task {
                                                 if let detail = try? await store.getItemDetail(id: item.id),
@@ -365,8 +411,11 @@ public struct iPadWorkspaceView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(Color(.systemGroupedBackground))
+                .refreshable {
+                    await store.syncNow()
+                }
 
-                if cachedSections.count > 1 {
+                if showIndexBar {
                     KSAlphabetIndexBar(letters: cachedSections.map(\.letter)) { letter in
                         withAnimation(.snappy(duration: 0.2)) {
                             proxy.scrollTo("ipad-alpha-\(letter)", anchor: .top)
@@ -393,12 +442,27 @@ public struct iPadWorkspaceView: View {
         )
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    Task { await store.syncNow() }
-                } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
+                if sidebarSelection == .trash && !store.trashedItems.isEmpty {
+                    Button(role: .destructive) {
+                        isConfirmingEmptyTrash = true
+                    } label: {
+                        Label(store.l10n.t(zhCN: "清空", en: "Empty"), systemImage: "trash.slash")
+                    }
+                } else {
+                    Button {
+                        Task { await store.syncNow() }
+                    } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(store.isSyncing)
                 }
-                .disabled(store.isSyncing)
+
+                Button {
+                    isShowingScannerSheet = true
+                } label: {
+                    Image(systemName: "qrcode.viewfinder")
+                }
+                .accessibilityLabel(store.l10n.t(zhCN: "扫描 2FA 二维码", en: "Scan 2FA QR"))
 
                 Button {
                     rightPaneMode = .editor(nil)
@@ -408,6 +472,16 @@ public struct iPadWorkspaceView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(KeysmithColors.accent)
             }
+        }
+        .confirmationDialog(
+            store.l10n.t(zhCN: "确定清空废纸篓？此操作不可撤销。", en: "Empty Trash? This cannot be undone."),
+            isPresented: $isConfirmingEmptyTrash,
+            titleVisibility: .visible
+        ) {
+            Button(store.l10n.t(zhCN: "彻底清空", en: "Empty Trash"), role: .destructive) {
+                Task { try? await store.emptyTrash() }
+            }
+            Button(store.l10n.cancel, role: .cancel) {}
         }
         .onChange(of: selectedItemId) { _, newValue in
             if newValue != nil && rightPaneMode != .item {
@@ -435,9 +509,20 @@ public struct iPadWorkspaceView: View {
             }
 
         case .tools:
-            ToolsTabView(store: store, onOpenSettings: {
-                rightPaneMode = .settings
-            })
+            ToolsTabView(
+                store: store,
+                isEmbeddedInNavigationStack: false,
+                onOpenSettings: {
+                    rightPaneMode = .settings
+                },
+                onSelectItem: { id in
+                    selectedItemId = id
+                    rightPaneMode = .item
+                },
+                onScanTotp: {
+                    isShowingScannerSheet = true
+                }
+            )
 
         case .editor(let existing):
             NavigationStack {
@@ -448,6 +533,21 @@ public struct iPadWorkspaceView: View {
                         if case .vault(let id) = sidebarSelection { return id }
                         return nil
                     }(),
+                    onSaved: { saved in
+                        selectedItemId = saved.id
+                        rightPaneMode = .item
+                    },
+                    onCancel: {
+                        rightPaneMode = .item
+                    }
+                )
+            }
+
+        case .newDraft(let draft):
+            NavigationStack {
+                ItemEditorView(
+                    store: store,
+                    initialDraft: draft,
                     onSaved: { saved in
                         selectedItemId = saved.id
                         rightPaneMode = .item

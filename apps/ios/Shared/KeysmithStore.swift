@@ -8,6 +8,8 @@ import UIKit
 @MainActor
 @Observable
 public final class KeysmithStore {
+    public static let shared = KeysmithStore()
+
     public let adapter: KeysmithCoreAdapter
 
     public var isDemoMode: Bool = false
@@ -37,6 +39,7 @@ public final class KeysmithStore {
     public var activePhoneTab: KSPhoneTab = .home
     public var toastMessage: String?
     public var errorBanner: String?
+    public var itemDetailRefreshToken: Int = 0
 
     // Clipboard countdown state (for .tabViewBottomAccessory & iPad status)
     public var clipboardActive: Bool = false
@@ -80,6 +83,19 @@ public final class KeysmithStore {
     public var visibleItems: [KSItemSummary] {
         items.filter { item in
             guard item.deletedAt == nil && !item.archived else { return false }
+            if session.travelMode {
+                if let vault = vaults.first(where: { $0.id == item.vaultId }) {
+                    return vault.travelSafe
+                }
+                return false
+            }
+            return true
+        }
+    }
+
+    public var trashedItems: [KSItemSummary] {
+        items.filter { item in
+            guard item.deletedAt != nil else { return false }
             if session.travelMode {
                 if let vault = vaults.first(where: { $0.id == item.vaultId }) {
                     return vault.travelSafe
@@ -135,7 +151,7 @@ public final class KeysmithStore {
             email: DemoSeedData.demoAccount.email,
             displayName: DemoSeedData.demoAccount.displayName,
             serverUrl: DemoSeedData.demoAccount.serverUrl,
-            biometricEnabled: true,
+            biometricEnabled: false,
             autoLockMinutes: 1,
             autoLockSeconds: 60,
             clipboardClearSeconds: 30,
@@ -310,7 +326,7 @@ public final class KeysmithStore {
 
     public func unlockWithBiometric() async throws {
         if isDemoMode {
-            let reason = l10n.unlockWithFaceID
+            let reason = l10n.unlockWithBiometry(AppleBiometricKeyStore.shared.currentBiometryKind())
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                 DispatchQueue.global(qos: .userInitiated).async {
                     do {
@@ -345,6 +361,16 @@ public final class KeysmithStore {
             return
         }
         try await adapter.sessionVerifyUserPresence(reason: reason)
+    }
+
+    public func verifyMasterPassword(_ password: String) async throws {
+        guard !password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw KSCoreAdapterError.invalidMasterPassword(l10n.masterPasswordPlaceholder)
+        }
+        if isDemoMode {
+            return
+        }
+        _ = try await adapter.sessionUnlockPassword(password)
     }
 
     public func lock(reason: String = "manual") {
@@ -442,6 +468,7 @@ public final class KeysmithStore {
             let list = Array(demoDetails.values).sorted { $0.updatedAt > $1.updatedAt }
             items = DemoSeedData.summaries(from: list)
             recalculateDemoVaultCounts()
+            itemDetailRefreshToken &+= 1
             return
         }
         guard session.status == .unlocked else { return }
@@ -453,6 +480,7 @@ public final class KeysmithStore {
             vaults = v
             items = i
             syncStatus = s
+            itemDetailRefreshToken &+= 1
             await CredentialIdentitySync.shared.sync(items: i)
         } catch {
             errorBanner = error.localizedDescription

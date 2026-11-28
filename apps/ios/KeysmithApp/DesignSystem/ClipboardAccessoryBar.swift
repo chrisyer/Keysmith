@@ -46,7 +46,7 @@ public struct ClipboardAccessoryBar: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .glassEffect(.regular, in: .capsule)
+        .modifier(VibrancyCapsuleModifier(vibrancyEnabled: store.session.vibrancyEnabled))
     }
 
     private var statusText: String {
@@ -61,5 +61,22 @@ public struct ClipboardAccessoryBar: View {
             fr: "\(label) copié (Local)",
             es: "\(label) copiado (Local)"
         )
+    }
+}
+
+private struct VibrancyCapsuleModifier: ViewModifier {
+    let vibrancyEnabled: Bool
+
+    func body(content: Content) -> some View {
+        if vibrancyEnabled {
+            content.glassEffect(.regular, in: .capsule)
+        } else {
+            content
+                .background(Color(.secondarySystemGroupedBackground), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+        }
     }
 }

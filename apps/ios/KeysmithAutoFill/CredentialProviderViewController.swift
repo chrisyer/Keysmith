@@ -333,7 +333,7 @@ public final class CredentialProviderViewController: ASCredentialProviderViewCon
             let clearSecs = UInt64(max(0, state?.clipboardClearSeconds ?? 30))
             try? await adapter.clipboardCopySecret(
                 text: code.code,
-                label: "2FA 验证码",
+                label: KSLocalizedStrings(languageCode: "system").t(zhCN: "2FA 验证码", en: "2FA Code"),
                 isSensitive: true,
                 clearAfterSecs: clearSecs
             )

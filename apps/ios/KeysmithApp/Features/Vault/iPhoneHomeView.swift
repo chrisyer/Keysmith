@@ -4,6 +4,7 @@ public enum KSItemsFilterPreset: Hashable, Sendable {
     case all
     case favorites
     case category(KSItemCategory)
+    case trash
 }
 
 public struct iPhoneHomeView: View {
@@ -11,17 +12,20 @@ public struct iPhoneHomeView: View {
     @Binding public var selectedVaultId: String?
     public var onSelectItem: (String) -> Void
     public var onNewItem: () -> Void
+    public var onScanTotp: (() -> Void)?
     public var onOpenSettings: () -> Void
     public var onJumpToItems: (KSItemsFilterPreset) -> Void
 
     @State private var totpSecretsByItemId: [String: String] = [:]
     @State private var primaryPasswordsByItemId: [String: String] = [:]
+    @State private var recentlyCopiedTotpId: String?
 
     public init(
         store: KeysmithStore,
         selectedVaultId: Binding<String?>,
         onSelectItem: @escaping (String) -> Void,
         onNewItem: @escaping () -> Void,
+        onScanTotp: (() -> Void)? = nil,
         onOpenSettings: @escaping () -> Void,
         onJumpToItems: @escaping (KSItemsFilterPreset) -> Void
     ) {
@@ -29,6 +33,7 @@ public struct iPhoneHomeView: View {
         self._selectedVaultId = selectedVaultId
         self.onSelectItem = onSelectItem
         self.onNewItem = onNewItem
+        self.onScanTotp = onScanTotp
         self.onOpenSettings = onOpenSettings
         self.onJumpToItems = onJumpToItems
     }
@@ -62,21 +67,30 @@ public struct iPhoneHomeView: View {
                     travelModeBanner
                 }
 
-                favoritesSection
+                if scopedItems.isEmpty {
+                    emptyVaultView
+                } else {
+                    favoritesSection
 
-                if !totpItems.isEmpty {
-                    liveTotpSection
+                    if !totpItems.isEmpty {
+                        liveTotpSection
+                    }
+
+                    if !recentItemsList.isEmpty {
+                        recentSection
+                    }
+
+                    quickCategoriesGrid
                 }
-
-                recentSection
-
-                quickCategoriesGrid
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
-            .padding(.bottom, 24)
+            .padding(.bottom, 36)
         }
         .background(Color(.systemGroupedBackground))
+        .refreshable {
+            await store.syncNow()
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -104,6 +118,12 @@ public struct iPhoneHomeView: View {
                             }
                         }
                     }
+                    Divider()
+                    Button {
+                        Task { await store.syncNow() }
+                    } label: {
+                        Label(store.l10n.syncNow, systemImage: "arrow.triangle.2.circlepath")
+                    }
                 } label: {
                     HStack(spacing: 6) {
                         Circle()
@@ -121,6 +141,13 @@ public struct iPhoneHomeView: View {
             }
 
             ToolbarItemGroup(placement: .topBarTrailing) {
+                if let onScanTotp {
+                    Button(action: onScanTotp) {
+                        Image(systemName: "qrcode.viewfinder")
+                    }
+                    .accessibilityLabel(store.l10n.t(zhCN: "扫描 2FA 二维码", en: "Scan 2FA QR"))
+                }
+
                 Button(action: onNewItem) {
                     Image(systemName: "plus")
                         .fontWeight(.semibold)
@@ -236,17 +263,31 @@ public struct iPhoneHomeView: View {
             }
             .buttonStyle(.plain)
 
-            Button {
-                Task { await copyPrimaryPassword(for: item) }
-            } label: {
-                Text(store.l10n.t(zhCN: "复制密码", en: "Copy Password"))
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+            if item.hasPassword {
+                Button {
+                    Task { await copyPrimaryPassword(for: item) }
+                } label: {
+                    Text(store.l10n.t(zhCN: "复制密码", en: "Copy Password"))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    onSelectItem(item.id)
+                } label: {
+                    Text(store.l10n.t(zhCN: "查看详情", en: "View Details"))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(12)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -263,26 +304,50 @@ public struct iPhoneHomeView: View {
                     ForEach(totpItems) { item in
                         let secret = totpSecretsByItemId[item.id] ?? ""
                         let totp = secret.isEmpty ? nil : store.computeTotp(secret, at: context.date)
-                        let urgent = (totp?.remainingSeconds ?? 30) <= 5
+                        let remaining = totp?.remainingSeconds ?? 30
+                        let period = max(1, totp?.period ?? 30)
+                        let progress = Double(remaining) / Double(period)
+                        let urgent = remaining <= 5
+                        let isCopied = recentlyCopiedTotpId == item.id
 
                         Button {
                             if let code = totp?.code {
                                 store.copyToClipboard(code, label: "\(item.title) 2FA", isSensitive: true)
+                                recentlyCopiedTotpId = item.id
+                                Task {
+                                    try? await Task.sleep(for: .seconds(1.2))
+                                    if recentlyCopiedTotpId == item.id {
+                                        recentlyCopiedTotpId = nil
+                                    }
+                                }
                             } else {
                                 onSelectItem(item.id)
                             }
                         } label: {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(item.title)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
+                                HStack(spacing: 6) {
+                                    Text(item.title)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 2)
+                                    if isCopied {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(KeysmithColors.success)
+                                    }
+                                }
                                 Text(totp?.formattedCode ?? "--- ---")
                                     .font(.system(.title3, design: .monospaced).monospacedDigit().weight(.bold))
-                                    .foregroundStyle(urgent ? KeysmithColors.danger : KeysmithColors.accent)
-                                Text("\(totp?.remainingSeconds ?? 30)s · \(store.l10n.t(zhCN: "点按复制", en: "Tap to copy"))")
+                                    .foregroundStyle(isCopied ? KeysmithColors.success : (urgent ? KeysmithColors.danger : KeysmithColors.accent))
+                                ProgressView(value: progress)
+                                    .tint(urgent ? KeysmithColors.danger : KeysmithColors.accent)
+                                    .scaleEffect(x: 1, y: 0.7, anchor: .center)
+                                Text(isCopied
+                                     ? store.l10n.t(zhCN: "已复制", en: "Copied")
+                                     : "\(remaining)s · \(store.l10n.t(zhCN: "点按复制", en: "Tap to copy"))")
                                     .font(.caption2.monospacedDigit())
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(isCopied ? KeysmithColors.success : .secondary)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(12)
@@ -295,6 +360,44 @@ public struct iPhoneHomeView: View {
         }
     }
 
+    private var recentItemsList: [KSItemSummary] {
+        Array(scopedItems.sorted { $0.updatedAt > $1.updatedAt }.prefix(3))
+    }
+
+    private var emptyVaultView: some View {
+        VStack(spacing: 16) {
+            ContentUnavailableView(
+                store.l10n.t(zhCN: "保险库尚无条目", en: "No Items Yet"),
+                systemImage: "key.shield",
+                description: Text(store.l10n.t(
+                    zhCN: "创建首个登录密码、Passkey 或直接扫描 2FA 二维码开始使用。",
+                    en: "Create your first login, passkey, or scan a 2FA QR code to get started."
+                ))
+            )
+            .frame(minHeight: 220)
+
+            HStack(spacing: 12) {
+                Button(action: onNewItem) {
+                    Label(store.l10n.newItem, systemImage: "plus")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(KeysmithColors.accent)
+
+                if let onScanTotp {
+                    Button(action: onScanTotp) {
+                        Label(store.l10n.t(zhCN: "扫 2FA 二维码", en: "Scan 2FA QR"), systemImage: "qrcode.viewfinder")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(store.l10n.recentItems)
@@ -302,7 +405,7 @@ public struct iPhoneHomeView: View {
                 .foregroundStyle(.secondary)
 
             VStack(spacing: 0) {
-                let recents = Array(scopedItems.prefix(3))
+                let recents = recentItemsList
                 ForEach(Array(recents.enumerated()), id: \.element.id) { idx, item in
                     if idx > 0 {
                         Divider().padding(.leading, 56)
