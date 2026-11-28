@@ -88,7 +88,7 @@ Download `.deb` (Debian/Ubuntu), `.rpm` (Fedora/RHEL/openSUSE), or `.AppImage` p
 #### Option 1: One-Line Installer (Verified via `SHA256SUMS.txt`)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/v0.1.5/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/v0.1.6/install.sh | sh
 ```
 
 > Inspect scripts before piping to `sh`. [`install.sh`](./install.sh) supports macOS (DMG → `/Applications`) and Linux (`AppImage` → `~/.local/bin/keysmith`), strictly requires a matching `SHA256SUMS.txt` checksum, and leaves macOS Gatekeeper approval under your control without automatic `xattr -cr`.

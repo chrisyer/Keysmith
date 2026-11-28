@@ -14,12 +14,12 @@ const I18N = {
       copied: '已复制 ✓',
     },
     hero: {
-      badge: 'v0.1.5 · 开源 MPL-2.0 · Rust + Tauri v2 原生构建',
+      badge: 'v0.1.6 · 开源 MPL-2.0 · Rust + Tauri v2 原生构建',
       titleLead: '把你的秘密，牢牢锁在',
       titleAccent: '自己的设备与私有云里',
       subtitle:
         'Keysmith 是一款本地优先、端到端零知识加密的跨平台密码与通行密钥管理器。以 Rust 驱动核心密码学引擎，告别 Electron 卡顿，完整兼容 Vaultwarden / Bitwarden 实时同步，并原生内置 OpenSSH Agent、屏幕二维码秒扫 2FA 与 Manifest V3 浏览器插件。',
-      ctaDownload: '立即下载 v0.1.5',
+      ctaDownload: '立即下载 v0.1.6',
       ctaReleases: '查看全部发行版 →',
       platMac: 'macOS 13+',
       platWin: 'Windows 10/11',
@@ -134,8 +134,8 @@ const I18N = {
       eyebrow: '全平台路线图',
       title: '已登陆 macOS / Windows / Linux 与主流浏览器，即将覆盖 Android 与 iOS',
       desc: '核心加密、Vaultwarden 协议、TOTP 与 Passkey 引擎均封装在跨平台的 Rust `keysmith-core` 中，所有终端将共享同一套高安全审计底座与一致体验。',
-      statusReady: '已发布 · v0.1.5',
-      statusLinux: '已发布 · v0.1.5',
+      statusReady: '已发布 · v0.1.6',
+      statusLinux: '已发布 · v0.1.6',
       statusExt: '已发布 · v0.3.0',
       statusPlanned: '即将推出',
       macDesc:
@@ -159,16 +159,16 @@ const I18N = {
     inst: {
       eyebrow: '快速上手',
       title: '选择适合你的安装方式',
-      desc: 'v0.1.5 已就绪，提供 macOS / Windows / Linux 安装包、Homebrew Cask、命令行工具与浏览器扩展压缩包。',
+      desc: 'v0.1.6 已就绪，提供 macOS / Windows / Linux 安装包、Homebrew Cask、命令行工具与浏览器扩展压缩包。',
       p0Title: 'macOS Homebrew Cask（推荐 · 支持一键升级）',
       p0Desc:
         '请务必携带完整的 tap 前缀 chrisyer/keysmith/keysmith，避免与 Homebrew 官方源中同名应用冲突。当前发布为本地 ad-hoc 签名，首次打开可在 macOS「隐私与安全性」中放行，或按提示手动执行 xattr -dr com.apple.quarantine /Applications/Keysmith.app。',
-      p1Title: 'macOS / Linux 一键安装脚本（v0.1.5）',
+      p1Title: 'macOS / Linux 一键安装脚本（v0.1.6）',
       p1Desc:
         '自动识别 macOS (Apple Silicon / Intel) 与 Linux (x64 AppImage)，强制严格 SHA-256 校验安装；macOS 版本不自动移除隔离属性，保留系统 Gatekeeper 授权控制。',
       p2Title: 'Windows 10 / 11 (x64) 安装包',
       p2Desc:
-        '前往 GitHub Releases 下载 Keysmith_0.1.5_x64-setup.exe (NSIS) 或 Keysmith_0.1.5_x64_en-US.msi 双击安装即可。启动后会自动配置浏览器的 NativeMessagingHosts 注册表。',
+        '前往 GitHub Releases 下载 Keysmith_0.1.6_x64-setup.exe (NSIS) 或 Keysmith_0.1.6_x64_en-US.msi 双击安装即可。启动后会自动配置浏览器的 NativeMessagingHosts 注册表。',
       p3Title: 'Keysmith CLI (ks) 与 OpenSSH Agent',
       p3Desc: '可从 Release 下载预编译二进制包，或使用 Cargo 从源码构建 ks 与 keysmith-ssh-agent。',
       p4Title: '浏览器扩展安装（Chrome / Edge / Arc / Brave）',
@@ -194,12 +194,12 @@ const I18N = {
       copied: 'Copied ✓',
     },
     hero: {
-      badge: 'v0.1.5 · Open Source MPL-2.0 · Rust + Tauri v2 Native',
+      badge: 'v0.1.6 · Open Source MPL-2.0 · Rust + Tauri v2 Native',
       titleLead: 'Keep every secret locked on',
       titleAccent: 'your devices & private cloud',
       subtitle:
         'Keysmith is a local-first, zero-knowledge password, Passkey, and OpenSSH Agent manager powered by Rust and Tauri v2. Enjoy native speed instead of Electron bloat, full Vaultwarden / Bitwarden real-time sync, screen QR scanning for TOTP, and a Manifest V3 browser extension.',
-      ctaDownload: 'Download v0.1.5',
+      ctaDownload: 'Download v0.1.6',
       ctaReleases: 'All Releases →',
       platMac: 'macOS 13+',
       platWin: 'Windows 10/11',
@@ -314,8 +314,8 @@ const I18N = {
       eyebrow: 'Cross-Platform Roadmap',
       title: 'macOS, Windows, Linux & Browser Ready—Android & iOS Next',
       desc: 'All cryptography, Vaultwarden sync, TOTP, and Passkey logic live inside the shared Rust keysmith-core crate, bringing identical security guarantees to every upcoming platform.',
-      statusReady: 'Available · v0.1.5',
-      statusLinux: 'Available · v0.1.5',
+      statusReady: 'Available · v0.1.6',
+      statusLinux: 'Available · v0.1.6',
       statusExt: 'Available · v0.3.0',
       statusPlanned: 'Planned / Coming Soon',
       macDesc:
@@ -339,16 +339,16 @@ const I18N = {
     inst: {
       eyebrow: 'Get Started',
       title: 'Choose your preferred installation method',
-      desc: 'v0.1.5 is live with installers for macOS, Windows & Linux (ad-hoc signed macOS/Windows builds), Homebrew Cask, CLI binaries, and the Manifest V3 browser extension.',
+      desc: 'v0.1.6 is live with installers for macOS, Windows & Linux (ad-hoc signed macOS/Windows builds), Homebrew Cask, CLI binaries, and the Manifest V3 browser extension.',
       p0Title: 'macOS Homebrew Cask (Recommended · Easy Upgrades)',
       p0Desc:
         'Always include the full chrisyer/keysmith/keysmith tap prefix to avoid colliding with Homebrew’s unrelated official keysmith cask. Builds are currently ad-hoc signed; approve via macOS Privacy & Security or manual xattr -dr com.apple.quarantine.',
-      p1Title: 'macOS & Linux One-Line Installer (v0.1.5)',
+      p1Title: 'macOS & Linux One-Line Installer (v0.1.6)',
       p1Desc:
         'Detects macOS (Apple Silicon / Intel) or Linux (x64 AppImage) and installs with strict SHA-256 verification, keeping macOS Gatekeeper approval under your control.',
       p2Title: 'Windows 10 / 11 (x64) Installers',
       p2Desc:
-        'Download Keysmith_0.1.5_x64-setup.exe (NSIS) or Keysmith_0.1.5_x64_en-US.msi from GitHub Releases. NativeMessagingHosts registry keys are configured automatically on first run.',
+        'Download Keysmith_0.1.6_x64-setup.exe (NSIS) or Keysmith_0.1.6_x64_en-US.msi from GitHub Releases. NativeMessagingHosts registry keys are configured automatically on first run.',
       p3Title: 'Keysmith CLI (ks) & OpenSSH Agent',
       p3Desc: 'Grab prebuilt binaries from GitHub Releases or compile ks and keysmith-ssh-agent from source via Cargo.',
       p4Title: 'Browser Extension (Chrome / Edge / Arc / Brave)',

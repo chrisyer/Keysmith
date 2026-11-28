@@ -1,6 +1,6 @@
 [package]
 name = "keysmith-cli"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 license = "MPL-2.0"
 description = "Keysmith CLI, OpenSSH agent, and Chrome Native Messaging host"
