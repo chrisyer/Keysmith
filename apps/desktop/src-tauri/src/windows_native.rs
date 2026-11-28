@@ -3,7 +3,7 @@
 use std::ffi::c_void;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::ptr::{null, null_mut};
+use std::ptr::null_mut;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -452,7 +452,7 @@ impl Drop for NcryptHandle {
     }
 }
 
-fn open_passport_ksp() -> Result<NcHandleWrapper, CoreError> {
+fn open_passport_ksp() -> Result<NcryptHandle, CoreError> {
     let mut prov: NCRYPT_PROV_HANDLE = 0;
     let prov_name = encode_wide_null("Microsoft Passport Key Storage Provider");
     let status = unsafe { NCryptOpenStorageProvider(&mut prov, prov_name.as_ptr(), 0) };
@@ -461,10 +461,8 @@ fn open_passport_ksp() -> Result<NcHandleWrapper, CoreError> {
             "Windows Hello CNG Microsoft Passport Key Storage Provider unavailable (0x{status:08x})"
         )));
     }
-    Ok(NcHandleWrapper(prov))
+    Ok(NcryptHandle(prov))
 }
-
-type NcHandleWrapper = NcryptHandle;
 
 pub fn keychain_save(account_id: &str, key: &[u8]) -> Result<(), CoreError> {
     let prov = open_passport_ksp()?;
