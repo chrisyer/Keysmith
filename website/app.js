@@ -14,17 +14,17 @@ const I18N = {
       copied: '已复制 ✓',
     },
     hero: {
-      badge: 'v0.1.4 · 开源 MPL-2.0 · Rust + Tauri v2 原生构建',
+      badge: 'v0.1.5 · 开源 MPL-2.0 · Rust + Tauri v2 原生构建',
       titleLead: '把你的秘密，牢牢锁在',
       titleAccent: '自己的设备与私有云里',
       subtitle:
         'Keysmith 是一款本地优先、端到端零知识加密的跨平台密码与通行密钥管理器。以 Rust 驱动核心密码学引擎，告别 Electron 卡顿，完整兼容 Vaultwarden / Bitwarden 实时同步，并原生内置 OpenSSH Agent、屏幕二维码秒扫 2FA 与 Manifest V3 浏览器插件。',
-      ctaDownload: '立即下载 v0.1.4',
+      ctaDownload: '立即下载 v0.1.5',
       ctaReleases: '查看全部发行版 →',
       platMac: 'macOS 13+',
       platWin: 'Windows 10/11',
       platExt: 'Chrome / Edge / Arc / Brave 插件',
-      platNext: 'Linux (main) · iOS / Android 推进中',
+      platNext: 'Linux (.deb / .rpm / AppImage) · iOS / Android 推进中',
     },
     preview: {
       regionAria: 'Keysmith 桌面端三栏交互预览',
@@ -132,10 +132,10 @@ const I18N = {
     },
     plat: {
       eyebrow: '全平台路线图',
-      title: '已支持 macOS / Windows / 浏览器与 Linux 源码构建，即将登陆 Android 与 iOS',
+      title: '已登陆 macOS / Windows / Linux 与主流浏览器，即将覆盖 Android 与 iOS',
       desc: '核心加密、Vaultwarden 协议、TOTP 与 Passkey 引擎均封装在跨平台的 Rust `keysmith-core` 中，所有终端将共享同一套高安全审计底座与一致体验。',
-      statusReady: '已发布 · v0.1.4',
-      statusLinux: '已合入 main · v0.1.5+ 发布安装包',
+      statusReady: '已发布 · v0.1.5',
+      statusLinux: '已发布 · v0.1.5',
       statusExt: '已发布 · v0.3.0',
       statusPlanned: '即将推出',
       macDesc:
@@ -146,29 +146,29 @@ const I18N = {
       extDesc:
         '兼容 Chrome / Edge / Arc / Brave / Vivaldi。支持内联填充、WebAuthn Passkey 拦截保存与认证、SSO 登录自动接管以及安全密码生成器。',
       linuxDesc:
-        '支持 .deb / .rpm / AppImage 构建，接入 Secret Service + Polkit 验证、logind/ScreenSaver 自动锁定、Wayland/X11 自动键入与扫码，以及 OpenSSH Agent 和 CLI 工具链。',
+        '提供 .deb / .rpm / AppImage 安装包，接入 Secret Service + Polkit 验证、logind/ScreenSaver 自动锁定、Wayland/X11 自动键入与扫码，以及 OpenSSH Agent 和 CLI 工具链。',
       iosDesc:
         '通过 Swift + UniFFI 绑定 Rust `keysmith-core`，接入 Face ID / Touch ID 与系统 AutoFill Credential / Passkey Provider，在 iPhone 与 Safari 中原生无缝填充。',
       androidDesc:
         '基于 Kotlin + Rust JNI 集成，支持 Android BiometricPrompt 生物解锁、系统 Autofill Framework 自动填充与 Jetpack Credential Manager 通行密钥托管。',
       calloutTitle: '一套 Rust 核心（keysmith-core），全端一致零知识安全保障',
       calloutDesc:
-        '未来上线的 Android、iOS 与 Linux 客户端将继续使用同一套经过测试验证的加密与 Vaultwarden 同步内核，确保全平台数据与 Passkey 完全互通。',
-      calloutBtn: '关注移动端与 Linux 进展 →',
+        '桌面端（macOS / Windows / Linux）与即将上线的 Android、iOS 客户端共享同一套经过测试验证的加密与 Vaultwarden 同步内核，确保全平台数据与 Passkey 完全互通。',
+      calloutBtn: '关注移动端进展 →',
     },
     inst: {
       eyebrow: '快速上手',
       title: '选择适合你的安装方式',
-      desc: 'v0.1.4 已就绪，提供 macOS / Windows 安装器、Homebrew Cask、命令行工具与浏览器扩展压缩包。',
+      desc: 'v0.1.5 已就绪，提供 macOS / Windows / Linux 安装包、Homebrew Cask、命令行工具与浏览器扩展压缩包。',
       p0Title: 'macOS Homebrew Cask（推荐 · 支持一键升级）',
       p0Desc:
         '请务必携带完整的 tap 前缀 chrisyer/keysmith/keysmith，避免与 Homebrew 官方源中同名应用冲突。当前发布为本地 ad-hoc 签名，首次打开可在 macOS「隐私与安全性」中放行，或按提示手动执行 xattr -dr com.apple.quarantine /Applications/Keysmith.app。',
-      p1Title: 'macOS 一键安装脚本（v0.1.4）',
+      p1Title: 'macOS / Linux 一键安装脚本（v0.1.5）',
       p1Desc:
-        '自动识别 Apple Silicon (arm64) 与 Intel (x64) 并下载 DMG 安装至 /Applications。强制严格 SHA-256 校验与不自动移除隔离属性的加固脚本已合入 main，将在下一版本（v0.1.5+）同步启用。',
+        '自动识别 macOS (Apple Silicon / Intel) 与 Linux (x64 AppImage)，强制严格 SHA-256 校验安装；macOS 版本不自动移除隔离属性，保留系统 Gatekeeper 授权控制。',
       p2Title: 'Windows 10 / 11 (x64) 安装包',
       p2Desc:
-        '前往 GitHub Releases 下载 Keysmith_0.1.4_x64-setup.exe (NSIS) 或 Keysmith_0.1.4_x64_en-US.msi 双击安装即可。启动后会自动配置浏览器的 NativeMessagingHosts 注册表。',
+        '前往 GitHub Releases 下载 Keysmith_0.1.5_x64-setup.exe (NSIS) 或 Keysmith_0.1.5_x64_en-US.msi 双击安装即可。启动后会自动配置浏览器的 NativeMessagingHosts 注册表。',
       p3Title: 'Keysmith CLI (ks) 与 OpenSSH Agent',
       p3Desc: '可从 Release 下载预编译二进制包，或使用 Cargo 从源码构建 ks 与 keysmith-ssh-agent。',
       p4Title: '浏览器扩展安装（Chrome / Edge / Arc / Brave）',
@@ -194,17 +194,17 @@ const I18N = {
       copied: 'Copied ✓',
     },
     hero: {
-      badge: 'v0.1.4 · Open Source MPL-2.0 · Rust + Tauri v2 Native',
+      badge: 'v0.1.5 · Open Source MPL-2.0 · Rust + Tauri v2 Native',
       titleLead: 'Keep every secret locked on',
       titleAccent: 'your devices & private cloud',
       subtitle:
         'Keysmith is a local-first, zero-knowledge password, Passkey, and OpenSSH Agent manager powered by Rust and Tauri v2. Enjoy native speed instead of Electron bloat, full Vaultwarden / Bitwarden real-time sync, screen QR scanning for TOTP, and a Manifest V3 browser extension.',
-      ctaDownload: 'Download v0.1.4',
+      ctaDownload: 'Download v0.1.5',
       ctaReleases: 'All Releases →',
       platMac: 'macOS 13+',
       platWin: 'Windows 10/11',
       platExt: 'Chrome / Edge / Arc / Brave Extension',
-      platNext: 'Linux (main) · iOS / Android In Progress',
+      platNext: 'Linux (.deb / .rpm / AppImage) · iOS / Android In Progress',
     },
     preview: {
       regionAria: 'Keysmith desktop 3-pane interactive preview',
@@ -312,10 +312,10 @@ const I18N = {
     },
     plat: {
       eyebrow: 'Cross-Platform Roadmap',
-      title: 'Desktop, Browser & Linux Source Ready—Android & iOS Next',
+      title: 'macOS, Windows, Linux & Browser Ready—Android & iOS Next',
       desc: 'All cryptography, Vaultwarden sync, TOTP, and Passkey logic live inside the shared Rust keysmith-core crate, bringing identical security guarantees to every upcoming platform.',
-      statusReady: 'Available · v0.1.4',
-      statusLinux: 'In main · Packages in v0.1.5+',
+      statusReady: 'Available · v0.1.5',
+      statusLinux: 'Available · v0.1.5',
       statusExt: 'Available · v0.3.0',
       statusPlanned: 'Planned / Coming Soon',
       macDesc:
@@ -326,29 +326,29 @@ const I18N = {
       extDesc:
         'Works with Chrome, Edge, Arc, Brave, and Vivaldi. Inline autofill, WebAuthn Passkeys, TOTP copy, SSO login capture, and built-in password generator.',
       linuxDesc:
-        'Supports .deb / .rpm / AppImage bundling on main with Secret Service + Polkit auth, logind/ScreenSaver auto-lock, Wayland/X11 Auto-Type & QR scan, plus OpenSSH Agent + ks CLI parity.',
+        'Ships .deb, .rpm, and AppImage packages with Secret Service + Polkit auth, logind/ScreenSaver auto-lock, Wayland/X11 Auto-Type & QR scan, plus OpenSSH Agent + ks CLI parity.',
       iosDesc:
         'Powered by Rust keysmith-core via Swift + UniFFI bindings, integrating Face ID / Touch ID and native iOS AutoFill Credential & Passkey Provider.',
       androidDesc:
         'Powered by Rust JNI bindings with Android BiometricPrompt unlock, Autofill Framework, and Jetpack Credential Manager Passkey support.',
       calloutTitle: 'One audited Rust engine (keysmith-core) across Desktop, Linux, iOS & Android',
       calloutDesc:
-        'Upcoming mobile and Linux apps share the exact same tested cryptographic and Vaultwarden sync core for seamless cross-device Passkeys and vault sync.',
-      calloutBtn: 'Follow Roadmap & Issues →',
+        'Desktop platforms (macOS, Windows, Linux) and upcoming mobile apps share the exact same tested cryptographic and Vaultwarden sync core for seamless cross-device Passkeys and vault sync.',
+      calloutBtn: 'Follow Mobile Roadmap →',
     },
     inst: {
       eyebrow: 'Get Started',
       title: 'Choose your preferred installation method',
-      desc: 'v0.1.4 is live with installers for macOS & Windows (ad-hoc signed builds), Homebrew Cask, CLI binaries, and the Manifest V3 browser extension.',
+      desc: 'v0.1.5 is live with installers for macOS, Windows & Linux (ad-hoc signed macOS/Windows builds), Homebrew Cask, CLI binaries, and the Manifest V3 browser extension.',
       p0Title: 'macOS Homebrew Cask (Recommended · Easy Upgrades)',
       p0Desc:
         'Always include the full chrisyer/keysmith/keysmith tap prefix to avoid colliding with Homebrew’s unrelated official keysmith cask. Builds are currently ad-hoc signed; approve via macOS Privacy & Security or manual xattr -dr com.apple.quarantine.',
-      p1Title: 'macOS One-Line Installer (v0.1.4)',
+      p1Title: 'macOS & Linux One-Line Installer (v0.1.5)',
       p1Desc:
-        'Detects Apple Silicon (arm64) or Intel (x64) and installs Keysmith.app into /Applications. Strict SHA-256 verification and manual Gatekeeper approval are in main and will ship in v0.1.5+.',
+        'Detects macOS (Apple Silicon / Intel) or Linux (x64 AppImage) and installs with strict SHA-256 verification, keeping macOS Gatekeeper approval under your control.',
       p2Title: 'Windows 10 / 11 (x64) Installers',
       p2Desc:
-        'Download Keysmith_0.1.4_x64-setup.exe (NSIS) or Keysmith_0.1.4_x64_en-US.msi from GitHub Releases. NativeMessagingHosts registry keys are configured automatically on first run.',
+        'Download Keysmith_0.1.5_x64-setup.exe (NSIS) or Keysmith_0.1.5_x64_en-US.msi from GitHub Releases. NativeMessagingHosts registry keys are configured automatically on first run.',
       p3Title: 'Keysmith CLI (ks) & OpenSSH Agent',
       p3Desc: 'Grab prebuilt binaries from GitHub Releases or compile ks and keysmith-ssh-agent from source via Cargo.',
       p4Title: 'Browser Extension (Chrome / Edge / Arc / Brave)',

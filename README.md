@@ -74,7 +74,7 @@ On launch, Keysmith extracts the browser extension to `%APPDATA%\dev.keysmith.de
 
 ### Linux (x64 · Debian/Ubuntu, Fedora/RHEL, AppImage)
 
-Linux desktop support is implemented on `main` (`.deb`, `.rpm`, and `.AppImage` packages will ship with `v0.1.5+`):
+Download `.deb` (Debian/Ubuntu), `.rpm` (Fedora/RHEL/openSUSE), or `.AppImage` packages from [GitHub Releases](https://github.com/chrisyer/Keysmith/releases), or install via the one-line script below:
 
 - **Secret Service + Polkit**: Stores unlock keys via Freedesktop Secret Service (`gnome-keyring` / `kwallet`) and verifies presence with Polkit (`dev.keysmith.desktop.unlock`, bundled in `/usr/share/polkit-1/actions/` for `.deb`/`.rpm`).
 - **Wayland & X11**: Supports clipboard auto-clear (`arboard` + `wl-copy`/`xclip`), screen lock & sleep auto-lock (`logind` + Freedesktop/GNOME/Cinnamon `ScreenSaver`), XDG Autostart (`~/.config/autostart/keysmith.desktop`), Auto-Type (`wtype`/`ydotool`/`xdotool`), TOTP QR screen scanning (`grim`/`import`/`spectacle`/`gnome-screenshot`/`scrot`), and automatic Chromium Native Messaging configuration under `$XDG_CONFIG_HOME` (`~/.config`).
@@ -88,10 +88,10 @@ Linux desktop support is implemented on `main` (`.deb`, `.rpm`, and `.AppImage` 
 #### Option 1: One-Line Installer (Verified via `SHA256SUMS.txt`)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/v0.1.4/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/v0.1.5/install.sh | sh
 ```
 
-> Inspect scripts before piping to `sh`. Note: the `v0.1.4` release URL points to the latest tagged release installer; the hardened [`install.sh`](./install.sh) on `main` (which strictly requires a matching `SHA256SUMS.txt` checksum and leaves macOS Gatekeeper approval under your control without automatic `xattr -cr`) will ship in the upcoming release (`v0.1.5+`).
+> Inspect scripts before piping to `sh`. [`install.sh`](./install.sh) supports macOS (DMG → `/Applications`) and Linux (`AppImage` → `~/.local/bin/keysmith`), strictly requires a matching `SHA256SUMS.txt` checksum, and leaves macOS Gatekeeper approval under your control without automatic `xattr -cr`.
 
 #### Option 2: Homebrew Cask
 

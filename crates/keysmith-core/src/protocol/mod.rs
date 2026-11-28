@@ -891,7 +891,7 @@ pub fn validate_favicon_host(raw: &str) -> Option<String> {
 impl VaultwardenClient {
     pub fn new() -> Self {
         let http = Client::builder()
-            .user_agent("Keysmith/0.1.4 (macOS; Tauri)")
+            .user_agent(concat!("Keysmith/", env!("CARGO_PKG_VERSION"), " (Tauri)"))
             .timeout(std::time::Duration::from_secs(20))
             .build()
             .unwrap_or_else(|_| Client::new());
@@ -1791,7 +1791,7 @@ impl VaultwardenClient {
     ) -> Option<Vec<u8>> {
         let parsed = url::Url::parse(url).ok()?;
         let mut builder = Client::builder()
-            .user_agent("Keysmith/0.1.4")
+            .user_agent(concat!("Keysmith/", env!("CARGO_PKG_VERSION")))
             .redirect(Policy::none())
             .timeout(std::time::Duration::from_secs(4));
 
