@@ -115,3 +115,87 @@ public struct KSItemIconBadge: View {
         }
     }
 }
+
+public struct KSItemFaviconBadge: View {
+    public let store: KeysmithStore
+    public let title: String
+    public let icon: KSItemIcon?
+    public var primaryUrl: String?
+    public let category: KSItemCategory
+    public var size: CGFloat
+
+    #if canImport(UIKit)
+    @State private var loadedImage: UIImage?
+    #endif
+
+    public init(
+        store: KeysmithStore,
+        title: String,
+        icon: KSItemIcon?,
+        primaryUrl: String? = nil,
+        category: KSItemCategory,
+        size: CGFloat = 38
+    ) {
+        self.store = store
+        self.title = title
+        self.icon = icon
+        self.primaryUrl = primaryUrl
+        self.category = category
+        self.size = size
+    }
+
+    private var resolvedHost: String? {
+        store.faviconHost(icon: icon, primaryUrl: primaryUrl)
+    }
+
+    public var body: some View {
+        Group {
+            #if canImport(UIKit)
+            let displayImage = store.session.faviconEnabled
+                ? (loadedImage ?? resolvedHost.flatMap { KSFaviconCache.shared.cachedImage(for: $0) })
+                : nil
+            if let image = displayImage {
+                ZStack {
+                    RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                        .fill(Color.white.opacity(0.96))
+                    Image(uiImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .padding(size * 0.16)
+                }
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+            } else {
+                KSItemIconBadge(title: title, icon: icon, category: category, size: size)
+            }
+            #else
+            KSItemIconBadge(title: title, icon: icon, category: category, size: size)
+            #endif
+        }
+        .accessibilityHidden(true)
+        .task(id: "\(resolvedHost ?? "")-\(store.session.faviconEnabled)") {
+            #if canImport(UIKit)
+            guard store.session.faviconEnabled, let host = resolvedHost else {
+                loadedImage = nil
+                return
+            }
+            if let cached = KSFaviconCache.shared.cachedImage(for: host) {
+                if loadedImage !== cached { loadedImage = cached }
+                return
+            }
+            if let fetched = await KSFaviconCache.shared.loadImage(
+                for: host,
+                isDemoMode: store.isDemoMode,
+                adapter: store.adapter
+            ) {
+                loadedImage = fetched
+            }
+            #endif
+        }
+    }
+}

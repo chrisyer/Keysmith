@@ -10,6 +10,7 @@ public struct iPhoneItemsView: View {
     public var onOpenSettings: () -> Void
 
     @State private var searchQuery: String = ""
+    @State private var cachedSections: [KSAlphabetSection] = []
 
     public init(
         store: KeysmithStore,
@@ -52,92 +53,143 @@ public struct iPhoneItemsView: View {
         }
     }
 
+    private var itemSignature: String {
+        store.visibleItems.map(\.id).joined(separator: ",")
+    }
+
+    private func rebuildSections() {
+        cachedSections = KSAlphabetIndexer.group(filteredItems)
+    }
+
     public var body: some View {
-        List {
-            if !isSearchMode {
-                Section {
-                    filterChipsRow
-                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-                        .listRowBackground(Color.clear)
-                }
-            }
-
-            if filteredItems.isEmpty {
-                ContentUnavailableView(
-                    store.l10n.t(zhCN: "未找到匹配条目", en: "No Matching Items"),
-                    systemImage: "magnifyingglass",
-                    description: Text(store.l10n.t(zhCN: "尝试更改筛选条件或搜索关键字", en: "Try a different filter or search query"))
-                )
-                .listRowBackground(Color.clear)
-            } else {
-                Section {
-                    ForEach(filteredItems) { item in
-                        Button {
-                            onSelectItem(item.id)
-                        } label: {
-                            HStack(spacing: 12) {
-                                KSItemIconBadge(title: item.title, icon: item.icon, category: item.category, size: 38)
-
-                                VStack(alignment: .leading, spacing: 3) {
-                                    HStack(spacing: 4) {
-                                        if item.favorite {
-                                            Image(systemName: "star.fill")
-                                                .font(.caption2)
-                                                .foregroundStyle(.yellow)
-                                        }
-                                        Text(item.title)
-                                            .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(.primary)
-                                            .lineLimit(1)
-                                    }
-                                    Text(item.subtitle.isEmpty ? store.l10n.categoryTitle(item.category) : item.subtitle)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-
-                                Spacer()
-
-                                if item.hasPasskey {
-                                    Text("PK")
-                                        .font(.caption2.weight(.bold))
-                                        .foregroundStyle(KeysmithColors.success)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(KeysmithColors.success.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
-                                }
-                            }
-                            .contentShape(Rectangle())
+        ScrollViewReader { proxy in
+            ZStack(alignment: .trailing) {
+                List {
+                    if !isSearchMode {
+                        Section {
+                            filterChipsRow
+                                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                                .listRowBackground(Color.clear)
                         }
-                        .buttonStyle(.plain)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            if item.hasPassword && !item.reprompt {
-                                Button {
-                                    Task {
-                                        if let detail = try? await store.getItemDetail(id: item.id),
-                                           let pw = detail.primaryPassword {
-                                            store.copyToClipboard(pw, label: item.title, isSensitive: true)
+                    }
+
+                    if cachedSections.isEmpty {
+                        ContentUnavailableView(
+                            store.l10n.t(zhCN: "未找到匹配条目", en: "No Matching Items"),
+                            systemImage: "magnifyingglass",
+                            description: Text(store.l10n.t(zhCN: "尝试更改筛选条件或搜索关键字", en: "Try a different filter or search query"))
+                        )
+                        .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(cachedSections) { section in
+                            Section {
+                                ForEach(section.items) { item in
+                                    Button {
+                                        onSelectItem(item.id)
+                                    } label: {
+                                        HStack(spacing: 12) {
+                                            KSItemFaviconBadge(
+                                                store: store,
+                                                title: item.title,
+                                                icon: item.icon,
+                                                primaryUrl: item.primaryUrl,
+                                                category: item.category,
+                                                size: 38
+                                            )
+
+                                            VStack(alignment: .leading, spacing: 3) {
+                                                HStack(spacing: 4) {
+                                                    if item.favorite {
+                                                        Image(systemName: "star.fill")
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.yellow)
+                                                    }
+                                                    Text(item.title)
+                                                        .font(.subheadline.weight(.semibold))
+                                                        .foregroundStyle(.primary)
+                                                        .lineLimit(1)
+                                                }
+                                                Text(item.subtitle.isEmpty ? store.l10n.categoryTitle(item.category) : item.subtitle)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(1)
+                                            }
+
+                                            Spacer()
+
+                                            if item.hasPasskey {
+                                                Text("PK")
+                                                    .font(.caption2.weight(.bold))
+                                                    .foregroundStyle(KeysmithColors.success)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(KeysmithColors.success.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
+                                            }
+                                        }
+                                        .padding(.trailing, cachedSections.count > 1 ? 18 : 0)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                        if item.hasPassword && !item.reprompt {
+                                            Button {
+                                                Task {
+                                                    if let detail = try? await store.getItemDetail(id: item.id),
+                                                       let pw = detail.primaryPassword {
+                                                        store.copyToClipboard(pw, label: item.title, isSensitive: true)
+                                                    }
+                                                }
+                                            } label: {
+                                                Label(store.l10n.copy, systemImage: "key.fill")
+                                            }
+                                            .tint(KeysmithColors.accent)
+                                        }
+                                        if let username = item.username, !username.isEmpty {
+                                            Button {
+                                                store.copyToClipboard(username, label: store.l10n.t(zhCN: "用户名", en: "Username"), isSensitive: false)
+                                            } label: {
+                                                Label(store.l10n.t(zhCN: "用户名", en: "User"), systemImage: "person.fill")
+                                            }
+                                            .tint(KeysmithColors.success)
                                         }
                                     }
-                                } label: {
-                                    Label(store.l10n.copy, systemImage: "key.fill")
                                 }
-                                .tint(KeysmithColors.accent)
-                            }
-                            if let username = item.username, !username.isEmpty {
-                                Button {
-                                    store.copyToClipboard(username, label: store.l10n.t(zhCN: "用户名", en: "Username"), isSensitive: false)
-                                } label: {
-                                    Label(store.l10n.t(zhCN: "用户名", en: "User"), systemImage: "person.fill")
-                                }
-                                .tint(KeysmithColors.success)
+                            } header: {
+                                Text(section.letter)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.secondary)
+                                    .id("alpha-\(section.letter)")
                             }
                         }
                     }
                 }
+                .listStyle(.insetGrouped)
+
+                if cachedSections.count > 1 {
+                    KSAlphabetIndexBar(letters: cachedSections.map(\.letter)) { letter in
+                        withAnimation(.snappy(duration: 0.2)) {
+                            proxy.scrollTo("alpha-\(letter)", anchor: .top)
+                        }
+                    }
+                    .padding(.trailing, 4)
+                }
             }
         }
-        .listStyle(.insetGrouped)
+        .onAppear {
+            rebuildSections()
+        }
+        .onChange(of: itemSignature) { _, _ in
+            rebuildSections()
+        }
+        .onChange(of: filterPreset) { _, _ in
+            rebuildSections()
+        }
+        .onChange(of: selectedVaultId) { _, _ in
+            rebuildSections()
+        }
+        .onChange(of: searchQuery) { _, _ in
+            rebuildSections()
+        }
         .navigationTitle(isSearchMode ? store.l10n.tabSearch : store.l10n.allItems)
         .searchable(
             text: $searchQuery,

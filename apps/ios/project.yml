@@ -54,6 +54,45 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.keysmith.app
         INFOPLIST_FILE: KeysmithApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: KeysmithApp/KeysmithApp.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -lc++
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/Frameworks"
+        ENABLE_PREVIEWS: YES
+
+  KeysmithApp-Personal:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: KeysmithApp
+        excludes:
+          - Info.plist
+          - "*.entitlements"
+      - path: Shared
+        excludes:
+          - Bindings/Headers/**
+    dependencies:
+      - framework: Frameworks/KeysmithCore.xcframework
+        embed: false
+      - sdk: AuthenticationServices.framework
+      - sdk: LocalAuthentication.framework
+      - sdk: AVFoundation.framework
+      - sdk: PhotosUI.framework
+      - sdk: Security.framework
+      - sdk: AppIntents.framework
+    settings:
+      base:
+        PRODUCT_NAME: Keysmith
+        PRODUCT_BUNDLE_IDENTIFIER: com.cherry.keysmith.personal
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: KeysmithApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: KeysmithApp/KeysmithApp-Personal.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) KEYSMITH_PERSONAL_BUILD
         OTHER_LDFLAGS:
           - $(inherited)
           - -lc++
@@ -130,6 +169,15 @@ schemes:
         KeysmithApp: all
         KeysmithAutoFill: all
         KeysmithControls: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+  KeysmithApp-Personal:
+    build:
+      targets:
+        KeysmithApp-Personal: all
     run:
       config: Debug
     archive:

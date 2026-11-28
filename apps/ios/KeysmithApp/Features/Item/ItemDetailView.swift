@@ -13,6 +13,7 @@ public struct ItemDetailView: View {
     @State private var repromptPassword: String = ""
     @State private var repromptError: String?
     @State private var largeTypeTarget: LargeTypePayload?
+    @State private var recentlyCopiedFieldID: String?
     @Environment(\.openURL) private var openURL
 
     private struct LargeTypePayload: Identifiable {
@@ -119,7 +120,7 @@ public struct ItemDetailView: View {
             }
         }
         .sheet(item: $largeTypeTarget) { payload in
-            LargeTypeSheet(title: payload.title, secret: payload.secret)
+            LargeTypeSheet(title: payload.title, secret: payload.secret, closeTitle: store.l10n.close)
         }
         .task(id: itemId) {
             repromptUnlocked = false
@@ -137,7 +138,14 @@ public struct ItemDetailView: View {
     private func headerCard(_ detail: KSItemDetail) -> some View {
         let vaultName = store.vaults.first(where: { $0.id == detail.vaultId })?.name ?? ""
         return HStack(spacing: 14) {
-            KSItemIconBadge(title: detail.title, icon: detail.icon, category: detail.category, size: 48)
+            KSItemFaviconBadge(
+                store: store,
+                title: detail.title,
+                icon: detail.icon,
+                primaryUrl: detail.urls.first?.uri,
+                category: detail.category,
+                size: 48
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(detail.title)
@@ -253,75 +261,167 @@ public struct ItemDetailView: View {
         }
     }
 
+    private func triggerFieldCopy(id: String, value: String, label: String, isSensitive: Bool) {
+        store.copyToClipboard(value, label: label, isSensitive: isSensitive)
+        recentlyCopiedFieldID = id
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            if recentlyCopiedFieldID == id {
+                recentlyCopiedFieldID = nil
+            }
+        }
+    }
+
     private func fieldRow(_ field: KSItemField) -> some View {
         let shouldMaskForCapture = store.isScreenCaptured && store.session.screenCaptureProtected && field.sensitive
         let isRevealed = !field.sensitive || (revealedFieldIDs.contains(field.id) && !shouldMaskForCapture)
+        let isCopied = recentlyCopiedFieldID == field.id
 
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(field.label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        return HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(field.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-            if field.sensitive || field.fieldType == .password || field.fieldType == .sshPrivateKey {
-                ColoredSecretText(
-                    text: field.value,
-                    font: .system(.subheadline, design: .monospaced).monospacedDigit(),
-                    isMasked: !isRevealed
-                )
-            } else {
-                Text(field.value)
-                    .font(.system(.subheadline, design: .monospaced))
-                    .textSelection(.enabled)
+                if field.sensitive || field.fieldType == .password || field.fieldType == .sshPrivateKey {
+                    ColoredSecretText(
+                        text: field.value,
+                        font: .system(.body, design: .monospaced).monospacedDigit(),
+                        isMasked: !isRevealed
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(field.value)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
-            HStack(spacing: 8) {
-                if field.sensitive {
-                    Button {
-                        if revealedFieldIDs.contains(field.id) {
-                            revealedFieldIDs.remove(field.id)
-                        } else {
-                            revealedFieldIDs.insert(field.id)
+            if !field.value.isEmpty {
+                HStack(spacing: 6) {
+                    if field.sensitive {
+                        Button {
+                            if revealedFieldIDs.contains(field.id) {
+                                revealedFieldIDs.remove(field.id)
+                            } else {
+                                revealedFieldIDs.insert(field.id)
+                            }
+                        } label: {
+                            Image(systemName: isRevealed ? "eye.slash" : "eye")
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                                .frame(width: 38, height: 38)
+                                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(isRevealed ? store.l10n.hide : store.l10n.reveal)
+                    }
+
+                    if field.copyable {
+                        Button {
+                            triggerFieldCopy(
+                                id: field.id,
+                                value: field.value,
+                                label: field.label,
+                                isSensitive: field.sensitive
+                            )
+                        } label: {
+                            Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(isCopied ? KeysmithColors.success : KeysmithColors.accent)
+                                .frame(width: 38, height: 38)
+                                .background(
+                                    (isCopied ? KeysmithColors.success : KeysmithColors.accent).opacity(0.14),
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(store.l10n.copy)
+                    }
+
+                    Menu {
+                        if field.copyable {
+                            Button {
+                                triggerFieldCopy(
+                                    id: field.id,
+                                    value: field.value,
+                                    label: field.label,
+                                    isSensitive: field.sensitive
+                                )
+                            } label: {
+                                Label(store.l10n.copy, systemImage: "doc.on.doc")
+                            }
+                        }
+                        if field.sensitive {
+                            Button {
+                                if revealedFieldIDs.contains(field.id) {
+                                    revealedFieldIDs.remove(field.id)
+                                } else {
+                                    revealedFieldIDs.insert(field.id)
+                                }
+                            } label: {
+                                Label(
+                                    isRevealed ? store.l10n.hide : store.l10n.reveal,
+                                    systemImage: isRevealed ? "eye.slash" : "eye"
+                                )
+                            }
+                        }
+                        Button {
+                            largeTypeTarget = LargeTypePayload(title: field.label, secret: field.value)
+                        } label: {
+                            Label(store.l10n.largeType, systemImage: "textformat.size.larger")
                         }
                     } label: {
-                        Text(isRevealed ? store.l10n.hide : store.l10n.reveal)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(Color.secondary.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
+                        Image(systemName: "ellipsis")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 34, height: 38)
+                            .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
-                    .buttonStyle(.plain)
-                }
-
-                if field.copyable && !field.value.isEmpty {
-                    Button {
-                        store.copyToClipboard(field.value, label: field.label, isSensitive: field.sensitive)
-                    } label: {
-                        Text(store.l10n.copy)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(KeysmithColors.accent)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(KeysmithColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if !field.value.isEmpty {
-                    Button {
-                        largeTypeTarget = LargeTypePayload(title: field.label, secret: field.value)
-                    } label: {
-                        Text(store.l10n.largeType)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(Color.secondary.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
+                    .accessibilityLabel(store.l10n.largeType)
                 }
             }
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .contextMenu {
+            if field.copyable && !field.value.isEmpty {
+                Button {
+                    triggerFieldCopy(
+                        id: field.id,
+                        value: field.value,
+                        label: field.label,
+                        isSensitive: field.sensitive
+                    )
+                } label: {
+                    Label(store.l10n.copy, systemImage: "doc.on.doc")
+                }
+            }
+            if field.sensitive {
+                Button {
+                    if revealedFieldIDs.contains(field.id) {
+                        revealedFieldIDs.remove(field.id)
+                    } else {
+                        revealedFieldIDs.insert(field.id)
+                    }
+                } label: {
+                    Label(
+                        isRevealed ? store.l10n.hide : store.l10n.reveal,
+                        systemImage: isRevealed ? "eye.slash" : "eye"
+                    )
+                }
+            }
+            if !field.value.isEmpty {
+                Button {
+                    largeTypeTarget = LargeTypePayload(title: field.label, secret: field.value)
+                } label: {
+                    Label(store.l10n.largeType, systemImage: "textformat.size.larger")
+                }
+            }
+        }
     }
 
     private func totpLiveCard(_ secretOrUri: String) -> some View {
@@ -362,20 +462,40 @@ public struct ItemDetailView: View {
 
                 Button {
                     if let code = totp?.code {
-                        store.copyToClipboard(code, label: store.l10n.t(zhCN: "验证码", en: "2FA Code"), isSensitive: true)
+                        triggerFieldCopy(
+                            id: "__totp__",
+                            value: code,
+                            label: store.l10n.t(zhCN: "验证码", en: "2FA Code"),
+                            isSensitive: true
+                        )
                     }
                 } label: {
-                    Text(store.l10n.copy)
-                        .font(.caption.weight(.semibold))
+                    let totpCopied = recentlyCopiedFieldID == "__totp__"
+                    Image(systemName: totpCopied ? "checkmark" : "doc.on.doc")
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(KeysmithColors.accent, in: RoundedRectangle(cornerRadius: 10))
+                        .frame(width: 40, height: 40)
+                        .background(
+                            totpCopied ? KeysmithColors.success : KeysmithColors.accent,
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(store.l10n.copy)
             }
             .padding(14)
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if let code = totp?.code {
+                    triggerFieldCopy(
+                        id: "__totp__",
+                        value: code,
+                        label: store.l10n.t(zhCN: "验证码", en: "2FA Code"),
+                        isSensitive: true
+                    )
+                }
+            }
         }
     }
 
@@ -413,28 +533,69 @@ public struct ItemDetailView: View {
     }
 
     private func urlsCard(_ urls: [KSItemUrl]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             Text(store.l10n.t(zhCN: "关联网址", en: "Websites"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            ForEach(urls) { urlItem in
-                HStack {
-                    Text(urlItem.uri)
-                        .font(.caption.monospaced())
-                        .lineLimit(1)
-                    Spacer()
-                    if let parsed = URL(string: urlItem.uri) {
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+            ForEach(Array(urls.enumerated()), id: \.element.id) { idx, urlItem in
+                if idx > 0 {
+                    Divider().padding(.leading, 14)
+                }
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let label = urlItem.label, !label.isEmpty {
+                            Text(label)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if let host = URL(string: urlItem.uri)?.host, !host.isEmpty {
+                            Text(host)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(urlItem.uri)
+                            .font(.subheadline.monospaced())
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                    Spacer(minLength: 8)
+                    HStack(spacing: 10) {
                         Button {
-                            openURL(parsed)
+                            store.copyToClipboard(
+                                urlItem.uri,
+                                label: store.l10n.t(zhCN: "网址", en: "URL"),
+                                isSensitive: false
+                            )
                         } label: {
-                            Image(systemName: "arrow.up.right.square")
-                                .foregroundStyle(KeysmithColors.accent)
+                            Image(systemName: "doc.on.doc")
+                                .font(.subheadline)
+                                .frame(width: 36, height: 36)
+                                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+
+                        if let parsed = URL(string: urlItem.uri) {
+                            Button {
+                                openURL(parsed)
+                            } label: {
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.subheadline)
+                                    .foregroundStyle(KeysmithColors.accent)
+                                    .frame(width: 36, height: 36)
+                                    .background(KeysmithColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
             }
         }
-        .padding(14)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 

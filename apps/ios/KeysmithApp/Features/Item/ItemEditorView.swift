@@ -11,6 +11,7 @@ public struct ItemEditorView: View {
     @State private var isSaving: Bool = false
     @State private var errorMessage: String?
     @State private var scanningFieldLocation: FieldLocation?
+    @State private var generatorFieldLocation: FieldLocation?
 
     private struct FieldLocation: Identifiable {
         let id = UUID()
@@ -34,6 +35,8 @@ public struct ItemEditorView: View {
             _draft = State(initialValue: existingItem.toDraft())
         } else {
             let fallbackVault = defaultVaultId ?? store.vaults.first(where: { $0.isDefault })?.id ?? store.vaults.first?.id ?? "personal"
+            let usernameLabel = store.l10n.t(zhCN: "用户名", en: "Username")
+            let passwordLabel = store.l10n.t(zhCN: "密码", en: "Password")
             let initialDraft = KSItemDraft(
                 vaultId: fallbackVault,
                 title: "",
@@ -43,8 +46,8 @@ public struct ItemEditorView: View {
                         id: UUID().uuidString,
                         title: "",
                         fields: [
-                            KSItemField(label: "用户名", fieldType: .text, value: "", sensitive: false, purpose: .username),
-                            KSItemField(label: "密码", fieldType: .password, value: "", sensitive: true, purpose: .password),
+                            KSItemField(label: usernameLabel, fieldType: .text, value: "", sensitive: false, purpose: .username),
+                            KSItemField(label: passwordLabel, fieldType: .password, value: "", sensitive: true, purpose: .password),
                         ]
                     )
                 ]
@@ -92,23 +95,61 @@ public struct ItemEditorView: View {
             Section(store.l10n.t(zhCN: "常用字段快捷添加", en: "Quick Add Common Fields")) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        presetChip(label: "+ 一次性验证码 (TOTP)", color: KeysmithColors.accent) {
-                            appendField(KSItemField(label: "一次性验证码", fieldType: .totp, value: "", sensitive: true, purpose: .totp))
+                        presetChip(
+                            label: store.l10n.t(zhCN: "+ 一次性验证码 (TOTP)", en: "+ One-Time Code (TOTP)"),
+                            color: KeysmithColors.accent
+                        ) {
+                            appendField(KSItemField(
+                                label: store.l10n.t(zhCN: "一次性验证码", en: "One-Time Code"),
+                                fieldType: .totp,
+                                value: "",
+                                sensitive: true,
+                                purpose: .totp
+                            ))
                         }
-                        presetChip(label: "+ 网址", color: .secondary) {
-                            appendField(KSItemField(label: "网址", fieldType: .url, value: "https://", sensitive: false))
+                        presetChip(label: store.l10n.t(zhCN: "+ 网址", en: "+ URL"), color: .secondary) {
+                            appendField(KSItemField(
+                                label: store.l10n.t(zhCN: "网址", en: "URL"),
+                                fieldType: .url,
+                                value: "https://",
+                                sensitive: false
+                            ))
                         }
-                        presetChip(label: "+ 用户名", color: .secondary) {
-                            appendField(KSItemField(label: "用户名", fieldType: .text, value: "", sensitive: false, purpose: .username))
+                        presetChip(label: store.l10n.t(zhCN: "+ 用户名", en: "+ Username"), color: .secondary) {
+                            appendField(KSItemField(
+                                label: store.l10n.t(zhCN: "用户名", en: "Username"),
+                                fieldType: .text,
+                                value: "",
+                                sensitive: false,
+                                purpose: .username
+                            ))
                         }
-                        presetChip(label: "+ 密码", color: .secondary) {
-                            appendField(KSItemField(label: "密码", fieldType: .password, value: "", sensitive: true, purpose: .password))
+                        presetChip(label: store.l10n.t(zhCN: "+ 密码", en: "+ Password"), color: .secondary) {
+                            appendField(KSItemField(
+                                label: store.l10n.t(zhCN: "密码", en: "Password"),
+                                fieldType: .password,
+                                value: "",
+                                sensitive: true,
+                                purpose: .password
+                            ))
                         }
-                        presetChip(label: "+ 恢复代码", color: .secondary) {
-                            appendField(KSItemField(label: "恢复代码", fieldType: .multiline, value: "", sensitive: true, purpose: .recoveryCodes))
+                        presetChip(label: store.l10n.t(zhCN: "+ 恢复代码", en: "+ Recovery Codes"), color: .secondary) {
+                            appendField(KSItemField(
+                                label: store.l10n.t(zhCN: "恢复代码", en: "Recovery Codes"),
+                                fieldType: .multiline,
+                                value: "",
+                                sensitive: true,
+                                purpose: .recoveryCodes
+                            ))
                         }
-                        presetChip(label: "+ PIN 码", color: .secondary) {
-                            appendField(KSItemField(label: "PIN 码", fieldType: .password, value: "", sensitive: true, purpose: .pin))
+                        presetChip(label: store.l10n.t(zhCN: "+ PIN 码", en: "+ PIN"), color: .secondary) {
+                            appendField(KSItemField(
+                                label: store.l10n.t(zhCN: "PIN 码", en: "PIN"),
+                                fieldType: .password,
+                                value: "",
+                                sensitive: true,
+                                purpose: .pin
+                            ))
                         }
                     }
                     .padding(.vertical, 2)
@@ -174,6 +215,7 @@ public struct ItemEditorView: View {
         }
         .sheet(item: $scanningFieldLocation) { loc in
             TotpScannerSheet(
+                l10n: store.l10n,
                 parseQrData: { data in
                     try await store.parseTotpQrImage(data: data)
                 },
@@ -185,6 +227,14 @@ public struct ItemEditorView: View {
                 }
             )
         }
+        .sheet(item: $generatorFieldLocation) { loc in
+            ItemPasswordGeneratorSheet(store: store) { generatedValue in
+                if loc.sectionIndex < draft.sections.count,
+                   loc.fieldIndex < draft.sections[loc.sectionIndex].fields.count {
+                    draft.sections[loc.sectionIndex].fields[loc.fieldIndex].value = generatedValue
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -193,7 +243,7 @@ public struct ItemEditorView: View {
         sectionId: String,
         fieldIndex: Int
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 TextField(store.l10n.t(zhCN: "字段名称", en: "Label"), text: field.label)
                     .font(.caption.weight(.semibold))
@@ -210,50 +260,75 @@ public struct ItemEditorView: View {
                 .pickerStyle(.menu)
             }
 
-            HStack(spacing: 8) {
+            Group {
                 if field.wrappedValue.fieldType == .multiline {
                     TextEditor(text: field.value)
                         .font(.system(.footnote, design: .monospaced))
-                        .frame(minHeight: 60)
+                        .frame(minHeight: 72)
                 } else {
                     TextField(store.l10n.t(zhCN: "输入值", en: "Value"), text: field.value)
                         .font(.system(.subheadline, design: .monospaced))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                if field.wrappedValue.fieldType == .password {
+            if field.wrappedValue.fieldType == .password {
+                HStack(spacing: 10) {
                     Button {
-                        let generated = LocalGeneratorEngine.generate(options: KSGeneratorOptions())
+                        let generated = LocalGeneratorEngine.generate(options: store.generatorOptions)
                         field.wrappedValue.value = generated.value
                     } label: {
-                        Image(systemName: "wand.and.stars")
+                        Label(store.l10n.t(zhCN: "随机生成", en: "Generate"), systemImage: "wand.and.stars")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(KeysmithColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                             .foregroundStyle(KeysmithColors.accent)
                     }
                     .buttonStyle(.plain)
-                }
 
-                if field.wrappedValue.fieldType == .totp {
                     Button {
                         if let secIdx = draft.sections.firstIndex(where: { $0.id == sectionId }) {
-                            scanningFieldLocation = FieldLocation(sectionIndex: secIdx, fieldIndex: fieldIndex)
+                            generatorFieldLocation = FieldLocation(sectionIndex: secIdx, fieldIndex: fieldIndex)
                         }
                     } label: {
-                        Label(store.l10n.t(zhCN: "扫二维码", en: "Scan QR"), systemImage: "qrcode.viewfinder")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(KeysmithColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
-                            .foregroundStyle(KeysmithColors.accent)
+                        Label(store.l10n.t(zhCN: "生成要求与选项", en: "Options"), systemImage: "slider.horizontal.3")
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
             }
 
+            if field.wrappedValue.fieldType == .totp {
+                Button {
+                    if let secIdx = draft.sections.firstIndex(where: { $0.id == sectionId }) {
+                        scanningFieldLocation = FieldLocation(sectionIndex: secIdx, fieldIndex: fieldIndex)
+                    }
+                } label: {
+                    Label(store.l10n.t(zhCN: "扫二维码", en: "Scan QR"), systemImage: "qrcode.viewfinder")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(KeysmithColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .foregroundStyle(KeysmithColors.accent)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Divider()
+
             Toggle(store.l10n.t(zhCN: "敏感掩码", en: "Mask Secret"), isOn: field.sensitive)
-                .font(.caption)
+                .font(.subheadline)
+                .padding(.top, 2)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
     }
 
     private func presetChip(label: String, color: Color, action: @escaping () -> Void) -> some View {
@@ -312,6 +387,304 @@ public struct ItemEditorView: View {
             onSaved(saved)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct ItemPasswordGeneratorSheet: View {
+    @Bindable var store: KeysmithStore
+    let onUsePassword: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private var clampedLength: Int {
+        min(64, max(8, store.generatorOptions.length))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(store.l10n.t(zhCN: "预览", en: "Preview")) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ColoredSecretText(
+                            text: store.generatorResult.value,
+                            font: .system(.title3, design: .monospaced).monospacedDigit()
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        HStack {
+                            Text(store.generatorResult.strength.label)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(KeysmithColors.success.opacity(0.14), in: Capsule())
+                                .foregroundStyle(KeysmithColors.success)
+
+                            Spacer()
+
+                            Text("\(store.generatorResult.strength.entropyBits) bits")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+
+                    HStack(spacing: 12) {
+                        Button {
+                            store.regeneratePassword()
+                        } label: {
+                            Label(store.l10n.t(zhCN: "换一个", en: "Regenerate"), systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            onUsePassword(store.generatorResult.value)
+                            dismiss()
+                        } label: {
+                            Label(store.l10n.t(zhCN: "填入密码", en: "Use Password"), systemImage: "checkmark")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(KeysmithColors.accent)
+                    }
+                }
+
+                Section(store.l10n.t(zhCN: "生成模式", en: "Mode")) {
+                    Picker(
+                        store.l10n.t(zhCN: "类型", en: "Type"),
+                        selection: Binding(
+                            get: { store.generatorOptions.mode },
+                            set: { mode in
+                                store.generatorOptions.mode = mode
+                                store.regeneratePassword()
+                            }
+                        )
+                    ) {
+                        Text(store.l10n.t(zhCN: "随机密码", en: "Password")).tag(KSGeneratorMode.password)
+                        Text(store.l10n.t(zhCN: "助记短语", en: "Passphrase")).tag(KSGeneratorMode.passphrase)
+                        Text("PIN").tag(KSGeneratorMode.pin)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                if store.generatorOptions.mode == .password {
+                    Section(store.l10n.t(zhCN: "长度与字符要求", en: "Length & Character Rules")) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Stepper(
+                                value: Binding(
+                                    get: { clampedLength },
+                                    set: { val in
+                                        store.generatorOptions.length = val
+                                        store.regeneratePassword()
+                                    }
+                                ),
+                                in: 8...64
+                            ) {
+                                HStack {
+                                    Text(store.l10n.t(zhCN: "密码长度", en: "Length"))
+                                    Spacer()
+                                    Text("\(clampedLength) \(store.l10n.t(zhCN: "位", en: "chars"))")
+                                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                                        .foregroundStyle(KeysmithColors.accent)
+                                }
+                            }
+
+                            Slider(
+                                value: Binding(
+                                    get: { Double(clampedLength) },
+                                    set: { val in
+                                        let rounded = Int(val.rounded())
+                                        if store.generatorOptions.length != rounded {
+                                            store.generatorOptions.length = rounded
+                                            store.regeneratePassword()
+                                        }
+                                    }
+                                ),
+                                in: 8...64,
+                                step: 1
+                            )
+                            .tint(KeysmithColors.accent)
+                        }
+
+                        Toggle(
+                            store.l10n.t(zhCN: "包含大写字母 (A-Z)", en: "Uppercase (A-Z)"),
+                            isOn: Binding(
+                                get: { store.generatorOptions.includeUppercase },
+                                set: { val in
+                                    store.generatorOptions.includeUppercase = val
+                                    store.regeneratePassword()
+                                }
+                            )
+                        )
+
+                        Toggle(
+                            store.l10n.t(zhCN: "包含小写字母 (a-z)", en: "Lowercase (a-z)"),
+                            isOn: Binding(
+                                get: { store.generatorOptions.includeLowercase },
+                                set: { val in
+                                    store.generatorOptions.includeLowercase = val
+                                    store.regeneratePassword()
+                                }
+                            )
+                        )
+
+                        Toggle(
+                            store.l10n.t(zhCN: "包含数字 (0-9)", en: "Digits (0-9)"),
+                            isOn: Binding(
+                                get: { store.generatorOptions.includeDigits },
+                                set: { val in
+                                    store.generatorOptions.includeDigits = val
+                                    store.regeneratePassword()
+                                }
+                            )
+                        )
+
+                        if store.generatorOptions.includeDigits {
+                            Stepper(
+                                value: Binding(
+                                    get: { store.generatorOptions.minDigits },
+                                    set: { val in
+                                        store.generatorOptions.minDigits = val
+                                        store.regeneratePassword()
+                                    }
+                                ),
+                                in: 0...9
+                            ) {
+                                Text(store.l10n.t(
+                                    zhCN: "最少数字位数：\(store.generatorOptions.minDigits)",
+                                    en: "Min digits: \(store.generatorOptions.minDigits)"
+                                ))
+                            }
+                        }
+
+                        Toggle(
+                            store.l10n.t(zhCN: "包含特殊符号 (!@#$)", en: "Special Symbols (!@#$)"),
+                            isOn: Binding(
+                                get: { store.generatorOptions.includeSymbols },
+                                set: { val in
+                                    store.generatorOptions.includeSymbols = val
+                                    store.regeneratePassword()
+                                }
+                            )
+                        )
+
+                        if store.generatorOptions.includeSymbols {
+                            Stepper(
+                                value: Binding(
+                                    get: { store.generatorOptions.minSymbols },
+                                    set: { val in
+                                        store.generatorOptions.minSymbols = val
+                                        store.regeneratePassword()
+                                    }
+                                ),
+                                in: 0...9
+                            ) {
+                                Text(store.l10n.t(
+                                    zhCN: "最少特殊字符数：\(store.generatorOptions.minSymbols)",
+                                    en: "Min symbols: \(store.generatorOptions.minSymbols)"
+                                ))
+                            }
+                        }
+
+                        Toggle(
+                            store.l10n.t(zhCN: "排除易混淆字符 (0O / 1lI)", en: "Exclude Ambiguous (0O / 1lI)"),
+                            isOn: Binding(
+                                get: { store.generatorOptions.excludeAmbiguous },
+                                set: { val in
+                                    store.generatorOptions.excludeAmbiguous = val
+                                    store.regeneratePassword()
+                                }
+                            )
+                        )
+                    }
+                } else if store.generatorOptions.mode == .passphrase {
+                    Section(store.l10n.t(zhCN: "短语参数", en: "Passphrase Rules")) {
+                        Stepper(
+                            value: Binding(
+                                get: { store.generatorOptions.wordCount },
+                                set: { val in
+                                    store.generatorOptions.wordCount = val
+                                    store.regeneratePassword()
+                                }
+                            ),
+                            in: 3...10
+                        ) {
+                            Text(store.l10n.t(
+                                zhCN: "单词数量：\(store.generatorOptions.wordCount)",
+                                en: "Words: \(store.generatorOptions.wordCount)"
+                            ))
+                        }
+
+                        Picker(
+                            store.l10n.t(zhCN: "分隔符", en: "Separator"),
+                            selection: Binding(
+                                get: { store.generatorOptions.separator },
+                                set: { val in
+                                    store.generatorOptions.separator = val
+                                    store.regeneratePassword()
+                                }
+                            )
+                        ) {
+                            Text("-").tag("-")
+                            Text(".").tag(".")
+                            Text("_").tag("_")
+                            Text(store.l10n.t(zhCN: "空格", en: "Space")).tag(" ")
+                        }
+
+                        Toggle(
+                            store.l10n.t(zhCN: "首字母大写", en: "Capitalize"),
+                            isOn: Binding(
+                                get: { store.generatorOptions.capitalize },
+                                set: { val in
+                                    store.generatorOptions.capitalize = val
+                                    store.regeneratePassword()
+                                }
+                            )
+                        )
+
+                        Toggle(
+                            store.l10n.t(zhCN: "附加随机数字", en: "Include Number"),
+                            isOn: Binding(
+                                get: { store.generatorOptions.includeNumberInPhrase },
+                                set: { val in
+                                    store.generatorOptions.includeNumberInPhrase = val
+                                    store.regeneratePassword()
+                                }
+                            )
+                        )
+                    }
+                } else {
+                    Section(store.l10n.t(zhCN: "PIN 位数", en: "PIN Length")) {
+                        Stepper(
+                            value: Binding(
+                                get: { store.generatorOptions.pinLength },
+                                set: { val in
+                                    store.generatorOptions.pinLength = val
+                                    store.regeneratePassword()
+                                }
+                            ),
+                            in: 4...12
+                        ) {
+                            Text(store.l10n.t(
+                                zhCN: "位数：\(store.generatorOptions.pinLength) 位",
+                                en: "Digits: \(store.generatorOptions.pinLength)"
+                            ))
+                        }
+                    }
+                }
+            }
+            .navigationTitle(store.l10n.t(zhCN: "密码生成选项", en: "Password Options"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(store.l10n.cancel) { dismiss() }
+                }
+            }
+            .onAppear {
+                if store.generatorResult.value.isEmpty {
+                    store.regeneratePassword()
+                }
+            }
         }
     }
 }

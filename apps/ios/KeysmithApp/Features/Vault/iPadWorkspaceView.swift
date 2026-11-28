@@ -26,6 +26,7 @@ public struct iPadWorkspaceView: View {
     @State private var rightPaneMode: RightPaneMode = .item
     @State private var searchText: String = ""
     @State private var isShowingScannerSheet: Bool = false
+    @State private var cachedSections: [KSAlphabetSection] = []
 
     public init(store: KeysmithStore) {
         self.store = store
@@ -133,6 +134,7 @@ public struct iPadWorkspaceView: View {
         }
         .sheet(isPresented: $isShowingScannerSheet) {
             TotpScannerSheet(
+                l10n: store.l10n,
                 parseQrData: { data in
                     try await store.parseTotpQrImage(data: data)
                 },
@@ -193,7 +195,7 @@ public struct iPadWorkspaceView: View {
                     count: store.visibleItems.filter { $0.hasPasskey || $0.category == .passkey }.count,
                     tag: .passkeys
                 )
-                Label(store.l10n.t(zhCN: "工具与安全中心", en: "Tools & Watchtower"), systemImage: "wrench.and.screwdriver")
+                Label(store.l10n.tabTools, systemImage: "shield.lefthalf.filled")
                     .tag(SidebarFilter.tools)
                     .onTapGesture {
                         sidebarSelection = .tools
@@ -268,52 +270,121 @@ public struct iPadWorkspaceView: View {
 
     // MARK: - Middle Item List Column
 
+    private var itemSignature: String {
+        store.visibleItems.map(\.id).joined(separator: ",")
+    }
+
+    private func rebuildSections() {
+        cachedSections = KSAlphabetIndexer.group(filteredItems)
+    }
+
     private var contentColumn: some View {
-        List(selection: $selectedItemId) {
-            ForEach(filteredItems) { item in
-                HStack(spacing: 10) {
-                    KSItemIconBadge(title: item.title, icon: item.icon, category: item.category, size: 36)
+        ScrollViewReader { proxy in
+            ZStack(alignment: .trailing) {
+                List {
+                    ForEach(cachedSections) { section in
+                        Section {
+                            ForEach(section.items) { item in
+                                let isSelected = selectedItemId == item.id && rightPaneMode == .item
+                                Button {
+                                    selectedItemId = item.id
+                                    rightPaneMode = .item
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        KSItemFaviconBadge(
+                                            store: store,
+                                            title: item.title,
+                                            icon: item.icon,
+                                            primaryUrl: item.primaryUrl,
+                                            category: item.category,
+                                            size: 36
+                                        )
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.title)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                        Text(item.subtitle.isEmpty ? store.l10n.categoryTitle(item.category) : item.subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.title)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(isSelected ? .white : .primary)
+                                                .lineLimit(1)
+                                            Text(item.subtitle.isEmpty ? store.l10n.categoryTitle(item.category) : item.subtitle)
+                                                .font(.caption)
+                                                .foregroundStyle(isSelected ? Color.white.opacity(0.85) : .secondary)
+                                                .lineLimit(1)
+                                        }
 
-                    Spacer()
+                                        Spacer()
 
-                    if item.hasPasskey {
-                        Text("PK")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(KeysmithColors.success)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(KeysmithColors.success.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
-                    }
-                }
-                .tag(item.id)
-                .swipeActions(edge: .trailing) {
-                    if item.hasPassword && !item.reprompt {
-                        Button {
-                            Task {
-                                if let detail = try? await store.getItemDetail(id: item.id),
-                                   let pw = detail.primaryPassword {
-                                    store.copyToClipboard(pw, label: item.title, isSensitive: true)
+                                        if item.hasPasskey {
+                                            Text("PK")
+                                                .font(.caption2.weight(.bold))
+                                                .foregroundStyle(isSelected ? Color.white : KeysmithColors.success)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(
+                                                    isSelected ? Color.white.opacity(0.22) : KeysmithColors.success.opacity(0.14),
+                                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                                )
+                                        }
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        isSelected ? KeysmithColors.accent : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    )
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: cachedSections.count > 1 ? 26 : 10))
+                                .swipeActions(edge: .trailing) {
+                                    if item.hasPassword && !item.reprompt {
+                                        Button {
+                                            Task {
+                                                if let detail = try? await store.getItemDetail(id: item.id),
+                                                   let pw = detail.primaryPassword {
+                                                    store.copyToClipboard(pw, label: item.title, isSensitive: true)
+                                                }
+                                            }
+                                        } label: {
+                                            Label(store.l10n.copy, systemImage: "key.fill")
+                                        }
+                                        .tint(KeysmithColors.accent)
+                                    }
                                 }
                             }
-                        } label: {
-                            Label(store.l10n.copy, systemImage: "key.fill")
+                        } header: {
+                            Text(section.letter)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.secondary)
+                                .id("ipad-alpha-\(section.letter)")
                         }
-                        .tint(KeysmithColors.accent)
                     }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(Color(.systemGroupedBackground))
+
+                if cachedSections.count > 1 {
+                    KSAlphabetIndexBar(letters: cachedSections.map(\.letter)) { letter in
+                        withAnimation(.snappy(duration: 0.2)) {
+                            proxy.scrollTo("ipad-alpha-\(letter)", anchor: .top)
+                        }
+                    }
+                    .padding(.trailing, 4)
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        .onAppear {
+            rebuildSections()
+        }
+        .onChange(of: itemSignature) { _, _ in
+            rebuildSections()
+        }
+        .onChange(of: searchText) { _, _ in
+            rebuildSections()
+        }
         .navigationTitle(activeColumnTitle)
         .searchable(
             text: $searchText,
@@ -344,6 +415,7 @@ public struct iPadWorkspaceView: View {
             }
         }
         .onChange(of: sidebarSelection) { _, newSelection in
+            rebuildSections()
             if newSelection == .tools {
                 rightPaneMode = .tools
             } else if rightPaneMode == .tools {

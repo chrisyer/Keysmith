@@ -1,57 +1,90 @@
 import CryptoKit
 import Foundation
 
-/// Swift 6 actor wrapping `KeysmithCoreHandle` (UniFFI) + JSON DTO encoding/decoding.
-/// Safe to instantiate from both `KeysmithApp` (`isExtension: false`) and `KeysmithAutoFill` (`isExtension: true`).
-public actor KeysmithCoreAdapter {
+/// Swift 6 thread-safe bridge wrapping `KeysmithCoreHandle` (UniFFI) + JSON DTO encoding/decoding.
+/// Uses dedicated DispatchQueues so blocking Rust/SQLite/network calls (especially low-priority favicons)
+/// never block MainActor or starve Swift Concurrency's cooperative thread pool.
+public final class KeysmithCoreAdapter: @unchecked Sendable {
+    private let handleLock = NSLock()
     private var handle: KeysmithCoreHandle?
     private let isExtension: Bool
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
+    private let workQueue: DispatchQueue
+    private let faviconQueue: DispatchQueue
 
     public init(isExtension: Bool = false) {
         self.isExtension = isExtension
-        self.encoder = JSONEncoder()
-        self.decoder = JSONDecoder()
+        self.workQueue = DispatchQueue(
+            label: isExtension ? "dev.keysmith.core.ext.work" : "dev.keysmith.core.work",
+            qos: .userInitiated,
+            attributes: .concurrent
+        )
+        self.faviconQueue = DispatchQueue(
+            label: "dev.keysmith.core.favicon",
+            qos: .utility
+        )
     }
 
-    public func initializeIfNeeded() throws {
-        if handle != nil { return }
+    public func initializeIfNeeded() async throws {
+        try await runBlocking {
+            _ = try self.requireHandleSync()
+        }
+    }
+
+    private func requireHandleSync() throws -> KeysmithCoreHandle {
+        handleLock.lock()
+        defer { handleLock.unlock() }
+        if let existing = handle {
+            return existing
+        }
         let dbPath = AppConfig.databaseURL().path
         let userAgent = AppConfig.userAgent(isExtension: isExtension)
-        handle = try KeysmithCoreHandle(
+        let created = try KeysmithCoreHandle(
             dbPath: dbPath,
             biometric: FfiBiometricBridge(store: AppleBiometricKeyStore.shared),
             clipboard: FfiClipboardBridge(manager: AppleClipboardManager.shared),
             isExtension: isExtension,
             userAgent: userAgent
         )
+        handle = created
+        return created
     }
 
-    private func requireHandle() throws -> KeysmithCoreHandle {
-        if handle == nil {
-            try initializeIfNeeded()
+    private func runBlocking<T: Sendable>(
+        on queue: DispatchQueue? = nil,
+        _ work: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        let targetQueue = queue ?? workQueue
+        return try await withCheckedThrowingContinuation { continuation in
+            targetQueue.async {
+                do {
+                    continuation.resume(returning: try work())
+                } catch let ffiError as FfiError {
+                    continuation.resume(throwing: Self.mapFfiError(ffiError))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
         }
-        guard let handle else {
-            throw KSCoreAdapterError.notInitialized
-        }
-        return handle
     }
 
     // MARK: - Auth
 
-    public func authCheckServer(serverUrl: String, allowInsecureHttp: Bool) throws -> KSServerCheckResult {
-        let json = try requireHandle().authCheckServerJson(serverUrl: serverUrl, allowInsecureHttp: allowInsecureHttp)
-        return try decodeJSON(json)
+    public func authCheckServer(serverUrl: String, allowInsecureHttp: Bool) async throws -> KSServerCheckResult {
+        try await runBlocking {
+            let json = try self.requireHandleSync().authCheckServerJson(serverUrl: serverUrl, allowInsecureHttp: allowInsecureHttp)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func authPrelogin(serverUrl: String, email: String, allowInsecureHttp: Bool) throws -> KSKdfConfig {
-        let json = try requireHandle().authPreloginJson(
-            serverUrl: serverUrl,
-            email: email,
-            allowInsecureHttp: allowInsecureHttp
-        )
-        return try decodeJSON(json)
+    public func authPrelogin(serverUrl: String, email: String, allowInsecureHttp: Bool) async throws -> KSKdfConfig {
+        try await runBlocking {
+            let json = try self.requireHandleSync().authPreloginJson(
+                serverUrl: serverUrl,
+                email: email,
+                allowInsecureHttp: allowInsecureHttp
+            )
+            return try self.decodeJSON(json)
+        }
     }
 
     public func authLogin(
@@ -62,9 +95,9 @@ public actor KeysmithCoreAdapter {
         twoFactorToken: String?,
         twoFactorRemember: Bool,
         allowInsecureHttp: Bool
-    ) throws -> KSSessionState {
-        do {
-            let json = try requireHandle().authLoginJson(
+    ) async throws -> KSSessionState {
+        try await runBlocking {
+            let json = try self.requireHandleSync().authLoginJson(
                 serverUrl: serverUrl,
                 email: email,
                 masterPassword: masterPassword,
@@ -73,13 +106,11 @@ public actor KeysmithCoreAdapter {
                 twoFactorRemember: twoFactorRemember,
                 allowInsecureHttp: allowInsecureHttp
             )
-            return try decodeJSON(json)
-        } catch let ffiError as FfiError {
-            throw mapFfiError(ffiError)
+            return try self.decodeJSON(json)
         }
     }
 
-    private func mapFfiError(_ error: FfiError) -> KSCoreAdapterError {
+    private static func mapFfiError(_ error: FfiError) -> KSCoreAdapterError {
         switch error {
         case .TwoFactorRequired(let msg):
             return .twoFactorRequired(message: msg, providers: [])
@@ -109,268 +140,368 @@ public actor KeysmithCoreAdapter {
         masterPassword: String,
         hint: String?,
         allowInsecureHttp: Bool
-    ) throws -> KSSessionState {
-        let json = try requireHandle().authRegisterJson(
-            serverUrl: serverUrl,
-            email: email,
-            displayName: displayName,
-            masterPassword: masterPassword,
-            hint: hint,
-            allowInsecureHttp: allowInsecureHttp
-        )
-        return try decodeJSON(json)
+    ) async throws -> KSSessionState {
+        try await runBlocking {
+            let json = try self.requireHandleSync().authRegisterJson(
+                serverUrl: serverUrl,
+                email: email,
+                displayName: displayName,
+                masterPassword: masterPassword,
+                hint: hint,
+                allowInsecureHttp: allowInsecureHttp
+            )
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func authLogout(clearLocalCache: Bool) throws {
-        try requireHandle().authLogout(clearLocalCache: clearLocalCache)
+    public func authLogout(clearLocalCache: Bool) async throws {
+        try await runBlocking {
+            try self.requireHandleSync().authLogout(clearLocalCache: clearLocalCache)
+        }
     }
 
     // MARK: - Account & Session
 
-    public func accountList() throws -> [KSAccountSummary] {
-        let json = try requireHandle().accountListJson()
-        return try decodeJSON(json)
+    public func accountList() async throws -> [KSAccountSummary] {
+        try await runBlocking {
+            let json = try self.requireHandleSync().accountListJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func accountSwitch(accountId: String) throws -> KSSessionState {
-        let json = try requireHandle().accountSwitchJson(accountId: accountId)
-        return try decodeJSON(json)
+    public func accountSwitch(accountId: String) async throws -> KSSessionState {
+        try await runBlocking {
+            let json = try self.requireHandleSync().accountSwitchJson(accountId: accountId)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func accountUpdateProfile(displayName: String) throws -> KSAccountSummary {
-        let json = try requireHandle().accountUpdateProfileJson(displayName: displayName)
-        return try decodeJSON(json)
+    public func accountUpdateProfile(displayName: String) async throws -> KSAccountSummary {
+        try await runBlocking {
+            let json = try self.requireHandleSync().accountUpdateProfileJson(displayName: displayName)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func sessionGetState() throws -> KSSessionState {
-        let json = try requireHandle().sessionGetStateJson()
-        return try decodeJSON(json)
+    public func sessionGetState() async throws -> KSSessionState {
+        try await runBlocking {
+            let json = try self.requireHandleSync().sessionGetStateJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func sessionUpdatePreferences(_ patch: KSSessionPreferencesPatch) throws -> KSSessionState {
-        let patchJSON = try encodeJSON(patch)
-        let json = try requireHandle().sessionUpdatePreferencesJson(patchJson: patchJSON)
-        return try decodeJSON(json)
+    public func sessionUpdatePreferences(_ patch: KSSessionPreferencesPatch) async throws -> KSSessionState {
+        try await runBlocking {
+            let patchJSON = try self.encodeJSON(patch)
+            let json = try self.requireHandleSync().sessionUpdatePreferencesJson(patchJson: patchJSON)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func sessionUnlockPassword(_ password: String) throws -> KSSessionState {
-        let json = try requireHandle().sessionUnlockPasswordJson(password: password)
-        return try decodeJSON(json)
+    public func sessionUnlockPassword(_ password: String) async throws -> KSSessionState {
+        try await runBlocking {
+            let json = try self.requireHandleSync().sessionUnlockPasswordJson(password: password)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func sessionUnlockBiometric() throws -> KSSessionState {
-        let json = try requireHandle().sessionUnlockBiometricJson()
-        return try decodeJSON(json)
+    public func sessionUnlockBiometric() async throws -> KSSessionState {
+        try await runBlocking {
+            let json = try self.requireHandleSync().sessionUnlockBiometricJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func sessionVerifyUserPresence(reason: String) throws {
-        try requireHandle().sessionVerifyUserPresence(reason: reason)
+    public func sessionVerifyUserPresence(reason: String) async throws {
+        try await runBlocking {
+            try self.requireHandleSync().sessionVerifyUserPresence(reason: reason)
+        }
     }
 
-    public func sessionLock(reason: String) throws {
-        try requireHandle().sessionLock(reason: reason)
+    public func sessionLock(reason: String) async throws {
+        try await runBlocking {
+            try self.requireHandleSync().sessionLock(reason: reason)
+        }
     }
 
-    public func sessionTouchActivity() throws {
-        try requireHandle().sessionTouchActivity()
+    public func sessionTouchActivity() async throws {
+        try await runBlocking {
+            try self.requireHandleSync().sessionTouchActivity()
+        }
     }
 
-    public func checkAutoLock() throws -> Bool {
-        try requireHandle().checkAutoLock()
+    public func checkAutoLock() async throws -> Bool {
+        try await runBlocking {
+            try self.requireHandleSync().checkAutoLock()
+        }
     }
 
     // MARK: - Vaults & Items
 
-    public func vaultList() throws -> [KSVault] {
-        let json = try requireHandle().vaultListJson()
-        return try decodeJSON(json)
+    public func vaultList() async throws -> [KSVault] {
+        try await runBlocking {
+            let json = try self.requireHandleSync().vaultListJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func vaultCreate(name: String, icon: String, color: String) throws -> KSVault {
-        let json = try requireHandle().vaultCreateJson(name: name, icon: icon, color: color)
-        return try decodeJSON(json)
+    public func vaultCreate(name: String, icon: String, color: String) async throws -> KSVault {
+        try await runBlocking {
+            let json = try self.requireHandleSync().vaultCreateJson(name: name, icon: icon, color: color)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func vaultRename(id: String, name: String) throws -> KSVault {
-        let json = try requireHandle().vaultRenameJson(id: id, name: name)
-        return try decodeJSON(json)
+    public func vaultRename(id: String, name: String) async throws -> KSVault {
+        try await runBlocking {
+            let json = try self.requireHandleSync().vaultRenameJson(id: id, name: name)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func vaultSetTravelSafe(id: String, travelSafe: Bool) throws -> KSVault {
-        let json = try requireHandle().vaultSetTravelSafeJson(id: id, travelSafe: travelSafe)
-        return try decodeJSON(json)
+    public func vaultSetTravelSafe(id: String, travelSafe: Bool) async throws -> KSVault {
+        try await runBlocking {
+            let json = try self.requireHandleSync().vaultSetTravelSafeJson(id: id, travelSafe: travelSafe)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func vaultDelete(id: String) throws {
-        try requireHandle().vaultDelete(id: id)
+    public func vaultDelete(id: String) async throws {
+        try await runBlocking {
+            try self.requireHandleSync().vaultDelete(id: id)
+        }
     }
 
-    public func itemList(filter: KSItemFilter = KSItemFilter()) throws -> [KSItemSummary] {
-        let filterJSON = try encodeJSON(filter)
-        let json = try requireHandle().itemListJson(filterJson: filterJSON)
-        return try decodeJSON(json)
+    public func itemList(filter: KSItemFilter = KSItemFilter()) async throws -> [KSItemSummary] {
+        try await runBlocking {
+            let filterJSON = try self.encodeJSON(filter)
+            let json = try self.requireHandleSync().itemListJson(filterJson: filterJSON)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func itemGet(id: String) throws -> KSItemDetail? {
-        let json = try requireHandle().itemGetJson(id: id)
-        if json == "null" || json.isEmpty { return nil }
-        return try decodeJSON(json)
+    public func itemGet(id: String) async throws -> KSItemDetail? {
+        try await runBlocking {
+            let json = try self.requireHandleSync().itemGetJson(id: id)
+            if json == "null" || json.isEmpty { return nil }
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func itemCreate(_ draft: KSItemDraft) throws -> KSItemDetail {
-        let draftJSON = try encodeJSON(draft)
-        let json = try requireHandle().itemCreateJson(draftJson: draftJSON)
-        return try decodeJSON(json)
+    public func itemCreate(_ draft: KSItemDraft) async throws -> KSItemDetail {
+        try await runBlocking {
+            let draftJSON = try self.encodeJSON(draft)
+            let json = try self.requireHandleSync().itemCreateJson(draftJson: draftJSON)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func itemUpdate(id: String, draft: KSItemDraft) throws -> KSItemDetail {
-        let draftJSON = try encodeJSON(draft)
-        let json = try requireHandle().itemUpdateJson(id: id, draftJson: draftJSON)
-        return try decodeJSON(json)
+    public func itemUpdate(id: String, draft: KSItemDraft) async throws -> KSItemDetail {
+        try await runBlocking {
+            let draftJSON = try self.encodeJSON(draft)
+            let json = try self.requireHandleSync().itemUpdateJson(id: id, draftJson: draftJSON)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func itemToggleFavorite(id: String) throws -> KSItemDetail {
-        let json = try requireHandle().itemToggleFavoriteJson(id: id)
-        return try decodeJSON(json)
+    public func itemToggleFavorite(id: String) async throws -> KSItemDetail {
+        try await runBlocking {
+            let json = try self.requireHandleSync().itemToggleFavoriteJson(id: id)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func itemTrash(id: String) throws {
-        try requireHandle().itemTrash(id: id)
+    public func itemTrash(id: String) async throws {
+        try await runBlocking {
+            try self.requireHandleSync().itemTrash(id: id)
+        }
     }
 
-    public func itemRestore(id: String) throws {
-        try requireHandle().itemRestore(id: id)
+    public func itemRestore(id: String) async throws {
+        try await runBlocking {
+            try self.requireHandleSync().itemRestore(id: id)
+        }
     }
 
-    public func itemDeletePermanent(id: String) throws {
-        try requireHandle().itemDeletePermanent(id: id)
+    public func itemDeletePermanent(id: String) async throws {
+        try await runBlocking {
+            try self.requireHandleSync().itemDeletePermanent(id: id)
+        }
     }
 
-    public func itemEmptyTrash() throws -> UInt32 {
-        try requireHandle().itemEmptyTrash()
+    public func itemEmptyTrash() async throws -> UInt32 {
+        try await runBlocking {
+            try self.requireHandleSync().itemEmptyTrash()
+        }
     }
 
     // MARK: - Sync & Tools
 
-    public func syncGetStatus() throws -> KSSyncStatus {
-        let json = try requireHandle().syncGetStatusJson()
-        return try decodeJSON(json)
+    public func syncGetStatus() async throws -> KSSyncStatus {
+        try await runBlocking {
+            let json = try self.requireHandleSync().syncGetStatusJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func syncNow() throws -> KSSyncStatus {
-        let json = try requireHandle().syncNowJson()
-        return try decodeJSON(json)
+    public func syncNow() async throws -> KSSyncStatus {
+        try await runBlocking {
+            let json = try self.requireHandleSync().syncNowJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func checkAndSyncIfChanged(syncOnUnknown: Bool) throws -> KSSyncStatus {
-        let json = try requireHandle().checkAndSyncIfChangedJson(syncOnUnknown: syncOnUnknown)
-        return try decodeJSON(json)
+    public func checkAndSyncIfChanged(syncOnUnknown: Bool) async throws -> KSSyncStatus {
+        try await runBlocking {
+            let json = try self.requireHandleSync().checkAndSyncIfChangedJson(syncOnUnknown: syncOnUnknown)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func totpCompute(secretOrUri: String) throws -> KSTotpCode {
-        let json = try requireHandle().totpComputeJson(secretOrUri: secretOrUri)
-        return try decodeJSON(json)
+    public func totpCompute(secretOrUri: String) async throws -> KSTotpCode {
+        try await runBlocking {
+            let json = try self.requireHandleSync().totpComputeJson(secretOrUri: secretOrUri)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func totpParseQrImage(data: Data) throws -> String {
-        let b64 = data.base64EncodedString()
-        return try requireHandle().totpParseQrImage(imageBase64: b64)
+    public func totpParseQrImage(data: Data) async throws -> String {
+        try await runBlocking {
+            let b64 = data.base64EncodedString()
+            return try self.requireHandleSync().totpParseQrImage(imageBase64: b64)
+        }
     }
 
-    public func generatorGenerate(options: KSGeneratorOptions) throws -> KSGeneratorResult {
-        let optsJSON = try encodeJSON(options)
-        let json = try requireHandle().generatorGenerateJson(optionsJson: optsJSON)
-        return try decodeJSON(json)
+    public func generatorGenerate(options: KSGeneratorOptions) async throws -> KSGeneratorResult {
+        try await runBlocking {
+            let optsJSON = try self.encodeJSON(options)
+            let json = try self.requireHandleSync().generatorGenerateJson(optionsJson: optsJSON)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func generatorHistoryList() throws -> [KSGeneratorHistoryEntry] {
-        let json = try requireHandle().generatorHistoryListJson()
-        return try decodeJSON(json)
+    public func generatorHistoryList() async throws -> [KSGeneratorHistoryEntry] {
+        try await runBlocking {
+            let json = try self.requireHandleSync().generatorHistoryListJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func generatorHistoryClear() throws {
-        try requireHandle().generatorHistoryClear()
+    public func generatorHistoryClear() async throws {
+        try await runBlocking {
+            try self.requireHandleSync().generatorHistoryClear()
+        }
     }
 
-    public func watchtowerScan(checkHibp: Bool) throws -> KSWatchtowerReport {
-        let json = try requireHandle().watchtowerScanJson(checkHibp: checkHibp)
-        return try decodeJSON(json)
+    public func watchtowerScan(checkHibp: Bool) async throws -> KSWatchtowerReport {
+        try await runBlocking {
+            let json = try self.requireHandleSync().watchtowerScanJson(checkHibp: checkHibp)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func sendList() throws -> [KSSendItem] {
-        let json = try requireHandle().sendListJson()
-        return try decodeJSON(json)
+    public func sendList() async throws -> [KSSendItem] {
+        try await runBlocking {
+            let json = try self.requireHandleSync().sendListJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func sendCreateText(_ input: KSSendCreateTextInput) throws -> KSSendItem {
-        let inputJSON = try encodeJSON(input)
-        let json = try requireHandle().sendCreateTextJson(inputJson: inputJSON)
-        return try decodeJSON(json)
+    public func sendCreateText(_ input: KSSendCreateTextInput) async throws -> KSSendItem {
+        try await runBlocking {
+            let inputJSON = try self.encodeJSON(input)
+            let json = try self.requireHandleSync().sendCreateTextJson(inputJson: inputJSON)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func sendDelete(id: String) throws {
-        try requireHandle().sendDelete(id: id)
+    public func sendDelete(id: String) async throws {
+        try await runBlocking {
+            try self.requireHandleSync().sendDelete(id: id)
+        }
     }
 
-    public func vaultExportEmergencyKit() throws -> KSExportResult {
-        let json = try requireHandle().vaultExportEmergencyKitJson()
-        return try decodeJSON(json)
+    public func vaultExportEmergencyKit() async throws -> KSExportResult {
+        try await runBlocking {
+            let json = try self.requireHandleSync().vaultExportEmergencyKitJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func snapshotList() throws -> [KSLocalSnapshotInfo] {
-        let json = try requireHandle().snapshotListJson()
-        return try decodeJSON(json)
+    public func snapshotList() async throws -> [KSLocalSnapshotInfo] {
+        try await runBlocking {
+            let json = try self.requireHandleSync().snapshotListJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func snapshotCreate() throws -> KSLocalSnapshotInfo {
-        let json = try requireHandle().snapshotCreateJson()
-        return try decodeJSON(json)
+    public func snapshotCreate() async throws -> KSLocalSnapshotInfo {
+        try await runBlocking {
+            let json = try self.requireHandleSync().snapshotCreateJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func snapshotDelete(id: String) throws {
-        try requireHandle().snapshotDelete(id: id)
+    public func snapshotDelete(id: String) async throws {
+        try await runBlocking {
+            try self.requireHandleSync().snapshotDelete(id: id)
+        }
     }
 
-    public func appSettingsGet() throws -> KSAppSettings {
-        let json = try requireHandle().appSettingsGetJson()
-        return try decodeJSON(json)
+    public func appSettingsGet() async throws -> KSAppSettings {
+        try await runBlocking {
+            let json = try self.requireHandleSync().appSettingsGetJson()
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func appSettingsUpdate(_ patch: KSAppSettingsPatch) throws -> KSAppSettings {
-        let patchJSON = try encodeJSON(patch)
-        let json = try requireHandle().appSettingsUpdateJson(patchJson: patchJSON)
-        return try decodeJSON(json)
+    public func appSettingsUpdate(_ patch: KSAppSettingsPatch) async throws -> KSAppSettings {
+        try await runBlocking {
+            let patchJSON = try self.encodeJSON(patch)
+            let json = try self.requireHandleSync().appSettingsUpdateJson(patchJson: patchJSON)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func faviconFetch(host: String) throws -> String? {
-        try requireHandle().faviconFetch(host: host)
+    public func faviconFetch(host: String) async throws -> String? {
+        try await runBlocking(on: faviconQueue) {
+            try self.requireHandleSync().faviconFetch(host: host)
+        }
     }
 
-    public func clipboardCopySecret(text: String, label: String, isSensitive: Bool, clearAfterSecs: UInt64) throws {
-        try requireHandle().clipboardCopySecret(
-            text: text,
-            label: label,
-            isSensitive: isSensitive,
-            clearAfterSecs: clearAfterSecs
-        )
+    public func clipboardCopySecret(text: String, label: String, isSensitive: Bool, clearAfterSecs: UInt64) async throws {
+        try await runBlocking {
+            try self.requireHandleSync().clipboardCopySecret(
+                text: text,
+                label: label,
+                isSensitive: isSensitive,
+                clearAfterSecs: clearAfterSecs
+            )
+        }
     }
 
-    public func clipboardClearNow() throws {
-        try requireHandle().clipboardClearNow()
+    public func clipboardClearNow() async throws {
+        try await runBlocking {
+            try self.requireHandleSync().clipboardClearNow()
+        }
     }
 
-    public func checkpointStorage() throws {
-        try requireHandle().checkpointStorage()
+    public func checkpointStorage() async throws {
+        try await runBlocking {
+            try self.requireHandleSync().checkpointStorage()
+        }
     }
 
     // MARK: - Apple AutoFill / Passkey / TextToInsert / CXF
 
-    public func passkeyListForRp(rpId: String, allowCredentialIdsB64u: [String]) throws -> [KSPasskeyListCandidate] {
-        let json = try requireHandle().passkeyListForRpJson(
-            rpId: rpId,
-            allowCredentialIdsB64u: allowCredentialIdsB64u
-        )
-        return try decodeJSON(json)
+    public func passkeyListForRp(rpId: String, allowCredentialIdsB64u: [String]) async throws -> [KSPasskeyListCandidate] {
+        try await runBlocking {
+            let json = try self.requireHandleSync().passkeyListForRpJson(
+                rpId: rpId,
+                allowCredentialIdsB64u: allowCredentialIdsB64u
+            )
+            return try self.decodeJSON(json)
+        }
     }
 
     public func passkeyCreateApple(
@@ -381,61 +512,71 @@ public actor KeysmithCoreAdapter {
         userName: String,
         userDisplayName: String,
         targetItemId: String?
-    ) throws -> KSApplePasskeyRegistration {
-        let reg = try requireHandle().passkeyCreateApple(
-            clientDataHash: clientDataHash,
-            rpId: rpId,
-            rpName: rpName,
-            userId: userId,
-            userName: userName,
-            userDisplayName: userDisplayName,
-            targetItemId: targetItemId
-        )
-        return KSApplePasskeyRegistration(
-            credentialId: reg.credentialId,
-            attestationObject: reg.attestationObject,
-            clientDataHash: reg.clientDataHash,
-            itemId: reg.itemId
-        )
+    ) async throws -> KSApplePasskeyRegistration {
+        try await runBlocking {
+            let reg = try self.requireHandleSync().passkeyCreateApple(
+                clientDataHash: clientDataHash,
+                rpId: rpId,
+                rpName: rpName,
+                userId: userId,
+                userName: userName,
+                userDisplayName: userDisplayName,
+                targetItemId: targetItemId
+            )
+            return KSApplePasskeyRegistration(
+                credentialId: reg.credentialId,
+                attestationObject: reg.attestationObject,
+                clientDataHash: reg.clientDataHash,
+                itemId: reg.itemId
+            )
+        }
     }
 
     public func passkeyAssertApple(
         clientDataHash: Data,
         rpId: String,
         credentialId: Data
-    ) throws -> KSApplePasskeyAssertion {
-        let res = try requireHandle().passkeyAssertApple(
-            clientDataHash: clientDataHash,
-            rpId: rpId,
-            credentialId: credentialId
-        )
-        return KSApplePasskeyAssertion(
-            credentialId: res.credentialId,
-            userHandle: res.userHandle,
-            authenticatorData: res.authenticatorData,
-            signature: res.signature,
-            clientDataHash: res.clientDataHash
-        )
+    ) async throws -> KSApplePasskeyAssertion {
+        try await runBlocking {
+            let res = try self.requireHandleSync().passkeyAssertApple(
+                clientDataHash: clientDataHash,
+                rpId: rpId,
+                credentialId: credentialId
+            )
+            return KSApplePasskeyAssertion(
+                credentialId: res.credentialId,
+                userHandle: res.userHandle,
+                authenticatorData: res.authenticatorData,
+                signature: res.signature,
+                clientDataHash: res.clientDataHash
+            )
+        }
     }
 
-    public func textInsertCandidates(query: String) throws -> [KSTextInsertCandidate] {
-        let json = try requireHandle().textInsertCandidatesJson(query: query)
-        return try decodeJSON(json)
+    public func textInsertCandidates(query: String) async throws -> [KSTextInsertCandidate] {
+        try await runBlocking {
+            let json = try self.requireHandleSync().textInsertCandidatesJson(query: query)
+            return try self.decodeJSON(json)
+        }
     }
 
-    public func cxfExportBundleJson() throws -> String {
-        try requireHandle().cxfExportBundleJson()
+    public func cxfExportBundleJson() async throws -> String {
+        try await runBlocking {
+            try self.requireHandleSync().cxfExportBundleJson()
+        }
     }
 
-    public func cxfImportBundleJson(_ bundleJson: String) throws -> KSImportSummary {
-        let json = try requireHandle().cxfImportBundleJson(bundleJson: bundleJson)
-        return try decodeJSON(json)
+    public func cxfImportBundleJson(_ bundleJson: String) async throws -> KSImportSummary {
+        try await runBlocking {
+            let json = try self.requireHandleSync().cxfImportBundleJson(bundleJson: bundleJson)
+            return try self.decodeJSON(json)
+        }
     }
 
     // MARK: - Helpers
 
     private func encodeJSON<T: Encodable>(_ value: T) throws -> String {
-        let data = try encoder.encode(value)
+        let data = try JSONEncoder().encode(value)
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 
@@ -443,7 +584,7 @@ public actor KeysmithCoreAdapter {
         guard let data = json.data(using: .utf8) else {
             throw KSCoreAdapterError.backend("Invalid UTF-8 JSON payload")
         }
-        return try decoder.decode(T.self, from: data)
+        return try JSONDecoder().decode(T.self, from: data)
     }
 }
 
@@ -599,19 +740,58 @@ public enum LocalGeneratorEngine {
             let lower = options.excludeAmbiguous ? "abcdefghijkmnpqrstuvwxyz" : "abcdefghijklmnopqrstuvwxyz"
             let digits = options.excludeAmbiguous ? "23456789" : "0123456789"
             let symbols = "!@#$%^&*-_=+?"
-            var pool = upper + lower
+
+            var pool = ""
+            if options.includeUppercase { pool += upper }
+            if options.includeLowercase { pool += lower }
             if options.includeDigits { pool += digits }
             if options.includeSymbols { pool += symbols }
-            let chars = Array(pool)
+            if pool.isEmpty { pool = upper + lower }
+
+            let poolChars = Array(pool)
+            let digitChars = Array(digits)
+            let symbolChars = Array(symbols)
+            let upperChars = Array(upper)
+            let lowerChars = Array(lower)
             let len = max(8, min(64, options.length))
-            var out = ""
-            for _ in 0..<len {
-                out.append(chars[randomIndex(upperBound: chars.count)])
+
+            var resultChars: [Character] = []
+            if options.includeUppercase {
+                resultChars.append(upperChars[randomIndex(upperBound: upperChars.count)])
             }
-            let bits = Int(Double(len) * log2(Double(chars.count)))
+            if options.includeLowercase {
+                resultChars.append(lowerChars[randomIndex(upperBound: lowerChars.count)])
+            }
+            if options.includeDigits {
+                let targetDigits = max(0, min(len - resultChars.count, options.minDigits))
+                for _ in 0..<targetDigits {
+                    resultChars.append(digitChars[randomIndex(upperBound: digitChars.count)])
+                }
+            }
+            if options.includeSymbols {
+                let targetSymbols = max(0, min(len - resultChars.count, options.minSymbols))
+                for _ in 0..<targetSymbols {
+                    resultChars.append(symbolChars[randomIndex(upperBound: symbolChars.count)])
+                }
+            }
+            while resultChars.count < len {
+                resultChars.append(poolChars[randomIndex(upperBound: poolChars.count)])
+            }
+            // CSPRNG Fisher-Yates shuffle
+            if resultChars.count > 1 {
+                for i in stride(from: resultChars.count - 1, through: 1, by: -1) {
+                    let j = randomIndex(upperBound: i + 1)
+                    if i != j {
+                        resultChars.swapAt(i, j)
+                    }
+                }
+            }
+
+            let out = String(resultChars)
+            let bits = Int(Double(len) * log2(Double(max(2, poolChars.count))))
             return KSGeneratorResult(
                 value: out,
-                strength: KSPasswordStrength(score: bits >= 80 ? 4 : 3, label: bits >= 80 ? "Strong" : "Good", entropyBits: bits)
+                strength: KSPasswordStrength(score: bits >= 80 ? 4 : (bits >= 56 ? 3 : 2), label: bits >= 80 ? "Strong" : (bits >= 56 ? "Good" : "Fair"), entropyBits: bits)
             )
 
         case .passphrase:

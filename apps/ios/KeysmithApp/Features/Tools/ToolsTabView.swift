@@ -1,12 +1,11 @@
 import SwiftUI
 
-/// Tools tab combining the 3-color password/passphrase/PIN generator,
-/// Watchtower security dashboard, and encrypted Send share manager.
+/// Security Center tab combining the Watchtower security dashboard
+/// and encrypted Send share manager.
 public struct ToolsTabView: View {
     @Bindable var store: KeysmithStore
     let onOpenSettings: () -> Void
 
-    @State private var showHistorySheet = false
     @State private var showCreateSendSheet = false
     @State private var checkHibpOnScan = false
     @State private var isScanningWatchtower = false
@@ -20,7 +19,6 @@ public struct ToolsTabView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    generatorCard
                     watchtowerCard
                     sendCard
                 }
@@ -28,16 +26,7 @@ public struct ToolsTabView: View {
                 .padding(.vertical, 12)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(store.l10n.t(
-                zhCN: "工具与安全中心",
-                zhTW: "工具與安全中心",
-                en: "Tools & Security",
-                ja: "ツールとセキュリティ",
-                ko: "도구 및 보안",
-                de: "Werkzeuge & Sicherheit",
-                fr: "Outils et sécurité",
-                es: "Herramientas y seguridad"
-            ))
+            .navigationTitle(store.l10n.tabTools)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: onOpenSettings) {
@@ -51,266 +40,11 @@ public struct ToolsTabView: View {
                     await store.runWatchtowerScan(checkHibp: false)
                 }
                 await store.loadSends()
-                await store.loadGeneratorHistory()
-            }
-            .sheet(isPresented: $showHistorySheet) {
-                GeneratorHistorySheet(store: store)
             }
             .sheet(isPresented: $showCreateSendSheet) {
                 CreateTextSendSheet(store: store)
             }
         }
-    }
-
-    // MARK: - Password Generator Card
-
-    private var generatorCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label(
-                    store.l10n.t(
-                        zhCN: "密码生成器",
-                        zhTW: "密碼生成器",
-                        en: "Password Generator",
-                        ja: "パスワード生成",
-                        ko: "비밀번호 생성기"
-                    ),
-                    systemImage: "wand.and.stars"
-                )
-                .font(.headline)
-
-                Spacer()
-
-                Button {
-                    showHistorySheet = true
-                } label: {
-                    Label(
-                        store.l10n.t(zhCN: "历史", zhTW: "歷史", en: "History"),
-                        systemImage: "clock.arrow.circlepath"
-                    )
-                    .font(.caption.weight(.medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            Picker(
-                store.l10n.t(zhCN: "模式", en: "Mode"),
-                selection: Binding(
-                    get: { store.generatorOptions.mode },
-                    set: { mode in
-                        store.generatorOptions.mode = mode
-                        store.regeneratePassword()
-                    }
-                )
-            ) {
-                Text(store.l10n.t(zhCN: "密码", zhTW: "密碼", en: "Password")).tag(KSGeneratorMode.password)
-                Text(store.l10n.t(zhCN: "短语", zhTW: "片語", en: "Passphrase")).tag(KSGeneratorMode.passphrase)
-                Text("PIN").tag(KSGeneratorMode.pin)
-            }
-            .pickerStyle(.segmented)
-
-            VStack(alignment: .leading, spacing: 8) {
-                ColoredSecretText(
-                    text: store.generatorResult.value,
-                    font: .system(.title3, design: .monospaced).monospacedDigit()
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(.secondarySystemGroupedBackground))
-                )
-
-                HStack(spacing: 8) {
-                    strengthPill(store.generatorResult.strength)
-                    Spacer()
-                    Text("\(store.generatorResult.strength.entropyBits) bits")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            generatorControls
-
-            HStack(spacing: 10) {
-                Button {
-                    store.regeneratePassword()
-                } label: {
-                    Label(
-                        store.l10n.t(zhCN: "换一个", zhTW: "換一個", en: "Regenerate"),
-                        systemImage: "arrow.clockwise"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-
-                Button {
-                    store.copyToClipboard(
-                        store.generatorResult.value,
-                        label: store.l10n.t(zhCN: "新密码", zhTW: "新密碼", en: "Generated Password"),
-                        isSensitive: true
-                    )
-                } label: {
-                    Label(store.l10n.copy, systemImage: "doc.on.doc")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(KeysmithColors.accent)
-            }
-        }
-        .padding(16)
-        .background(cardBackground)
-    }
-
-    @ViewBuilder
-    private var generatorControls: some View {
-        switch store.generatorOptions.mode {
-        case .password:
-            VStack(spacing: 10) {
-                HStack {
-                    Text(store.l10n.t(zhCN: "长度", zhTW: "長度", en: "Length"))
-                        .font(.subheadline)
-                    Spacer()
-                    Text("\(clampedPasswordLength) \(store.l10n.t(zhCN: "位", en: "chars"))")
-                        .font(.subheadline.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(KeysmithColors.accent)
-                }
-
-                Slider(
-                    value: Binding(
-                        get: { Double(clampedPasswordLength) },
-                        set: { newVal in
-                            let rounded = Int(newVal.rounded())
-                            if store.generatorOptions.length != rounded {
-                                store.generatorOptions.length = rounded
-                                store.regeneratePassword()
-                            }
-                        }
-                    ),
-                    in: 12...32,
-                    step: 1
-                )
-                .tint(KeysmithColors.accent)
-
-                Toggle(
-                    store.l10n.t(zhCN: "包含数字 (0-9)", zhTW: "包含數字 (0-9)", en: "Include Digits (0-9)"),
-                    isOn: Binding(
-                        get: { store.generatorOptions.includeDigits },
-                        set: { val in
-                            store.generatorOptions.includeDigits = val
-                            store.regeneratePassword()
-                        }
-                    )
-                )
-                .font(.subheadline)
-
-                Toggle(
-                    store.l10n.t(zhCN: "包含特殊符号 (!@#$)", zhTW: "包含特殊符號 (!@#$)", en: "Include Symbols (!@#$)"),
-                    isOn: Binding(
-                        get: { store.generatorOptions.includeSymbols },
-                        set: { val in
-                            store.generatorOptions.includeSymbols = val
-                            store.regeneratePassword()
-                        }
-                    )
-                )
-                .font(.subheadline)
-
-                Toggle(
-                    store.l10n.t(zhCN: "排除易混淆字符 (0O / 1lI)", zhTW: "排除易混淆字元 (0O / 1lI)", en: "Exclude Ambiguous (0O / 1lI)"),
-                    isOn: Binding(
-                        get: { store.generatorOptions.excludeAmbiguous },
-                        set: { val in
-                            store.generatorOptions.excludeAmbiguous = val
-                            store.regeneratePassword()
-                        }
-                    )
-                )
-                .font(.subheadline)
-            }
-
-        case .passphrase:
-            VStack(spacing: 10) {
-                Stepper(
-                    value: Binding(
-                        get: { store.generatorOptions.wordCount },
-                        set: { val in
-                            store.generatorOptions.wordCount = val
-                            store.regeneratePassword()
-                        }
-                    ),
-                    in: 3...10
-                ) {
-                    Text(store.l10n.t(
-                        zhCN: "词数：\(store.generatorOptions.wordCount) 个单词",
-                        en: "Words: \(store.generatorOptions.wordCount)"
-                    ))
-                    .font(.subheadline)
-                }
-
-                Toggle(
-                    store.l10n.t(zhCN: "首字母大写", en: "Capitalize Words"),
-                    isOn: Binding(
-                        get: { store.generatorOptions.capitalize },
-                        set: { val in
-                            store.generatorOptions.capitalize = val
-                            store.regeneratePassword()
-                        }
-                    )
-                )
-                .font(.subheadline)
-
-                Toggle(
-                    store.l10n.t(zhCN: "附加随机数字", en: "Include Number"),
-                    isOn: Binding(
-                        get: { store.generatorOptions.includeNumberInPhrase },
-                        set: { val in
-                            store.generatorOptions.includeNumberInPhrase = val
-                            store.regeneratePassword()
-                        }
-                    )
-                )
-                .font(.subheadline)
-            }
-
-        case .pin:
-            Stepper(
-                value: Binding(
-                    get: { store.generatorOptions.pinLength },
-                    set: { val in
-                        store.generatorOptions.pinLength = val
-                        store.regeneratePassword()
-                    }
-                ),
-                in: 4...12
-            ) {
-                Text(store.l10n.t(
-                    zhCN: "PIN 位数：\(store.generatorOptions.pinLength) 位",
-                    en: "PIN Length: \(store.generatorOptions.pinLength)"
-                ))
-                .font(.subheadline)
-            }
-        }
-    }
-
-    private var clampedPasswordLength: Int {
-        min(32, max(12, store.generatorOptions.length))
-    }
-
-    private func strengthPill(_ strength: KSPasswordStrength) -> some View {
-        let color: Color = switch strength.score {
-        case 4...: KeysmithColors.success
-        case 3: KeysmithColors.accent
-        case 2: KeysmithColors.warning
-        default: KeysmithColors.danger
-        }
-        return Text(strength.label)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.14), in: Capsule())
-            .foregroundStyle(color)
     }
 
     // MARK: - Watchtower Dashboard Card
@@ -531,7 +265,11 @@ public struct ToolsTabView: View {
 
             HStack(spacing: 8) {
                 Button {
-                    store.copyToClipboard(send.shareUrl, label: "\(send.name) 链接", isSensitive: false)
+                    store.copyToClipboard(
+                        send.shareUrl,
+                        label: store.l10n.t(zhCN: "\(send.name) 链接", en: "\(send.name) Link"),
+                        isSensitive: false
+                    )
                 } label: {
                     Label(store.l10n.t(zhCN: "复制链接", en: "Copy Link"), systemImage: "link")
                         .font(.caption.weight(.medium))
@@ -581,67 +319,6 @@ public struct ToolsTabView: View {
     }
 }
 
-// MARK: - Generator History Sheet
-
-private struct GeneratorHistorySheet: View {
-    @Bindable var store: KeysmithStore
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if store.generatorHistory.isEmpty {
-                    ContentUnavailableView(
-                        store.l10n.t(zhCN: "暂无生成历史", en: "No Generator History"),
-                        systemImage: "clock.arrow.circlepath",
-                        description: Text(store.l10n.t(
-                            zhCN: "生成的密码会以密文形式安全保存在本地。",
-                            en: "Generated passwords are stored locally in encrypted form."
-                        ))
-                    )
-                } else {
-                    List(store.generatorHistory) { entry in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                ColoredSecretText(
-                                    text: entry.value,
-                                    font: .system(.subheadline, design: .monospaced)
-                                )
-                                Text("\(entry.mode) · \(entry.entropyBits) bits · \(String(entry.createdAt.prefix(16)))")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button(store.l10n.copy) {
-                                store.copyToClipboard(entry.value, label: "历史密码", isSensitive: true)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-                }
-            }
-            .navigationTitle(store.l10n.t(zhCN: "生成历史", en: "Generator History"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if !store.generatorHistory.isEmpty {
-                        Button(store.l10n.clearClipboard, role: .destructive) {
-                            Task { await store.clearGeneratorHistory() }
-                        }
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(store.l10n.done) { dismiss() }
-                }
-            }
-            .task {
-                await store.loadGeneratorHistory()
-            }
-        }
-    }
-}
-
 // MARK: - Create Text Send Sheet
 
 private struct CreateTextSendSheet: View {
@@ -672,14 +349,14 @@ private struct CreateTextSendSheet: View {
 
                 Section(store.l10n.t(zhCN: "访问控制", en: "Access Control")) {
                     Picker(store.l10n.t(zhCN: "自动删除时间", en: "Deletion Delay"), selection: $deletionDays) {
-                        Text("1 天").tag(1)
-                        Text("7 天").tag(7)
-                        Text("30 天").tag(30)
+                        Text(store.l10n.t(zhCN: "1 天", en: "1 day")).tag(1)
+                        Text(store.l10n.t(zhCN: "7 天", en: "7 days")).tag(7)
+                        Text(store.l10n.t(zhCN: "30 天", en: "30 days")).tag(30)
                     }
                     Toggle(store.l10n.t(zhCN: "限制最大访问次数", en: "Limit Access Count"), isOn: $maxAccessEnabled)
                     if maxAccessEnabled {
                         Stepper(value: $maxAccessCount, in: 1...50) {
-                            Text("最多 \(maxAccessCount) 次")
+                            Text(store.l10n.t(zhCN: "最多 \(maxAccessCount) 次", en: "Max \(maxAccessCount) views"))
                         }
                     }
                     SecureField(store.l10n.t(zhCN: "可选访问密码", en: "Optional password"), text: $password)

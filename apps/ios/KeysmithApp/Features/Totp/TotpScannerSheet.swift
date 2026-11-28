@@ -7,6 +7,7 @@ import UIKit
 /// Scans TOTP `otpauth://` QR codes from live camera (`AVCaptureSession`),
 /// photo library (`PhotosPicker`), or clipboard image purely in memory (zero disk writes).
 public struct TotpScannerSheet: View {
+    public let l10n: KSLocalizedStrings
     let parseQrData: (@Sendable (Data) async throws -> String)?
     let onScanned: (String) -> Void
 
@@ -18,9 +19,11 @@ public struct TotpScannerSheet: View {
     @State private var cameraUnavailable = false
 
     public init(
+        l10n: KSLocalizedStrings = KSLocalizedStrings(languageCode: "system"),
         parseQrData: (@Sendable (Data) async throws -> String)? = nil,
         onScanned: @escaping (String) -> Void
     ) {
+        self.l10n = l10n
         self.parseQrData = parseQrData
         self.onScanned = onScanned
     }
@@ -32,7 +35,7 @@ public struct TotpScannerSheet: View {
 
                 VStack(spacing: 10) {
                     PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                        Label("从相册选择二维码图片", systemImage: "photo.on.rectangle")
+                        Label(l10n.t(zhCN: "从相册选择二维码图片", en: "Choose QR Photo"), systemImage: "photo.on.rectangle")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -41,7 +44,7 @@ public struct TotpScannerSheet: View {
                     Button {
                         Task { await decodeClipboardImage() }
                     } label: {
-                        Label("从剪贴板图片识别", systemImage: "doc.on.clipboard")
+                        Label(l10n.t(zhCN: "从剪贴板图片识别", en: "Scan Image from Clipboard"), systemImage: "doc.on.clipboard")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -61,17 +64,20 @@ public struct TotpScannerSheet: View {
                         .multilineTextAlignment(.center)
                 }
 
-                Text("纯内存解码 otpauth:// URI，所有图像仅在内存中处理，绝不写入磁盘。")
+                Text(l10n.t(
+                    zhCN: "纯内存解码 otpauth:// URI，所有图像仅在内存中处理，绝不写入磁盘。",
+                    en: "Decodes otpauth:// URIs strictly in memory; images are never written to disk."
+                ))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
             .padding(20)
-            .navigationTitle("扫描 TOTP 二维码")
+            .navigationTitle(l10n.t(zhCN: "扫描 TOTP 二维码", en: "Scan TOTP QR Code"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("取消") { dismiss() }
+                    Button(l10n.cancel) { dismiss() }
                 }
             }
             .onChange(of: selectedPhoto) { _, item in
@@ -126,7 +132,7 @@ public struct TotpScannerSheet: View {
                 let demoUri = "otpauth://totp/GitHub:dev@keysmith.app?secret=JBSWY3DPEHPK3PXP&issuer=GitHub"
                 handleDecodedPayload(demoUri)
             } label: {
-                Label("模拟识别 GitHub TOTP 二维码", systemImage: "checkmark.seal.fill")
+                Label(l10n.t(zhCN: "模拟识别 GitHub TOTP 二维码", en: "Simulate GitHub TOTP QR"), systemImage: "checkmark.seal.fill")
                     .font(.subheadline.weight(.semibold))
             }
             .buttonStyle(.borderedProminent)
@@ -147,7 +153,7 @@ public struct TotpScannerSheet: View {
 
         do {
             guard let data = try await item.loadTransferable(type: Data.self) else {
-                errorMessage = "无法读取所选图片的内存数据"
+                errorMessage = l10n.t(zhCN: "无法读取所选图片的内存数据", en: "Unable to load selected image data")
                 return
             }
             try await decodeImageDataInMemory(data)
@@ -159,7 +165,7 @@ public struct TotpScannerSheet: View {
     private func decodeClipboardImage() async {
         errorMessage = nil
         guard let image = UIPasteboard.general.image, let pngData = image.pngData() else {
-            errorMessage = "剪贴板中没有可识别的图片"
+            errorMessage = l10n.t(zhCN: "剪贴板中没有可识别的图片", en: "No image found on clipboard")
             return
         }
         isDecoding = true
@@ -200,7 +206,7 @@ public struct TotpScannerSheet: View {
     private func handleDecodedPayload(_ payload: String) {
         let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        statusMessage = "已识别 TOTP 密钥"
+        statusMessage = l10n.t(zhCN: "已识别 TOTP 密钥", en: "TOTP Secret Detected")
         #if canImport(UIKit)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         #endif

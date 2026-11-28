@@ -63,6 +63,17 @@ public final class AppleBiometricKeyStore: @unchecked Sendable {
         }
 
         var status = SecItemAdd(query as CFDictionary, nil)
+        if status == errSecMissingEntitlement, query[kSecAttrAccessGroup as String] != nil {
+            // Retry without shared Access Group first so private hardware Keychain + BiometryCurrentSet still works on Personal Team devices.
+            query.removeValue(forKey: kSecAttrAccessGroup as String)
+            SecItemDelete([
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: accountId,
+            ] as CFDictionary)
+            status = SecItemAdd(query as CFDictionary, nil)
+        }
+        #if targetEnvironment(simulator)
         if status == errSecMissingEntitlement {
             // Unsigned Simulator (-34018): retry without Access Group / AccessControl ACL.
             var simQuery: [String: Any] = [
@@ -80,6 +91,7 @@ public final class AppleBiometricKeyStore: @unchecked Sendable {
                 return
             }
         }
+        #endif
 
         guard status == errSecSuccess else {
             throw KSBiometricError.keychainError(status)
@@ -100,6 +112,12 @@ public final class AppleBiometricKeyStore: @unchecked Sendable {
 
         var result: CFTypeRef?
         var status = SecItemCopyMatching(query as CFDictionary, &result)
+        if (status == errSecMissingEntitlement || status == errSecItemNotFound),
+           query[kSecAttrAccessGroup as String] != nil {
+            query.removeValue(forKey: kSecAttrAccessGroup as String)
+            status = SecItemCopyMatching(query as CFDictionary, &result)
+        }
+        #if targetEnvironment(simulator)
         if status == errSecMissingEntitlement || status == errSecItemNotFound {
             let simQuery: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
@@ -115,6 +133,7 @@ public final class AppleBiometricKeyStore: @unchecked Sendable {
                 }
             }
         }
+        #endif
 
         guard status == errSecSuccess, let data = result as? Data else {
             throw KSBiometricError.keychainError(status)
@@ -131,7 +150,9 @@ public final class AppleBiometricKeyStore: @unchecked Sendable {
             kSecAttrAccount as String: accountId,
         ]
         SecItemDelete(simQuery as CFDictionary)
+        #if targetEnvironment(simulator)
         deleteSimulatorFallbackKey(accountId: accountId)
+        #endif
 
         if status != errSecSuccess && status != errSecItemNotFound && status != errSecMissingEntitlement {
             throw KSBiometricError.keychainError(status)
@@ -186,6 +207,7 @@ public final class AppleBiometricKeyStore: @unchecked Sendable {
         return query
     }
 
+    #if targetEnvironment(simulator)
     // MARK: - Unsigned Simulator Fallback (-34018)
 
     private func fallbackURL(accountId: String) -> URL {
@@ -211,4 +233,5 @@ public final class AppleBiometricKeyStore: @unchecked Sendable {
         defer { fallbackLock.unlock() }
         try? FileManager.default.removeItem(at: fallbackURL(accountId: accountId))
     }
+    #endif
 }

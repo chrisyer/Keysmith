@@ -21,10 +21,14 @@ public enum AppConfig {
     }
 
     public static func resolvedKeychainAccessGroup() -> String? {
+        #if KEYSMITH_PERSONAL_BUILD
+        return nil
+        #else
         if let prefix = Bundle.main.infoDictionary?["AppIdentifierPrefix"] as? String, !prefix.isEmpty {
             return "\(prefix)\(keychainAccessGroup)"
         }
         return nil
+        #endif
     }
 
     public static func sharedContainerDirectory() -> URL {

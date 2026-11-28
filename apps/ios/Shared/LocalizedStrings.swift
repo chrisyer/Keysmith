@@ -61,7 +61,7 @@ public struct KSLocalizedStrings: Sendable {
         t(zhCN: "项目", zhTW: "項目", en: "Items", ja: "項目", ko: "항목", de: "Einträge", fr: "Éléments", es: "Elementos")
     }
     public var tabTools: String {
-        t(zhCN: "工具", zhTW: "工具", en: "Tools", ja: "ツール", ko: "도구", de: "Werkzeuge", fr: "Outils", es: "Herramientas")
+        t(zhCN: "安全中心", zhTW: "安全中心", en: "Security", ja: "セキュリティ", ko: "보안", de: "Sicherheit", fr: "Sécurité", es: "Seguridad")
     }
     public var tabSearch: String {
         t(zhCN: "搜索", zhTW: "搜尋", en: "Search", ja: "検索", ko: "검색", de: "Suche", fr: "Rechercher", es: "Buscar")
@@ -121,6 +121,9 @@ public struct KSLocalizedStrings: Sendable {
     }
     public var done: String {
         t(zhCN: "完成", zhTW: "完成", en: "Done", ja: "完了", ko: "완료", de: "Fertig", fr: "Terminé", es: "Listo")
+    }
+    public var close: String {
+        t(zhCN: "关闭", zhTW: "關閉", en: "Close", ja: "閉じる", ko: "닫기", de: "Schließen", fr: "Fermer", es: "Cerrar")
     }
 
     // MARK: - Auth & Lock

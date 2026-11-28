@@ -10,9 +10,11 @@ struct SettingsAccountsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("已登录账号") {
+                Section(store.l10n.t(zhCN: "已登录账号", zhTW: "已登入帳戶", en: "Signed-in Accounts")) {
                     if store.accounts.isEmpty {
-                        Text(store.session.email.isEmpty ? "当前未登录账号" : store.session.email)
+                        Text(store.session.email.isEmpty
+                             ? store.l10n.t(zhCN: "当前未登录账号", en: "No active account")
+                             : store.session.email)
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(store.accounts) { account in
@@ -60,10 +62,16 @@ struct SettingsAccountsSheet: View {
                             dismiss()
                         }
                     } label: {
-                        Label("添加或登录其他 Vaultwarden 账号", systemImage: "person.badge.plus")
+                        Label(
+                            store.l10n.t(zhCN: "添加或登录其他 Vaultwarden 账号", en: "Add or Sign In to Another Account"),
+                            systemImage: "person.badge.plus"
+                        )
                     }
                 } footer: {
-                    Text("切换前会保留当前账号的离线密文库与本地隔离配置。")
+                    Text(store.l10n.t(
+                        zhCN: "切换前会保留当前账号的离线密文库与本地隔离配置。",
+                        en: "Your current account's offline encrypted vault stays isolated when switching."
+                    ))
                 }
 
                 if let errorMessage {
@@ -74,7 +82,7 @@ struct SettingsAccountsSheet: View {
                     }
                 }
             }
-            .navigationTitle("账号管理")
+            .navigationTitle(store.l10n.t(zhCN: "账号管理", zhTW: "帳戶管理", en: "Accounts"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -99,10 +107,10 @@ struct SettingsVaultsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("新建保险库") {
+                Section(store.l10n.t(zhCN: "新建保险库", zhTW: "新增保險庫", en: "New Vault")) {
                     HStack {
-                        TextField("保险库名称", text: $newVaultName)
-                        Button("创建") {
+                        TextField(store.l10n.t(zhCN: "保险库名称", en: "Vault name"), text: $newVaultName)
+                        Button(store.l10n.t(zhCN: "创建", en: "Create")) {
                             let name = newVaultName.trimmingCharacters(in: .whitespacesAndNewlines)
                             guard !name.isEmpty else { return }
                             Task {
@@ -118,7 +126,7 @@ struct SettingsVaultsSheet: View {
                     }
                 }
 
-                Section("保险库与旅行安全标记") {
+                Section(store.l10n.t(zhCN: "保险库与旅行安全标记", en: "Vaults & Travel Safe")) {
                     ForEach(store.vaults) { vault in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
@@ -128,14 +136,14 @@ struct SettingsVaultsSheet: View {
                                 Text(vault.name)
                                     .font(.subheadline.weight(.semibold))
                                 if vault.isDefault {
-                                    Text("默认")
+                                    Text(store.l10n.t(zhCN: "默认", en: "Default"))
                                         .font(.caption2)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 1)
                                         .background(Color(.tertiarySystemFill), in: Capsule())
                                 }
                                 if vault.isOrganization {
-                                    Text("组织")
+                                    Text(store.l10n.t(zhCN: "组织", en: "Org"))
                                         .font(.caption2)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 1)
@@ -143,13 +151,13 @@ struct SettingsVaultsSheet: View {
                                         .foregroundStyle(KeysmithColors.accent)
                                 }
                                 Spacer()
-                                Text("\(vault.itemCount) 项")
+                                Text(store.l10n.t(zhCN: "\(vault.itemCount) 项", en: "\(vault.itemCount) items"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
 
                             Toggle(
-                                "旅行安全 (Travel Safe)",
+                                store.l10n.t(zhCN: "旅行安全 (Travel Safe)", en: "Travel Safe"),
                                 isOn: Binding(
                                     get: { vault.travelSafe },
                                     set: { val in
@@ -167,7 +175,7 @@ struct SettingsVaultsSheet: View {
                         }
                         .swipeActions(edge: .trailing) {
                             if !vault.isDefault && !vault.isOrganization {
-                                Button("删除", role: .destructive) {
+                                Button(store.l10n.t(zhCN: "删除", en: "Delete"), role: .destructive) {
                                     Task {
                                         do {
                                             try await store.deleteVault(id: vault.id)
@@ -178,7 +186,7 @@ struct SettingsVaultsSheet: View {
                                 }
                             }
                             if !vault.isOrganization {
-                                Button("重命名") {
+                                Button(store.l10n.t(zhCN: "重命名", en: "Rename")) {
                                     renamingVault = vault
                                     renameText = vault.name
                                 }
@@ -196,19 +204,19 @@ struct SettingsVaultsSheet: View {
                     }
                 }
             }
-            .navigationTitle("管理保险库")
+            .navigationTitle(store.l10n.t(zhCN: "管理保险库", en: "Manage Vaults"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(store.l10n.done) { dismiss() }
                 }
             }
-            .alert("重命名保险库", isPresented: Binding(
+            .alert(store.l10n.t(zhCN: "重命名保险库", en: "Rename Vault"), isPresented: Binding(
                 get: { renamingVault != nil },
                 set: { if !$0 { renamingVault = nil } }
             )) {
-                TextField("名称", text: $renameText)
-                Button("保存") {
+                TextField(store.l10n.t(zhCN: "名称", en: "Name"), text: $renameText)
+                Button(store.l10n.save) {
                     guard let vault = renamingVault else { return }
                     let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return }
@@ -221,7 +229,7 @@ struct SettingsVaultsSheet: View {
                         }
                     }
                 }
-                Button("取消", role: .cancel) { renamingVault = nil }
+                Button(store.l10n.cancel, role: .cancel) { renamingVault = nil }
             }
         }
     }
@@ -240,7 +248,10 @@ struct SettingsEmergencyKitSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Emergency Kit 包含服务器地址、登录邮箱、KDF 配置与恢复指引（不包含主密码明文）。建议打印或离线安全保存。")
+                    Text(store.l10n.t(
+                        zhCN: "Emergency Kit 包含服务器地址、登录邮箱、KDF 配置与恢复指引（不包含主密码明文）。建议打印或离线安全保存。",
+                        en: "Your Emergency Kit contains your server URL, email, KDF settings, and recovery notes (never your master password). Keep a printed or offline copy."
+                    ))
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -259,13 +270,13 @@ struct SettingsEmergencyKitSheet: View {
                             Button {
                                 store.copyToClipboard(kit.content, label: "Emergency Kit", isSensitive: true)
                             } label: {
-                                Label("复制内容", systemImage: "doc.on.doc")
+                                Label(store.l10n.t(zhCN: "复制内容", en: "Copy"), systemImage: "doc.on.doc")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
 
                             ShareLink(item: kit.content, preview: SharePreview(kit.fileName)) {
-                                Label("导出文件", systemImage: "square.and.arrow.up")
+                                Label(store.l10n.t(zhCN: "导出文件", en: "Export File"), systemImage: "square.and.arrow.up")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent)
@@ -276,7 +287,7 @@ struct SettingsEmergencyKitSheet: View {
                             .font(.caption)
                             .foregroundStyle(KeysmithColors.danger)
                     } else {
-                        ProgressView("正在生成 Emergency Kit...")
+                        ProgressView(store.l10n.t(zhCN: "正在生成 Emergency Kit...", en: "Generating Emergency Kit..."))
                             .frame(maxWidth: .infinity, minHeight: 140)
                     }
                 }

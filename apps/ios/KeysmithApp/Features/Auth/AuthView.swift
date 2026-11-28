@@ -303,7 +303,7 @@ public struct AuthView: View {
             Button {
                 Task { await submit() }
             } label: {
-                HStack {
+                HStack(spacing: 8) {
                     if isSubmitting {
                         ProgressView()
                             .tint(.white)
@@ -313,11 +313,12 @@ public struct AuthView: View {
                         : store.l10n.t(zhCN: "创建账户", en: "Create Account"))
                         .font(.body.weight(.semibold))
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 13)
-                .foregroundStyle(.white)
-                .background(KeysmithColors.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .frame(minWidth: 180, maxWidth: 240)
             }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .controlSize(.large)
+            .tint(KeysmithColors.accent)
             .disabled(isSubmitting || (tab == .register && registrationDisabled))
 
             Button {
@@ -325,12 +326,13 @@ public struct AuthView: View {
             } label: {
                 Label(store.l10n.enterDemoMode, systemImage: "sparkles")
                     .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
+                    .foregroundStyle(KeysmithColors.accent)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
             }
-            .buttonStyle(.bordered)
-            .tint(KeysmithColors.accent)
+            .buttonStyle(.plain)
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Validation & Actions

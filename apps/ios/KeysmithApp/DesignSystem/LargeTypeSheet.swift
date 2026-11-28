@@ -4,15 +4,17 @@ import SwiftUI
 public struct LargeTypeSheet: View {
     public let title: String
     public let secret: String
+    public var closeTitle: String
     @Environment(\.dismiss) private var dismiss
 
     private let columns = [
         GridItem(.adaptive(minimum: 52, maximum: 72), spacing: 10)
     ]
 
-    public init(title: String, secret: String) {
+    public init(title: String, secret: String, closeTitle: String = "Close") {
         self.title = title
         self.secret = secret
+        self.closeTitle = closeTitle
     }
 
     public var body: some View {
@@ -54,7 +56,7 @@ public struct LargeTypeSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") {
+                    Button(closeTitle) {
                         dismiss()
                     }
                 }

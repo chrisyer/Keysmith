@@ -1122,8 +1122,12 @@ public enum KSGeneratorMode: String, Sendable, Codable, CaseIterable, Identifiab
 public struct KSGeneratorOptions: Sendable, Codable, Equatable {
     public var mode: KSGeneratorMode
     public var length: Int
+    public var includeUppercase: Bool
+    public var includeLowercase: Bool
     public var includeDigits: Bool
     public var includeSymbols: Bool
+    public var minDigits: Int
+    public var minSymbols: Int
     public var excludeAmbiguous: Bool
     public var wordCount: Int
     public var separator: String
@@ -1134,8 +1138,12 @@ public struct KSGeneratorOptions: Sendable, Codable, Equatable {
     public init(
         mode: KSGeneratorMode = .password,
         length: Int = 20,
+        includeUppercase: Bool = true,
+        includeLowercase: Bool = true,
         includeDigits: Bool = true,
         includeSymbols: Bool = true,
+        minDigits: Int = 1,
+        minSymbols: Int = 1,
         excludeAmbiguous: Bool = true,
         wordCount: Int = 4,
         separator: String = "-",
@@ -1145,14 +1153,42 @@ public struct KSGeneratorOptions: Sendable, Codable, Equatable {
     ) {
         self.mode = mode
         self.length = length
+        self.includeUppercase = includeUppercase
+        self.includeLowercase = includeLowercase
         self.includeDigits = includeDigits
         self.includeSymbols = includeSymbols
+        self.minDigits = minDigits
+        self.minSymbols = minSymbols
         self.excludeAmbiguous = excludeAmbiguous
         self.wordCount = wordCount
         self.separator = separator
         self.capitalize = capitalize
         self.includeNumberInPhrase = includeNumberInPhrase
         self.pinLength = pinLength
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case mode, length, includeUppercase, includeLowercase, includeDigits, includeSymbols
+        case minDigits, minSymbols, excludeAmbiguous, wordCount, separator, capitalize
+        case includeNumberInPhrase, pinLength
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try c.decodeIfPresent(KSGeneratorMode.self, forKey: .mode) ?? .password
+        length = try c.decodeIfPresent(Int.self, forKey: .length) ?? 20
+        includeUppercase = try c.decodeIfPresent(Bool.self, forKey: .includeUppercase) ?? true
+        includeLowercase = try c.decodeIfPresent(Bool.self, forKey: .includeLowercase) ?? true
+        includeDigits = try c.decodeIfPresent(Bool.self, forKey: .includeDigits) ?? true
+        includeSymbols = try c.decodeIfPresent(Bool.self, forKey: .includeSymbols) ?? true
+        minDigits = try c.decodeIfPresent(Int.self, forKey: .minDigits) ?? 1
+        minSymbols = try c.decodeIfPresent(Int.self, forKey: .minSymbols) ?? 1
+        excludeAmbiguous = try c.decodeIfPresent(Bool.self, forKey: .excludeAmbiguous) ?? true
+        wordCount = try c.decodeIfPresent(Int.self, forKey: .wordCount) ?? 4
+        separator = try c.decodeIfPresent(String.self, forKey: .separator) ?? "-"
+        capitalize = try c.decodeIfPresent(Bool.self, forKey: .capitalize) ?? true
+        includeNumberInPhrase = try c.decodeIfPresent(Bool.self, forKey: .includeNumberInPhrase) ?? true
+        pinLength = try c.decodeIfPresent(Int.self, forKey: .pinLength) ?? 6
     }
 }
 
@@ -1352,7 +1388,7 @@ public enum KSLanguageMode: String, Sendable, Codable, CaseIterable, Identifiabl
 
     public var nativeName: String {
         switch self {
-        case .system: return "跟随系统 / System"
+        case .system: return "System / 跟随系统"
         case .zhCN: return "简体中文"
         case .zhTW: return "繁體中文"
         case .en: return "English"

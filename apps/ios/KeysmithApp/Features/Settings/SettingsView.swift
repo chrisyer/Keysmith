@@ -163,9 +163,10 @@ public struct SettingsView: View {
             Button {
                 activeSheet = .accounts
             } label: {
+                let accCount = max(1, store.accounts.count)
                 LabeledContent(
                     store.l10n.t(zhCN: "切换 / 添加账号", zhTW: "切換 / 新增帳戶", en: "Switch / Add Account"),
-                    value: "\(max(1, store.accounts.count)) 个账号"
+                    value: store.l10n.t(zhCN: "\(accCount) 个账号", zhTW: "\(accCount) 個帳戶", en: "\(accCount) account\(accCount > 1 ? "s" : "")")
                 )
             }
             .foregroundStyle(.primary)
@@ -173,9 +174,10 @@ public struct SettingsView: View {
             Button {
                 activeSheet = .vaults
             } label: {
+                let vCount = store.vaults.count
                 LabeledContent(
                     store.l10n.t(zhCN: "管理保险库与文件夹", zhTW: "管理保險庫與資料夾", en: "Manage Vaults & Folders"),
-                    value: "\(store.vaults.count) 个保险库"
+                    value: store.l10n.t(zhCN: "\(vCount) 个保险库", zhTW: "\(vCount) 個保險庫", en: "\(vCount) vault\(vCount == 1 ? "" : "s")")
                 )
             }
             .foregroundStyle(.primary)
@@ -225,7 +227,14 @@ public struct SettingsView: View {
                 isOn: Binding(
                     get: { store.session.biometricEnabled },
                     set: { val in
-                        Task { try? await store.updatePreferences(.init(biometricEnabled: val)) }
+                        Task {
+                            do {
+                                try await store.updatePreferences(.init(biometricEnabled: val))
+                            } catch {
+                                store.errorBanner = error.localizedDescription
+                                store.showToast(error.localizedDescription)
+                            }
+                        }
                     }
                 )
             )
@@ -392,7 +401,7 @@ public struct SettingsView: View {
                     + store.appSettings.disabledAutofillDomains.count
                 LabeledContent(
                     store.l10n.t(zhCN: "等效域名与禁用填充站点", en: "Equivalent & Excluded Domains"),
-                    value: "\(ruleCount) 条规则"
+                    value: store.l10n.t(zhCN: "\(ruleCount) 条规则", zhTW: "\(ruleCount) 條規則", en: "\(ruleCount) rule\(ruleCount == 1 ? "" : "s")")
                 )
             }
             .foregroundStyle(.primary)
@@ -476,9 +485,10 @@ public struct SettingsView: View {
             Button {
                 activeSheet = .snapshots
             } label: {
+                let snapCount = store.snapshots.count
                 LabeledContent(
                     store.l10n.t(zhCN: "管理本地加密快照", en: "Manage Local Snapshots"),
-                    value: "\(store.snapshots.count) 份"
+                    value: store.l10n.t(zhCN: "\(snapCount) 份", zhTW: "\(snapCount) 份", en: "\(snapCount) snapshot\(snapCount == 1 ? "" : "s")")
                 )
             }
             .foregroundStyle(.primary)

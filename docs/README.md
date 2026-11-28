@@ -12,6 +12,8 @@
 | [01-architecture.md](./01-architecture.md) | 总体系统架构、Monorepo 目录规划、`keysmith-core` 模块边界、安全与锁屏生命周期、macOS Touch ID / 剪贴板防泄露、Tauri v2 IPC 契约、多端复用策略 | 全阶段 |
 | [02-protocol-and-schema.md](./02-protocol-and-schema.md) | Vaultwarden 零知识密码学（Argon2id/PBKDF2 + HKDF + EncString Type 2）、注册/登录/同步/SignalR 实时推送 API、SQLite 离线缓存、`KeysmithItem Schema v1` 完整规范、模板矩阵、Watchtower 审计规则 | 核心引擎 & 同步 |
 | [03-ui-and-interaction.md](./03-ui-and-interaction.md) | 1Password 8 风格视觉规范、三色密码高亮 / Large Type / TOTP 倒计时等标志性微交互、三栏主界面详设、Quick Access 悬浮窗、Watchtower 面板、快捷键矩阵、前端状态架构 | 桌面 UI & 交互 |
+| [04-optimization-and-1password-gap.md](./04-optimization-and-1password-gap.md) | 1Password 能力差距审计、扩展与开发者生态优化清单 | 体验对齐与生态 |
+| [05-ios-ipados-design.md](./05-ios-ipados-design.md) | iOS & iPadOS 通用 App 与 AutoFill/Passkey 扩展设计：`crates/keysmith-ffi` UniFFI 契约、App Group / Keychain 共享安全边界、iPhone/iPad 自适应 UI 与 Phase M0–M3 路线图 | 移动端（iOS / iPadOS） |
 
 ---
 

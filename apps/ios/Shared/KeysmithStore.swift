@@ -297,7 +297,7 @@ public final class KeysmithStore {
     public func unlockWithPassword(_ password: String) async throws {
         if isDemoMode {
             guard !password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw KSCoreAdapterError.invalidMasterPassword("请输入主密码")
+                throw KSCoreAdapterError.invalidMasterPassword(l10n.masterPasswordPlaceholder)
             }
             session.status = .unlocked
             return
@@ -310,7 +310,17 @@ public final class KeysmithStore {
 
     public func unlockWithBiometric() async throws {
         if isDemoMode {
-            try AppleBiometricKeyStore.shared.verifyUser(reason: l10n.unlockWithFaceID)
+            let reason = l10n.unlockWithFaceID
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        try AppleBiometricKeyStore.shared.verifyUser(reason: reason)
+                        cont.resume()
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
             session.status = .unlocked
             return
         }
@@ -322,7 +332,16 @@ public final class KeysmithStore {
 
     public func verifyUserPresence(reason: String) async throws {
         if isDemoMode {
-            try AppleBiometricKeyStore.shared.verifyUser(reason: reason)
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        try AppleBiometricKeyStore.shared.verifyUser(reason: reason)
+                        cont.resume()
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
             return
         }
         try await adapter.sessionVerifyUserPresence(reason: reason)
@@ -382,7 +401,10 @@ public final class KeysmithStore {
         if let v = patch.lockOnSleep { session.lockOnSleep = v }
         if let v = patch.screenCaptureProtected { session.screenCaptureProtected = v }
         if let v = patch.vibrancyEnabled { session.vibrancyEnabled = v }
-        if let v = patch.faviconEnabled { session.faviconEnabled = v }
+        if let v = patch.faviconEnabled {
+            session.faviconEnabled = v
+            if v { KSFaviconCache.shared.resetAttempted() }
+        }
         if let v = patch.biometricMaxDays { session.biometricMaxDays = v }
         if let v = patch.travelMode { session.travelMode = v }
         if let v = patch.trashAutoPurgeDays { session.trashAutoPurgeDays = v }
@@ -854,6 +876,25 @@ public final class KeysmithStore {
         }
     }
 
+    // MARK: - Website Favicons
+
+    public func faviconHost(icon: KSItemIcon?, primaryUrl: String?) -> String? {
+        if case .domain(let host) = icon {
+            let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !trimmed.isEmpty { return trimmed }
+        }
+        guard let raw = primaryUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        if let parsed = URL(string: raw), let host = parsed.host, !host.isEmpty {
+            return host.lowercased()
+        }
+        if let parsed = URL(string: "https://\(raw)"), let host = parsed.host, !host.isEmpty {
+            return host.lowercased()
+        }
+        return nil
+    }
+
     // MARK: - Private Helpers
 
     private func recalculateDemoVaultCounts() {
@@ -918,3 +959,99 @@ public final class KeysmithStore {
         #endif
     }
 }
+
+#if canImport(UIKit)
+/// Non-observable, thread-safe favicon cache with in-flight deduplication so background
+/// icon fetches never trigger broad `@Observable` SwiftUI list invalidations.
+public final class KSFaviconCache: @unchecked Sendable {
+    public static let shared = KSFaviconCache()
+
+    private let cache = NSCache<NSString, UIImage>()
+    private let lock = NSLock()
+    private var attemptedHosts: Set<String> = []
+    private var inFlight: [String: Task<UIImage?, Never>] = [:]
+
+    private init() {
+        cache.countLimit = 250
+    }
+
+    public func cachedImage(for host: String) -> UIImage? {
+        let clean = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !clean.isEmpty else { return nil }
+        return cache.object(forKey: clean as NSString)
+    }
+
+    public func resetAttempted() {
+        lock.withLock {
+            attemptedHosts.removeAll()
+        }
+    }
+
+    private func claimLoadTask(
+        for clean: String,
+        isDemoMode: Bool,
+        adapter: KeysmithCoreAdapter
+    ) -> Task<UIImage?, Never>? {
+        lock.withLock {
+            if let active = inFlight[clean] {
+                return active
+            }
+            if attemptedHosts.contains(clean) {
+                return nil
+            }
+            attemptedHosts.insert(clean)
+            let created = Task<UIImage?, Never> { [cache] in
+                var resolved: UIImage?
+                if !isDemoMode {
+                    if let dataURI = try? await adapter.faviconFetch(host: clean) {
+                        resolved = Self.decodeDataURIImage(dataURI)
+                    }
+                } else if let url = URL(string: "https://icons.bitwarden.net/\(clean)/icon.png") {
+                    var req = URLRequest(url: url)
+                    req.timeoutInterval = 3.5
+                    if let (data, response) = try? await URLSession.shared.data(for: req),
+                       let http = response as? HTTPURLResponse,
+                       (200...299).contains(http.statusCode) {
+                        resolved = UIImage(data: data)
+                    }
+                }
+                if let resolved {
+                    cache.setObject(resolved, forKey: clean as NSString)
+                }
+                return resolved
+            }
+            inFlight[clean] = created
+            return created
+        }
+    }
+
+    private func clearInFlight(for clean: String) {
+        lock.withLock {
+            _ = inFlight.removeValue(forKey: clean)
+        }
+    }
+
+    public func loadImage(for host: String, isDemoMode: Bool, adapter: KeysmithCoreAdapter) async -> UIImage? {
+        let clean = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !clean.isEmpty else { return nil }
+
+        if let existing = cache.object(forKey: clean as NSString) {
+            return existing
+        }
+
+        guard let task = claimLoadTask(for: clean, isDemoMode: isDemoMode, adapter: adapter) else {
+            return nil
+        }
+        let image = await task.value
+        clearInFlight(for: clean)
+        return image
+    }
+
+    private static func decodeDataURIImage(_ uri: String) -> UIImage? {
+        guard let commaIdx = uri.firstIndex(of: ",") else { return nil }
+        let base64 = String(uri[uri.index(after: commaIdx)...])
+        guard let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else { return nil }
+        return UIImage(data: data)
+    }
+}
+#endif

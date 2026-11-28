@@ -1,17 +1,214 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "_" : {
+
+    },
+    "-" : {
+
+    },
+    "." : {
+
+    },
+    "·" : {
+
+    },
+    "%@" : {
+
+    },
+    "%@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "%@ (%@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ (%2$@)"
+          }
+        }
+      }
+    },
+    "%@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ %2$@"
+          }
+        }
+      }
+    },
+    "%@ bits" : {
+
+    },
+    "%@ 条目 · %@ 保险库 · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ 条目 · %2$@ 保险库 · %3$@"
+          }
+        }
+      }
+    },
+    "%@ 项" : {
+
+    },
+    "%@%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@%2$@"
+          }
+        }
+      }
+    },
+    "%@s" : {
+
+    },
+    "%@s · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@s · %2$@"
+          }
+        }
+      }
+    },
+    "1 天" : {
+
+    },
+    "1. 打开系统「设置 → 通用 → 自动填充与密码」" : {
+
+    },
+    "2. 打开「自动填充密码和通行密钥」开关" : {
+
+    },
+    "3. 在填充来源中勾选「Keysmith」，并将验证码来源设为 Keysmith" : {
+
+    },
+    "7 天" : {
+
+    },
+    "30 天" : {
+
+    },
+    "Data Protection Keychain · BiometryCurrentSet" : {
+
+    },
+    "Emergency Kit 包含服务器地址、登录邮箱、KDF 配置与恢复指引（不包含主密码明文）。建议打印或离线安全保存。" : {
+
+    },
+    "ID: %@" : {
+
+    },
+    "K" : {
+
+    },
     "Keysmith" : {
       "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
-        "es" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
-        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
-        "ja" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
-        "ko" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } },
-        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "Keysmith" } }
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keysmith"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keysmith"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keysmith"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keysmith"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keysmith"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keysmith"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keysmith"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keysmith"
+          }
+        }
       }
+    },
+    "PIN" : {
+
+    },
+    "PK" : {
+
+    },
+    "RP: %@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "RP: %1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "最多 %@ 次" : {
+
+    },
+    "切换前会保留当前账号的离线密文库与本地隔离配置。" : {
+
+    },
+    "暂无本地加密快照" : {
+
+    },
+    "禁用自动填充站点" : {
+
+    },
+    "等效域名组（逗号分隔）" : {
+
+    },
+    "纯内存解码 otpauth:// URI，所有图像仅在内存中处理，绝不写入磁盘。" : {
+
+    },
+    "组织" : {
+
+    },
+    "通过 iOS 26 FIDO Credential Exchange (CXF) 原生系统安全通道，与 Apple「密码」、1Password 等兼容管理器安全互迁账号与通行密钥。" : {
+
+    },
+    "默认" : {
+
     }
   },
   "version" : "1.0"

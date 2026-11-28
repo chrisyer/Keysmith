@@ -203,7 +203,14 @@ public struct iPhoneHomeView: View {
             } label: {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        KSItemIconBadge(title: item.title, icon: item.icon, category: item.category, size: 34)
+                        KSItemFaviconBadge(
+                            store: store,
+                            title: item.title,
+                            icon: item.icon,
+                            primaryUrl: item.primaryUrl,
+                            category: item.category,
+                            size: 36
+                        )
                         Spacer()
                         if item.hasPasskey {
                             Text("PK")
@@ -233,11 +240,11 @@ public struct iPhoneHomeView: View {
                 Task { await copyPrimaryPassword(for: item) }
             } label: {
                 Text(store.l10n.t(zhCN: "复制密码", en: "Copy Password"))
-                    .font(.caption.weight(.medium))
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-                    .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 9))
+                    .padding(.vertical, 8)
+                    .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
             }
             .buttonStyle(.plain)
         }
@@ -305,7 +312,14 @@ public struct iPhoneHomeView: View {
                             onSelectItem(item.id)
                         } label: {
                             HStack(spacing: 12) {
-                                KSItemIconBadge(title: item.title, icon: item.icon, category: item.category, size: 36)
+                                KSItemFaviconBadge(
+                                    store: store,
+                                    title: item.title,
+                                    icon: item.icon,
+                                    primaryUrl: item.primaryUrl,
+                                    category: item.category,
+                                    size: 36
+                                )
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(item.title)
                                         .font(.subheadline.weight(.semibold))
@@ -325,9 +339,9 @@ public struct iPhoneHomeView: View {
                             Task { await copyPrimaryPassword(for: item) }
                         } label: {
                             Text(store.l10n.copy)
-                                .font(.caption.weight(.medium))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
+                                .font(.subheadline.weight(.medium))
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 8)
                                 .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
                         }
                         .buttonStyle(.plain)

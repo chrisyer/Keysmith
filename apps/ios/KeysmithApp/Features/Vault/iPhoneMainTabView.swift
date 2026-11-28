@@ -66,7 +66,7 @@ public struct iPhoneMainTabView: View {
                 }
             }
 
-            Tab(store.l10n.tabTools, systemImage: "wrench.and.screwdriver.fill", value: KSPhoneTab.tools) {
+            Tab(store.l10n.tabTools, systemImage: "shield.lefthalf.filled", value: KSPhoneTab.tools) {
                 ToolsTabView(store: store, onOpenSettings: {
                     isShowingSettingsSheet = true
                 })
@@ -125,6 +125,7 @@ public struct iPhoneMainTabView: View {
         }
         .sheet(isPresented: $isShowingScannerSheet) {
             TotpScannerSheet(
+                l10n: store.l10n,
                 parseQrData: { data in
                     try await store.parseTotpQrImage(data: data)
                 },
