@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -171,11 +172,13 @@ impl ClipboardManager for MacosClipboard {
 
 /// macOS Keychain + LocalAuthentication (Touch ID) store for the 64-byte `UserSymmetricKey`.
 #[derive(Debug, Default)]
-pub struct MacosBiometricKeyStore;
+pub struct MacosBiometricKeyStore {
+    allow_login_keychain_fallback: AtomicBool,
+}
 
 impl MacosBiometricKeyStore {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 }
 
@@ -184,8 +187,14 @@ impl BiometricKeyStore for MacosBiometricKeyStore {
         macos_impl::biometry_is_available()
     }
 
+    fn set_legacy_keychain_fallback(&self, enabled: bool) {
+        self.allow_login_keychain_fallback
+            .store(enabled, Ordering::SeqCst);
+    }
+
     fn save_unlock_key(&self, account_id: &str, key: &[u8]) -> Result<(), CoreError> {
-        macos_impl::keychain_save(account_id, key)
+        let allow_fallback = self.allow_login_keychain_fallback.load(Ordering::SeqCst);
+        macos_impl::keychain_save(account_id, key, allow_fallback)
     }
 
     fn load_unlock_key(
@@ -193,11 +202,16 @@ impl BiometricKeyStore for MacosBiometricKeyStore {
         account_id: &str,
         reason: &str,
     ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
-        macos_impl::keychain_load_with_reason(account_id, reason)
+        let allow_fallback = self.allow_login_keychain_fallback.load(Ordering::SeqCst);
+        macos_impl::keychain_load_with_reason(account_id, reason, allow_fallback)
     }
 
     fn delete_unlock_key(&self, account_id: &str) -> Result<(), CoreError> {
         macos_impl::keychain_delete(account_id)
+    }
+
+    fn delete_legacy_unlock_key(&self, account_id: &str) -> Result<(), CoreError> {
+        macos_impl::keychain_delete_legacy(account_id)
     }
 
     fn verify_user(&self, reason: &str) -> Result<(), CoreError> {
@@ -297,7 +311,9 @@ mod macos_impl {
     };
     use core_foundation_sys::number::kCFBooleanTrue;
     use core_foundation_sys::string::{kCFStringEncodingUTF8, CFStringCreateWithBytes, CFStringRef};
-    use security_framework::passwords::delete_generic_password;
+    use security_framework::passwords::{
+        delete_generic_password, get_generic_password, set_generic_password,
+    };
     use security_framework_sys::access_control::{
         kSecAccessControlBiometryCurrentSet, kSecAccessControlUserPresence,
         kSecAttrAccessibleWhenUnlockedThisDeviceOnly, SecAccessControlCreateWithFlags,
@@ -728,7 +744,11 @@ mod macos_impl {
         Ok(unsafe { SecItemDelete(query.0 as _) })
     }
 
-    pub fn keychain_save(account_id: &str, key: &[u8]) -> Result<(), CoreError> {
+    pub fn keychain_save(
+        account_id: &str,
+        key: &[u8],
+        allow_login_keychain_fallback: bool,
+    ) -> Result<(), CoreError> {
         let _ = dp_delete_status(account_id);
 
         let mut acl = unsafe {
@@ -786,8 +806,16 @@ mod macos_impl {
             return Ok(());
         }
         if status == ERR_SEC_MISSING_ENTITLEMENT {
+            if allow_login_keychain_fallback {
+                set_generic_password(KEYCHAIN_SERVICE, account_id, key).map_err(|e| {
+                    CoreError::Biometric(format!(
+                        "Failed to store key in macOS Login Keychain fallback: {e}"
+                    ))
+                })?;
+                return Ok(());
+            }
             return Err(CoreError::Biometric(
-                "macOS Data Protection Keychain ACL unavailable (OSStatus=-34018; ad-hoc or unsigned build). Biometric unlock requires a signed build with Keychain access-group entitlement."
+                "macOS Data Protection Keychain ACL unavailable (OSStatus=-34018; ad-hoc or unsigned build). Use a signed build, or enable \"Allow Login Keychain fallback (ad-hoc builds)\" in Settings -> Security."
                     .to_string(),
             ));
         }
@@ -799,6 +827,7 @@ mod macos_impl {
     pub fn keychain_load_with_reason(
         account_id: &str,
         reason: &str,
+        allow_login_keychain_fallback: bool,
     ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
         let ctx = biometry_authenticate_context(reason)?;
         let cf_service = make_cf_string(KEYCHAIN_SERVICE)?;
@@ -834,15 +863,41 @@ mod macos_impl {
             return Ok(Zeroizing::new(bytes));
         }
 
+        if (status == ERR_SEC_MISSING_ENTITLEMENT || status == ERR_SEC_ITEM_NOT_FOUND)
+            && allow_login_keychain_fallback
+        {
+            let bytes = get_generic_password(KEYCHAIN_SERVICE, account_id).map_err(|e| {
+                CoreError::Biometric(format!(
+                    "Unable to load biometric key from macOS Login Keychain fallback ({e}); unlock with your master password to rebind."
+                ))
+            })?;
+            return Ok(Zeroizing::new(bytes));
+        }
+
         if status == ERR_SEC_MISSING_ENTITLEMENT {
             return Err(CoreError::Biometric(
-                "macOS Data Protection Keychain ACL unavailable (OSStatus=-34018); unlock with your master password."
+                "macOS Data Protection Keychain ACL unavailable (OSStatus=-34018); unlock with your master password, or enable Login Keychain fallback in Settings -> Security."
                     .to_string(),
             ));
         }
         Err(CoreError::Biometric(format!(
-            "Unable to load biometric key from macOS Data Protection Keychain (OSStatus={status}); unlock with your master password."
+            "Unable to load biometric key from macOS Data Protection Keychain (OSStatus={status}); unlock with your master password (or enable Login Keychain fallback in Settings -> Security for ad-hoc builds)."
         )))
+    }
+
+    pub fn keychain_delete_legacy(account_id: &str) -> Result<(), CoreError> {
+        match delete_generic_password(KEYCHAIN_SERVICE, account_id) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                if e.code() == ERR_SEC_ITEM_NOT_FOUND {
+                    Ok(())
+                } else {
+                    Err(CoreError::Biometric(format!(
+                        "删除 macOS Login Keychain 密钥失败: {e}"
+                    )))
+                }
+            }
+        }
     }
 
     pub fn keychain_delete(account_id: &str) -> Result<(), CoreError> {
@@ -856,18 +911,7 @@ mod macos_impl {
                 )));
             }
         }
-        match delete_generic_password(KEYCHAIN_SERVICE, account_id) {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                if e.code() == ERR_SEC_ITEM_NOT_FOUND {
-                    Ok(())
-                } else {
-                    Err(CoreError::Biometric(format!(
-                        "删除 macOS Keychain 密钥失败: {e}"
-                    )))
-                }
-            }
-        }
+        keychain_delete_legacy(account_id)
     }
 
     pub fn system_preferred_language() -> Option<String> {
@@ -1324,7 +1368,11 @@ mod macos_impl {
         }
     }
 
-    pub fn keychain_save(account_id: &str, key: &[u8]) -> Result<(), CoreError> {
+    pub fn keychain_save(
+        account_id: &str,
+        key: &[u8],
+        _allow_login_keychain_fallback: bool,
+    ) -> Result<(), CoreError> {
         #[cfg(target_os = "windows")]
         {
             return crate::windows_native::keychain_save(account_id, key);
@@ -1345,6 +1393,7 @@ mod macos_impl {
     pub fn keychain_load_with_reason(
         account_id: &str,
         reason: &str,
+        _allow_login_keychain_fallback: bool,
     ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
         #[cfg(target_os = "windows")]
         {
@@ -1365,6 +1414,10 @@ mod macos_impl {
     }
 
     pub fn cleanup_stale_qr_temp_files() {}
+
+    pub fn keychain_delete_legacy(_account_id: &str) -> Result<(), CoreError> {
+        Ok(())
+    }
 
     pub fn keychain_delete(account_id: &str) -> Result<(), CoreError> {
         #[cfg(target_os = "windows")]

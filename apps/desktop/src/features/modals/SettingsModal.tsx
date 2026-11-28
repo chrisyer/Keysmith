@@ -615,11 +615,51 @@ export function SettingsModal() {
                   <input
                     type="checkbox"
                     checked={biometricEnabled}
-                    onChange={(e) => void updatePreferences({ biometricEnabled: e.target.checked })}
+                    onChange={async (e) => {
+                      try {
+                        await updatePreferences({ biometricEnabled: e.target.checked });
+                      } catch (err) {
+                        showToast({
+                          label: bioTitle,
+                          text: err instanceof Error ? err.message : String(err),
+                          kind: 'warning',
+                        });
+                      }
+                    }}
                     className="ks-checkbox"
                     aria-label={bioTitle}
                   />
                 </label>
+
+                {isMacOs && (
+                  <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
+                    <div>
+                      <div className="font-medium text-[var(--text-primary)]">
+                        {dict.settings.macosLoginKeychainFallback}
+                      </div>
+                      <div className="text-xs text-[var(--text-secondary)] mt-0.5 leading-relaxed">
+                        {dict.settings.macosLoginKeychainFallbackDesc}
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(appSettings.macosLoginKeychainFallback)}
+                      onChange={async (e) => {
+                        try {
+                          await updateAppSettings({ macosLoginKeychainFallback: e.target.checked });
+                        } catch (err) {
+                          showToast({
+                            label: dict.settings.macosLoginKeychainFallback,
+                            text: err instanceof Error ? err.message : String(err),
+                            kind: 'warning',
+                          });
+                        }
+                      }}
+                      className="ks-checkbox"
+                      aria-label={dict.settings.macosLoginKeychainFallback}
+                    />
+                  </label>
+                )}
 
                 {isLinuxOs && platformCaps && !platformCaps.polkitPolicyInstalled && (
                   <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-[var(--text-primary)] flex flex-col gap-2">
@@ -805,13 +845,21 @@ export function SettingsModal() {
                       checked={travelMode}
                       onChange={async (e) => {
                         const nextVal = e.target.checked;
-                        await updatePreferences({ travelMode: nextVal });
-                        await refreshAll(getFilter());
-                        showToast({
-                          label: dict.settings.travelModeTitle,
-                          text: nextVal ? dict.sidebar.travelModeActive : dict.common.restore,
-                          kind: nextVal ? 'warning' : 'info',
-                        });
+                        try {
+                          await updatePreferences({ travelMode: nextVal });
+                          await refreshAll(getFilter());
+                          showToast({
+                            label: dict.settings.travelModeTitle,
+                            text: nextVal ? dict.sidebar.travelModeActive : dict.common.restore,
+                            kind: nextVal ? 'warning' : 'info',
+                          });
+                        } catch (err) {
+                          showToast({
+                            label: dict.settings.travelModeTitle,
+                            text: err instanceof Error ? err.message : String(err),
+                            kind: 'warning',
+                          });
+                        }
                       }}
                       className="ks-checkbox"
                     />
@@ -840,9 +888,17 @@ export function SettingsModal() {
                               <input
                                 type="checkbox"
                                 checked={Boolean(v.travelSafe)}
-                                onChange={(e) =>
-                                  void setVaultTravelSafe(v.id, e.target.checked, getFilter())
-                                }
+                                onChange={async (e) => {
+                                  try {
+                                    await setVaultTravelSafe(v.id, e.target.checked, getFilter());
+                                  } catch (err) {
+                                    showToast({
+                                      label: dict.settings.travelModeTitle,
+                                      text: err instanceof Error ? err.message : String(err),
+                                      kind: 'warning',
+                                    });
+                                  }
+                                }}
                                 title={dict.settings.travelSafeToggle}
                                 className="ks-checkbox"
                               />

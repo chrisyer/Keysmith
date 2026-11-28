@@ -430,6 +430,9 @@ export const es = {
     linuxBio: 'Secret Service + Polkit',
     linuxBioDesc: 'Guardar la clave en Secret Service y verificar la identidad con Polkit antes de desbloquear',
     biometricBindingNoteMac: 'Al activarlo, la clave de desbloqueo se guarda protegida en macOS Keychain ACL y puede desactivarse en cualquier momento.',
+    macosLoginKeychainFallback: 'Permitir respaldo en Llavero de inicio de sesión (compilaciones ad-hoc)',
+    macosLoginKeychainFallbackDesc:
+      'Desactivado por defecto. Para compilaciones macOS open-source ad-hoc sin permisos de Apple Developer (-34018): verifica Touch ID mediante LAContext antes de leer la clave del Llavero de inicio de sesión (menor aislamiento que Data Protection Keychain firmado).',
     biometricBindingNoteWindows: 'Al activarlo, la clave de desbloqueo se guarda protegida en Windows Hello KSP y puede desactivarse en cualquier momento.',
     biometricBindingNoteLinux: 'Al activarlo, la clave de desbloqueo se guarda en Secret Service con verificación Polkit y puede desactivarse en cualquier momento.',
     biometricMaxDays: 'Solicitar contraseña maestra',
@@ -695,11 +698,14 @@ export const es = {
   vaultModal: {
     createTitle: 'Nueva bóveda',
     renameTitle: 'Renombrar bóveda',
+    editTitle: 'Ajustes de la bóveda',
     nameLabel: 'Nombre',
     namePlaceholder: 'p. ej. Personal / Trabajo',
+    defaultNameHint: 'La bóveda personal predeterminada no se puede renombrar.',
     colorLabel: 'Color',
     createdToast: 'Bóveda «{name}» creada',
     renamedToast: 'Bóveda renombrada a «{name}»',
+    updatedToast: 'Bóveda "{name}" actualizada',
     travelSafeLabel: 'Seguro en viaje (conservar en el dispositivo en modo viaje)',
   },
   generator: {

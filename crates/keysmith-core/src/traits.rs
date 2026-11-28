@@ -5,8 +5,9 @@ use crate::error::CoreError;
 /// Platform abstraction for biometric-protected key storage.
 ///
 /// On macOS, signed builds bind the unlock key to the Data Protection Keychain with
-/// `SecAccessControlCreateWithFlags` (`kSecAccessControlBiometryCurrentSet`) + `LAContext`
-/// (falling back on `-34018` under ad-hoc signing to `LAContext`-gated login Keychain).
+/// `SecAccessControlCreateWithFlags` (`kSecAccessControlBiometryCurrentSet`) + `LAContext`.
+/// Ad-hoc / unsigned open-source builds may optionally opt in to falling back on `-34018`
+/// to the `LAContext`-gated Login Keychain (disabled by default; fail-closed).
 /// On Windows, keys are wrapped via CNG `Microsoft Passport Key Storage Provider` (Windows Hello).
 pub trait BiometricKeyStore: Send + Sync {
     fn is_available(&self) -> bool;
@@ -23,6 +24,15 @@ pub trait BiometricKeyStore: Send + Sync {
 
     /// Remove the stored unlock key for the given account.
     fn delete_unlock_key(&self, account_id: &str) -> Result<(), CoreError>;
+
+    /// Configure whether macOS ad-hoc builds may fall back from Data Protection Keychain
+    /// (-34018) to the LAContext-gated Login Keychain. Defaults to false (fail-closed).
+    fn set_legacy_keychain_fallback(&self, _enabled: bool) {}
+
+    /// Remove only the legacy Login Keychain entry (leaving Data Protection Keychain intact).
+    fn delete_legacy_unlock_key(&self, _account_id: &str) -> Result<(), CoreError> {
+        Ok(())
+    }
 
     /// Perform interactive biometric verification (without reading the stored unlock key) for reprompt protection.
     fn verify_user(&self, _reason: &str) -> Result<(), CoreError> {

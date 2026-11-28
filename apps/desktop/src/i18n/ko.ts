@@ -430,6 +430,9 @@ export const ko = {
     linuxBio: 'Secret Service + Polkit 잠금 해제',
     linuxBioDesc: '잠금 해제 키를 Secret Service에 저장하고 잠금 해제 시 Polkit으로 본인 확인',
     biometricBindingNoteMac: '활성화하면 금고 잠금 해제 키가 macOS Keychain ACL에 보호 저장되며 언제든 끌 수 있습니다.',
+    macosLoginKeychainFallback: '로그인 키체인 폴백 허용 (ad-hoc 빌드)',
+    macosLoginKeychainFallbackDesc:
+      '기본값은 꺼짐입니다. Apple Developer 서명 권한이 없는 오픈소스 ad-hoc 빌드(-34018)용 옵션으로, Touch ID(LAContext) 인증 후 로그인 키체인에서 잠금 해제 키를 읽습니다(정식 서명된 Data Protection Keychain보다 격리 수준이 낮습니다).',
     biometricBindingNoteWindows: '활성화하면 금고 잠금 해제 키가 Windows Hello KSP에 보호 저장되며 언제든 끌 수 있습니다.',
     biometricBindingNoteLinux: '활성화하면 금고 잠금 해제 키가 Secret Service에 저장되고 잠금 해제 시 Polkit으로 확인합니다. 언제든 끌 수 있습니다.',
     biometricMaxDays: '마스터 비밀번호 주기적 확인',
@@ -695,11 +698,14 @@ export const ko = {
   vaultModal: {
     createTitle: '새 금고',
     renameTitle: '금고 이름 변경',
+    editTitle: '금고 설정',
     nameLabel: '이름',
     namePlaceholder: '예: 개인 / 업무',
+    defaultNameHint: '기본 개인 금고는 이름을 변경할 수 없습니다',
     colorLabel: '색상',
     createdToast: '금고 "{name}" 생성됨',
     renamedToast: '금고 이름을 "{name}"(으)로 변경함',
+    updatedToast: '"{name}" 금고를 업데이트했습니다',
     travelSafeLabel: '여행 안전 (여행 모드 활성화 시 기기에 유지)',
   },
   generator: {

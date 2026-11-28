@@ -1837,6 +1837,7 @@ pub async fn app_settings_update(
     let lang_changed = patch.language.is_some();
     let theme_changed = patch.theme.is_some();
     let sync_mode_changed = patch.sync_mode.is_some();
+    let macos_fallback_changed = patch.macos_login_keychain_fallback.is_some();
     let core = Arc::clone(&state.core);
     let updated = run_blocking(move || core.app_settings_update(patch)).await??;
     if lang_changed {
@@ -1854,6 +1855,9 @@ pub async fn app_settings_update(
     if sync_mode_changed {
         poke_signalr(&state);
         let _ = app.emit(EVENT_SYNC_STATUS, state.core.sync_get_status());
+    }
+    if macos_fallback_changed {
+        emit_session_state(&app, &state.core.session_get_state(), "settings");
     }
     let _ = app.emit(EVENT_UI_SETTINGS_CHANGED, &updated);
     Ok(updated)

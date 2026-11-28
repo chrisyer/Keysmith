@@ -430,6 +430,9 @@ export const en = {
     linuxBio: 'Secret Service + Polkit Unlock',
     linuxBioDesc: 'Store unlock key in Secret Service and verify identity with Polkit before unlocking',
     biometricBindingNoteMac: 'Enabling stores your vault unlock key inside the macOS Keychain ACL and can be disabled anytime.',
+    macosLoginKeychainFallback: 'Allow Login Keychain fallback (ad-hoc builds)',
+    macosLoginKeychainFallbackDesc:
+      'Off by default. For unsigned / ad-hoc open-source macOS builds without Apple Developer entitlements (-34018), verifies Touch ID via LAContext before reading the unlock key from the macOS Login Keychain. Less isolated than a signed Data Protection Keychain build.',
     biometricBindingNoteWindows: 'Enabling stores your vault unlock key inside the Windows Hello KSP and can be disabled anytime.',
     biometricBindingNoteLinux: 'Enabling stores your vault unlock key inside Secret Service with Polkit verification and can be disabled anytime.',
     biometricMaxDays: 'Require Master Password',
@@ -695,11 +698,14 @@ export const en = {
   vaultModal: {
     createTitle: 'New Vault',
     renameTitle: 'Rename Vault',
+    editTitle: 'Vault Settings',
     nameLabel: 'Name',
     namePlaceholder: 'e.g. Personal / Work',
+    defaultNameHint: 'The default personal vault cannot be renamed.',
     colorLabel: 'Color',
     createdToast: 'Created vault "{name}"',
     renamedToast: 'Renamed vault to "{name}"',
+    updatedToast: 'Updated vault "{name}"',
     travelSafeLabel: 'Safe for Travel (keep on device when Travel Mode is on)',
   },
   generator: {

@@ -3517,3 +3517,177 @@ async fn security_ssh_defaults_and_user_presence_fail_closed() {
         .await
         .is_ok());
 }
+
+#[tokio::test]
+async fn macos_login_keychain_fallback_defaults_off_and_cleans_up_on_disable() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct AdhocBiometricStore {
+        fallback_enabled: AtomicBool,
+        legacy_deleted: AtomicBool,
+        keys: Mutex<HashMap<String, Vec<u8>>>,
+    }
+
+    impl AdhocBiometricStore {
+        fn new() -> Self {
+            Self {
+                fallback_enabled: AtomicBool::new(false),
+                legacy_deleted: AtomicBool::new(false),
+                keys: Mutex::new(HashMap::new()),
+            }
+        }
+    }
+
+    impl BiometricKeyStore for AdhocBiometricStore {
+        fn is_available(&self) -> bool {
+            true
+        }
+
+        fn set_legacy_keychain_fallback(&self, enabled: bool) {
+            self.fallback_enabled.store(enabled, Ordering::SeqCst);
+        }
+
+        fn save_unlock_key(&self, account_id: &str, key: &[u8]) -> Result<(), CoreError> {
+            if !self.fallback_enabled.load(Ordering::SeqCst) {
+                return Err(CoreError::Biometric(
+                    "OSStatus=-34018: Data Protection Keychain unavailable".to_string(),
+                ));
+            }
+            self.keys
+                .lock()
+                .unwrap()
+                .insert(account_id.to_string(), key.to_vec());
+            Ok(())
+        }
+
+        fn load_unlock_key(
+            &self,
+            account_id: &str,
+            _reason: &str,
+        ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+            if !self.fallback_enabled.load(Ordering::SeqCst) {
+                return Err(CoreError::Biometric(
+                    "OSStatus=-34018: Data Protection Keychain unavailable".to_string(),
+                ));
+            }
+            self.keys
+                .lock()
+                .unwrap()
+                .get(account_id)
+                .cloned()
+                .map(Zeroizing::new)
+                .ok_or_else(|| CoreError::Biometric("OSStatus=-25300".to_string()))
+        }
+
+        fn delete_unlock_key(&self, account_id: &str) -> Result<(), CoreError> {
+            self.keys.lock().unwrap().remove(account_id);
+            Ok(())
+        }
+
+        fn delete_legacy_unlock_key(&self, account_id: &str) -> Result<(), CoreError> {
+            self.legacy_deleted.store(true, Ordering::SeqCst);
+            self.keys.lock().unwrap().remove(account_id);
+            Ok(())
+        }
+
+        fn verify_user(&self, _reason: &str) -> Result<(), CoreError> {
+            Ok(())
+        }
+    }
+
+    let storage = Storage::open_in_memory().unwrap();
+    let kdf = KdfConfig::default();
+    let mk = derive_master_key("MasterPass#2026!", "bio@example.com", &kdf).unwrap();
+    let smk = stretch_master_key(&mk).unwrap();
+    let usk = UserSymmetricKey::generate();
+    let acc = StoredAccount::default_prefs(
+        "acc-adhoc-bio".to_string(),
+        "https://vault.example.com".to_string(),
+        "bio@example.com".to_string(),
+        "bio".to_string(),
+        kdf.kdf,
+        kdf.kdf_iterations,
+        kdf.kdf_memory,
+        kdf.kdf_parallelism,
+        protect_user_symmetric_key(&usk, &smk).unwrap(),
+        "dev-acc-adhoc-bio".to_string(),
+    );
+    storage.upsert_account(&acc).unwrap();
+
+    let bio = Arc::new(AdhocBiometricStore::new());
+    let core = AppCore::with_storage(
+        storage.clone(),
+        Arc::clone(&bio) as Arc<dyn BiometricKeyStore>,
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+
+    // Defaults to false (fail-closed)
+    assert!(!core.app_settings_get().unwrap().macos_login_keychain_fallback);
+
+    core.session_unlock_password("MasterPass#2026!")
+        .await
+        .unwrap();
+
+    // Enabling biometric fails when fallback is OFF on ad-hoc builds
+    assert!(core
+        .session_update_preferences(SessionPreferencesPatch {
+            biometric_enabled: Some(true),
+            ..Default::default()
+        })
+        .is_err());
+    assert!(!core.session_get_state().biometric_enabled);
+
+    // Turning fallback ON allows enabling biometric and unlocking with it
+    let updated = core
+        .app_settings_update(AppSettingsPatch {
+            macos_login_keychain_fallback: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(updated.macos_login_keychain_fallback);
+
+    let session = core
+        .session_update_preferences(SessionPreferencesPatch {
+            biometric_enabled: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(session.biometric_enabled);
+
+    core.session_lock("manual").unwrap();
+    core.session_unlock_biometric().await.unwrap();
+    assert_eq!(core.session_get_state().status, AuthStatus::Unlocked);
+
+    // Setting persists across reopen
+    let bio_reopened = Arc::new(AdhocBiometricStore::new());
+    // Seed saved key to simulate persisted macOS Login Keychain across process restart
+    bio_reopened
+        .keys
+        .lock()
+        .unwrap()
+        .insert("acc-adhoc-bio".to_string(), usk.to_bytes().to_vec());
+    let reopened = AppCore::with_storage(
+        storage,
+        Arc::clone(&bio_reopened) as Arc<dyn BiometricKeyStore>,
+        Arc::new(NoopClipboardManager),
+    )
+    .unwrap();
+    assert!(reopened
+        .app_settings_get()
+        .unwrap()
+        .macos_login_keychain_fallback);
+    assert!(bio_reopened.fallback_enabled.load(Ordering::SeqCst));
+    reopened.session_unlock_biometric().await.unwrap();
+
+    // Turning fallback OFF deletes legacy key and disables biometric on ad-hoc builds
+    let disabled = reopened
+        .app_settings_update(AppSettingsPatch {
+            macos_login_keychain_fallback: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(!disabled.macos_login_keychain_fallback);
+    assert!(bio_reopened.legacy_deleted.load(Ordering::SeqCst));
+    assert!(!reopened.session_get_state().biometric_enabled);
+}

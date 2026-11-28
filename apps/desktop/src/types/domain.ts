@@ -497,6 +497,7 @@ export interface AppSettings {
   snapshotIntervalDays?: number;
   snapshotKeepCount?: number;
   syncMode?: SyncMode;
+  macosLoginKeychainFallback?: boolean;
 }
 
 export interface AppSettingsPatch {
@@ -512,6 +513,7 @@ export interface AppSettingsPatch {
   snapshotIntervalDays?: number;
   snapshotKeepCount?: number;
   syncMode?: SyncMode;
+  macosLoginKeychainFallback?: boolean;
 }
 
 export interface SshAgentStatus {

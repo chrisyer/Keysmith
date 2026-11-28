@@ -430,6 +430,9 @@ export const fr = {
     linuxBio: 'Secret Service + Polkit',
     linuxBioDesc: 'Stocker la clé dans Secret Service et vérifier l’identité via Polkit au déverrouillage',
     biometricBindingNoteMac: 'L’activation enregistre votre clé de déverrouillage dans le trousseau macOS (Keychain ACL) et peut être désactivée à tout moment.',
+    macosLoginKeychainFallback: 'Autoriser le repli sur le trousseau de session (builds ad-hoc)',
+    macosLoginKeychainFallbackDesc:
+      'Désactivé par défaut. Pour les builds macOS open-source ad-hoc sans droits Apple Developer (-34018) : vérifie Touch ID via LAContext avant de lire la clé dans le trousseau de session (isolation moindre qu’un build signé Data Protection Keychain).',
     biometricBindingNoteWindows: 'L’activation enregistre votre clé de déverrouillage dans Windows Hello KSP et peut être désactivée à tout moment.',
     biometricBindingNoteLinux: 'L’activation enregistre votre clé de déverrouillage dans Secret Service avec vérification Polkit et peut être désactivée à tout moment.',
     biometricMaxDays: 'Exiger le mot de passe principal',
@@ -695,11 +698,14 @@ export const fr = {
   vaultModal: {
     createTitle: 'Nouveau coffre',
     renameTitle: 'Renommer le coffre',
+    editTitle: 'Paramètres du coffre',
     nameLabel: 'Nom',
     namePlaceholder: 'ex. Personnel / Travail',
+    defaultNameHint: 'Le coffre personnel par défaut ne peut pas être renommé.',
     colorLabel: 'Couleur',
     createdToast: 'Coffre « {name} » créé',
     renamedToast: 'Coffre renommé en « {name} »',
+    updatedToast: 'Coffre « {name} » mis à jour',
     travelSafeLabel: 'Sûr en voyage (conserver sur l’appareil en mode voyage)',
   },
   generator: {

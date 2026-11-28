@@ -835,6 +835,8 @@ pub struct AppSettings {
     pub snapshot_keep_count: usize,
     #[serde(default = "default_sync_mode")]
     pub sync_mode: String,
+    #[serde(default = "default_false_val")]
+    pub macos_login_keychain_fallback: bool,
 }
 
 impl Default for AppSettings {
@@ -852,6 +854,7 @@ impl Default for AppSettings {
             snapshot_interval_days: 1,
             snapshot_keep_count: 5,
             sync_mode: "auto".to_string(),
+            macos_login_keychain_fallback: false,
         }
     }
 }
@@ -871,6 +874,7 @@ pub struct AppSettingsPatch {
     pub snapshot_interval_days: Option<u32>,
     pub snapshot_keep_count: Option<usize>,
     pub sync_mode: Option<String>,
+    pub macos_login_keychain_fallback: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

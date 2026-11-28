@@ -430,6 +430,9 @@ export const ja = {
     linuxBio: 'Secret Service + Polkit ロック解除',
     linuxBioDesc: '保管庫キーを Secret Service に保存し、ロック解除時に Polkit で本人確認を行います',
     biometricBindingNoteMac: '有効にすると保管庫のロック解除キーが macOS Keychain ACL に保護保存されます。いつでも無効にできます。',
+    macosLoginKeychainFallback: 'ログインキーチェーンへのフォールバックを許可（ad-hoc ビルド）',
+    macosLoginKeychainFallbackDesc:
+      '既定ではオフ。Apple Developer 署名エンタイトルメントのないオープンソース ad-hoc ビルド（-34018）向け。Touch ID（LAContext）認証後にログインキーチェーンから復号鍵を読み込みます（署名済み Data Protection Keychain より隔離性は低くなります）。',
     biometricBindingNoteWindows: '有効にすると保管庫のロック解除キーが Windows Hello KSP に保護保存されます。いつでも無効にできます。',
     biometricBindingNoteLinux: '有効にすると保管庫のロック解除キーが Secret Service に保存され、Polkit で本人確認されます。いつでも無効にできます。',
     biometricMaxDays: 'マスターパスワード定期確認',
@@ -695,11 +698,14 @@ export const ja = {
   vaultModal: {
     createTitle: '新規保管庫',
     renameTitle: '保管庫の名前変更',
+    editTitle: '保管庫の設定',
     nameLabel: '名前',
     namePlaceholder: '例：個人用 / 仕事用',
+    defaultNameHint: 'デフォルトの個人保管庫は名前を変更できません',
     colorLabel: 'カラー',
     createdToast: '保管庫「{name}」を作成しました',
     renamedToast: '保管庫名を「{name}」に変更しました',
+    updatedToast: '保管庫「{name}」を更新しました',
     travelSafeLabel: '渡航安全（トラベルモード有効時も端末に保持）',
   },
   generator: {

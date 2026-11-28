@@ -852,6 +852,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
     snapshotIntervalDays: 1,
     snapshotKeepCount: 5,
     syncMode: 'auto',
+    macosLoginKeychainFallback: false,
   };
 
   private session: SessionState = {
@@ -1110,6 +1111,7 @@ class KeysmithPrototypeClient implements KeysmithClient {
   async vaultRename(id: string, name: string): Promise<Vault> {
     const v = this.vaults.find((item) => item.id === id);
     if (!v) throw new Error('Vault not found');
+    if (v.isDefault) throw new Error('Default vault cannot be renamed');
     v.name = name.trim() || v.name;
     this.emit('sync:data_changed', { vaultChanged: true, updatedItemIds: [], deletedItemIds: [] });
     this.markDemoSynced();

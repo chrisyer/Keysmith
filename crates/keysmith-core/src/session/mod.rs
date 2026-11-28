@@ -266,12 +266,17 @@ impl AppCore {
                 .filter(|s| !s.trim().is_empty())
         });
 
+        let all_settings = storage.get_all_app_settings().unwrap_or_default();
+        let macos_legacy_fallback = all_settings
+            .get("macos_login_keychain_fallback")
+            .map(|s| s == "true")
+            .unwrap_or(false);
+        biometric.set_legacy_keychain_fallback(macos_legacy_fallback);
+
         let client = VaultwardenClient::new();
         if let Some(ref acc) = account {
-            let allow_http = storage
-                .get_all_app_settings()
-                .ok()
-                .and_then(|m| m.get(&format!("allow_insecure_http:{}", acc.id)).cloned())
+            let allow_http = all_settings
+                .get(&format!("allow_insecure_http:{}", acc.id))
                 .map(|v| v == "true")
                 .unwrap_or(false);
             if allow_http {
@@ -5608,6 +5613,10 @@ impl AppCore {
             .cloned()
             .filter(|v| matches!(v.as_str(), "auto" | "manual"))
             .unwrap_or_else(|| "auto".to_string());
+        let macos_login_keychain_fallback = raw
+            .get("macos_login_keychain_fallback")
+            .map(|s| s == "true")
+            .unwrap_or(false);
 
         Ok(AppSettings {
             language,
@@ -5622,6 +5631,7 @@ impl AppCore {
             snapshot_interval_days,
             snapshot_keep_count,
             sync_mode,
+            macos_login_keychain_fallback,
         })
     }
 
@@ -5706,6 +5716,56 @@ impl AppCore {
         if let Some(mode) = patch.sync_mode {
             if matches!(mode.as_str(), "auto" | "manual") {
                 self.storage.set_app_setting("sync_mode", &mode)?;
+            }
+        }
+        if let Some(enabled) = patch.macos_login_keychain_fallback {
+            self.storage.set_app_setting(
+                "macos_login_keychain_fallback",
+                if enabled { "true" } else { "false" },
+            )?;
+            self.biometric.set_legacy_keychain_fallback(enabled);
+            if enabled {
+                if let Ok(guard) = self.read_state() {
+                    if let (Some(acc), Some(unlocked)) =
+                        (guard.account.as_ref(), guard.unlocked.as_ref())
+                    {
+                        if acc.biometric_enabled && self.biometric.is_available() {
+                            let _ = self
+                                .biometric
+                                .save_unlock_key(&acc.id, &*unlocked.usk.to_bytes());
+                        }
+                    }
+                }
+            } else {
+                if let Ok(accounts) = self.storage.list_accounts() {
+                    for acc in accounts {
+                        let _ = self.biometric.delete_legacy_unlock_key(&acc.id);
+                    }
+                }
+                let mut updated_acc: Option<StoredAccount> = None;
+                {
+                    let mut guard = self.write_state()?;
+                    if let (Some(acc), Some(unlocked)) =
+                        (guard.account.clone(), guard.unlocked.as_ref())
+                    {
+                        if acc.biometric_enabled {
+                            if !self.biometric.is_available()
+                                || self
+                                    .biometric
+                                    .save_unlock_key(&acc.id, &*unlocked.usk.to_bytes())
+                                    .is_err()
+                            {
+                                let mut disabled = acc;
+                                disabled.biometric_enabled = false;
+                                updated_acc = Some(disabled.clone());
+                                guard.account = Some(disabled);
+                            }
+                        }
+                    }
+                }
+                if let Some(acc) = updated_acc {
+                    self.storage.upsert_account(&acc)?;
+                }
             }
         }
         self.app_settings_get()

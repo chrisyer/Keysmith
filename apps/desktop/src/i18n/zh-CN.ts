@@ -430,6 +430,9 @@ export const zhCN = {
     linuxBio: 'Secret Service + Polkit 解锁',
     linuxBioDesc: '允许将解锁密钥托管至系统 Secret Service，并在解锁前通过 Polkit（指纹 / PAM）验证身份',
     biometricBindingNoteMac: '开启后解锁密钥将受 macOS 钥匙串（Keychain ACL）保护，可随时在设置中关闭并清除。',
+    macosLoginKeychainFallback: '允许登录钥匙串回退（开源 ad-hoc 构建）',
+    macosLoginKeychainFallbackDesc:
+      '默认关闭。适用于无 Apple Developer 签名权限（-34018）的开源 ad-hoc 构建：开启后先通过 Touch ID（LAContext）验证身份，再从系统登录钥匙串读取解锁密钥；隔离级别低于正式签名的 Data Protection Keychain。',
     biometricBindingNoteWindows: '开启后解锁密钥将受 Windows Hello KSP 保护，可随时在设置中关闭并清除。',
     biometricBindingNoteLinux: '开启后解锁密钥将写入 Secret Service 并由 Polkit 校验身份，可随时在设置中关闭并清除。',
     biometricMaxDays: '定期主密码验证',
@@ -695,11 +698,14 @@ export const zhCN = {
   vaultModal: {
     createTitle: '新建保险库',
     renameTitle: '重命名保险库',
+    editTitle: '保险库设置',
     nameLabel: '名称',
     namePlaceholder: '例如：个人 / 工作',
+    defaultNameHint: '默认个人保险库不支持重命名',
     colorLabel: '颜色',
     createdToast: '已创建保险库「{name}」',
     renamedToast: '已重命名为「{name}」',
+    updatedToast: '已更新保险库「{name}」',
     travelSafeLabel: '旅行安全保险库（开启旅行模式时保留在本地）',
   },
   generator: {

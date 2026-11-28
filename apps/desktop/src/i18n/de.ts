@@ -430,6 +430,9 @@ export const de = {
     linuxBio: 'Secret Service + Polkit',
     linuxBioDesc: 'Entsperrschlüssel im Secret Service speichern und vor dem Entsperren per Polkit bestätigen',
     biometricBindingNoteMac: 'Bei Aktivierung wird Ihr Tresor-Entsperrschlüssel geschützt in der macOS Keychain ACL abgelegt und kann jederzeit deaktiviert werden.',
+    macosLoginKeychainFallback: 'Login-Schlüsselbund-Fallback erlauben (Ad-hoc-Builds)',
+    macosLoginKeychainFallbackDesc:
+      'Standardmäßig deaktiviert. Für unsignierte/Ad-hoc-Builds ohne Apple-Developer-Berechtigungen (-34018): prüft Touch ID per LAContext und liest den Entsperrschlüssel aus dem Login-Schlüsselbund (geringere Isolation als ein signierter Data Protection Keychain).',
     biometricBindingNoteWindows: 'Bei Aktivierung wird Ihr Tresor-Entsperrschlüssel geschützt im Windows Hello KSP abgelegt und kann jederzeit deaktiviert werden.',
     biometricBindingNoteLinux: 'Bei Aktivierung wird Ihr Tresor-Entsperrschlüssel im Secret Service gespeichert und per Polkit geprüft. Jederzeit deaktivierbar.',
     biometricMaxDays: 'Master-Passwort erforderlich',
@@ -695,11 +698,14 @@ export const de = {
   vaultModal: {
     createTitle: 'Neuer Tresor',
     renameTitle: 'Tresor umbenennen',
+    editTitle: 'Tresor-Einstellungen',
     nameLabel: 'Name',
     namePlaceholder: 'z. B. Privat / Arbeit',
+    defaultNameHint: 'Der Standard-Tresor kann nicht umbenannt werden.',
     colorLabel: 'Farbe',
     createdToast: 'Tresor „{name}“ erstellt',
     renamedToast: 'Tresor in „{name}“ umbenannt',
+    updatedToast: 'Tresor „{name}“ aktualisiert',
     travelSafeLabel: 'Reisesicher (bleibt bei aktivem Reisemodus auf dem Gerät)',
   },
   generator: {
