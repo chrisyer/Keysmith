@@ -365,6 +365,10 @@ export const fr = {
     linkedItemsLabel: 'Éléments liés',
     linkedItemsSearchPlaceholder: 'Rechercher des éléments à lier (clé SSH, jeton API, serveur)...',
     linkedItemsEmpty: 'Aucun élément lié',
+    fieldAddedBadge: 'Ajouté',
+    discardConfirmTitle: 'Ignorer les modifications non enregistrées ?',
+    discardConfirmBtn: 'Ignorer les modifications',
+    keepEditingBtn: 'Continuer l’édition',
     fieldTypes: {
       text: 'Texte',
       password: 'Mot de passe',
@@ -533,7 +537,6 @@ export const fr = {
     emergencyKitDesc: 'Génère une fiche A4 avec l’URL du serveur, l’e-mail et un espace pour noter le mot de passe principal',
     emergencyKitBtn: 'Télécharger le kit d’urgence PDF',
     sshAgentTitle: 'Approbation biométrique Agent SSH',
-    sshAgentDesc: 'Exiger Touch ID / Windows Hello / Polkit avant de signer via SSH (cache de 60 s par clé)',
     trashPurgeTitle: 'Purge automatique de la corbeille',
     trashPurgeDesc: 'Supprimer définitivement les éléments de la corbeille après le délai choisi',
     days90: 'Tous les 90 jours',

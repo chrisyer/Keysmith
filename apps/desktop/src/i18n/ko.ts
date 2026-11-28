@@ -365,6 +365,10 @@ export const ko = {
     linkedItemsLabel: '연결된 항목',
     linkedItemsSearchPlaceholder: '연결할 항목 검색 (SSH 키, API 토큰, 서버 등)...',
     linkedItemsEmpty: '연결된 항목 없음',
+    fieldAddedBadge: '추가됨',
+    discardConfirmTitle: '저장하지 않은 변경 사항을 버릴까요?',
+    discardConfirmBtn: '변경 사항 버리기',
+    keepEditingBtn: '계속 편집',
     fieldTypes: {
       text: '텍스트',
       password: '비밀번호',
@@ -533,7 +537,6 @@ export const ko = {
     emergencyKitDesc: '서버 URL, 이메일 및 마스터 비밀번호 수기 기재란이 있는 인쇄용 A4 복구 시트 생성',
     emergencyKitBtn: '비상 복구 키트 PDF 다운로드',
     sshAgentTitle: 'SSH 에이전트 생체 인증 승인',
-    sshAgentDesc: 'SSH 서명 전 Touch ID / Windows Hello / Polkit 승인 요청 (키당 60초 캐시)',
     trashPurgeTitle: '휴지통 자동 비우기',
     trashPurgeDesc: '보관 기간이 지난 휴지통 항목을 자동으로 영구 삭제',
     days90: '90일마다',

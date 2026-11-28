@@ -119,6 +119,11 @@ describe('Desktop i18n dictionaries', () => {
       expect(linuxCopy, `${loc.id} Linux copy should not mention Keychain`).not.toMatch(/Keychain/i);
       expect(linuxCopy, `${loc.id} Linux copy should not mention Windows Hello`).not.toMatch(/Windows Hello/i);
       expect(linuxCopy, `${loc.id} Linux copy should not mention Touch ID`).not.toMatch(/Touch ID/i);
+
+      const serialized = JSON.stringify(dict);
+      expect(serialized, `${loc.id} should not contain mixed platform bio text`).not.toMatch(
+        /Touch ID\s*\/\s*Windows Hello/i,
+      );
     }
   });
 });

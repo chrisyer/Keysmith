@@ -365,6 +365,10 @@ export const es = {
     linkedItemsLabel: 'Elementos vinculados',
     linkedItemsSearchPlaceholder: 'Buscar elementos para vincular (clave SSH, token API, servidor)...',
     linkedItemsEmpty: 'Sin elementos vinculados',
+    fieldAddedBadge: 'Añadido',
+    discardConfirmTitle: '¿Descartar los cambios no guardados?',
+    discardConfirmBtn: 'Descartar cambios',
+    keepEditingBtn: 'Seguir editando',
     fieldTypes: {
       text: 'Texto',
       password: 'Contraseña',
@@ -533,7 +537,6 @@ export const es = {
     emergencyKitDesc: 'Genera una hoja A4 de recuperación con URL del servidor, correo y espacio para anotar la contraseña maestra',
     emergencyKitBtn: 'Descargar kit de emergencia PDF',
     sshAgentTitle: 'Aprobación biométrica del Agente SSH',
-    sshAgentDesc: 'Requerir Touch ID / Windows Hello / Polkit antes de firmar con SSH (caché de 60 s por clave)',
     trashPurgeTitle: 'Vaciar papelera automáticamente',
     trashPurgeDesc: 'Eliminar permanentemente elementos en la papelera tras el período de retención',
     days90: 'Cada 90 días',

@@ -365,6 +365,10 @@ export const en = {
     linkedItemsLabel: 'Linked Items',
     linkedItemsSearchPlaceholder: 'Search items to link (e.g. SSH key, API token, server)...',
     linkedItemsEmpty: 'No linked items',
+    fieldAddedBadge: 'Added',
+    discardConfirmTitle: 'Discard unsaved changes?',
+    discardConfirmBtn: 'Discard Changes',
+    keepEditingBtn: 'Keep Editing',
     fieldTypes: {
       text: 'Text',
       password: 'Password',
@@ -533,7 +537,6 @@ export const en = {
     emergencyKitDesc: 'Generate an A4 recovery sheet with server URL, account email, and space to write your master password offline',
     emergencyKitBtn: 'Download Emergency Kit PDF',
     sshAgentTitle: 'SSH Agent Biometric Approval',
-    sshAgentDesc: 'Require Touch ID / Windows Hello / Polkit approval before signing SSH challenges (cached 60s per key)',
     trashPurgeTitle: 'Auto-purge Trash',
     trashPurgeDesc: 'Permanently delete trashed items older than the retention window',
     days90: 'Every 90 days',

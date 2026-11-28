@@ -22,7 +22,6 @@ import {
   RotateCcw,
   Shield,
   Sun,
-  Terminal,
   Trash2,
   UserPlus,
   X,
@@ -630,7 +629,7 @@ export function SettingsModal() {
                     <div className="flex items-center gap-2">
                       <code
                         title={polkitInstallCommand}
-                        className="flex-1 min-w-0 font-mono-tabular text-[11px] px-2.5 py-1.5 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] overflow-x-auto whitespace-nowrap ks-scroll select-all"
+                        className="flex-1 min-w-0 font-mono-tabular text-[11px] px-2.5 py-1.5 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] whitespace-pre-wrap break-normal overflow-x-auto ks-scroll select-all"
                       >
                         {polkitInstallCommand}
                       </code>
@@ -913,7 +912,7 @@ export function SettingsModal() {
                 <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-3">
                   <label className="flex items-start justify-between gap-4 cursor-pointer">
                     <div className="flex items-start gap-2.5 min-w-0">
-                      <Terminal size={16} className="text-[var(--accent-primary)] shrink-0 mt-0.5" />
+                      <KeyRound size={16} className="text-[var(--accent-primary)] shrink-0 mt-0.5" />
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-semibold text-[var(--text-primary)]">
@@ -1099,7 +1098,7 @@ export function SettingsModal() {
                         }}
                         className="min-h-[36px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-white text-[13px] font-medium cursor-pointer"
                       >
-                        <Terminal size={14} />
+                        <KeyRound size={14} />
                         {dict.settings.sshSection.configureBtn}
                       </button>
                     ) : (

@@ -365,6 +365,10 @@ export const zhCN = {
     linkedItemsLabel: '关联条目',
     linkedItemsSearchPlaceholder: '搜索要关联的条目（如服务器、SSH 密钥、数据库）...',
     linkedItemsEmpty: '暂无关联条目',
+    fieldAddedBadge: '已添加',
+    discardConfirmTitle: '是否放弃未保存的更改？',
+    discardConfirmBtn: '放弃更改',
+    keepEditingBtn: '继续编辑',
     fieldTypes: {
       text: '文本',
       password: '密码',
@@ -533,7 +537,6 @@ export const zhCN = {
     emergencyKitDesc: '生成可打印 A4 救援文档（含服务器地址、登录邮箱及离线手写主密码框），建议打印妥善保管',
     emergencyKitBtn: '下载应急救援 PDF',
     sshAgentTitle: 'SSH Agent 生物识别确认',
-    sshAgentDesc: '终端或 Git 调用 SSH 私钥签名时要求 Touch ID / Windows Hello / Polkit 授权（单密钥 60 秒内免重复确认）',
     trashPurgeTitle: '自动清空废纸篓',
     trashPurgeDesc: '自动永久清理移入废纸篓超过保留天数的条目',
     days90: '每 90 天',

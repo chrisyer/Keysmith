@@ -365,6 +365,10 @@ export const ja = {
     linkedItemsLabel: '関連アイテム',
     linkedItemsSearchPlaceholder: '関連付けるアイテムを検索（SSH 鍵、API トークン、サーバーなど）...',
     linkedItemsEmpty: '関連アイテムなし',
+    fieldAddedBadge: '追加済み',
+    discardConfirmTitle: '保存されていない変更を破棄しますか？',
+    discardConfirmBtn: '変更を破棄',
+    keepEditingBtn: '編集を続ける',
     fieldTypes: {
       text: 'テキスト',
       password: 'パスワード',
@@ -533,7 +537,6 @@ export const ja = {
     emergencyKitDesc: 'サーバー URL・メール・手書きマスターパスワード欄付きの A4 復旧シートを生成',
     emergencyKitBtn: 'エマージェンシーキット PDF を保存',
     sshAgentTitle: 'SSH エージェント生体認証承認',
-    sshAgentDesc: 'SSH 署名時に Touch ID / Windows Hello / Polkit の承認を要求（鍵ごとに60秒キャッシュ）',
     trashPurgeTitle: 'ゴミ箱の自動消去',
     trashPurgeDesc: '保持日数を過ぎたゴミ箱内アイテムを自動的に完全削除',
     days90: '90 日ごと',

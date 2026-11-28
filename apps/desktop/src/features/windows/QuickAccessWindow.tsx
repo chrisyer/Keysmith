@@ -1,10 +1,11 @@
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ArrowRight, Check, Copy, ExternalLink, Keyboard, Lock, Maximize2, Search, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ColoredPassword } from '../../components/ColoredPassword';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
 import { TotpRow } from '../../components/TotpRow';
 import { localizeBuiltinFieldLabel, useI18n } from '../../i18n';
-import { tauriClient } from '../../services/tauriClient';
+import { isTauriRuntime, tauriClient } from '../../services/tauriClient';
 import type { AuthStatus, ItemDetail, ItemSummary } from '../../types/domain';
 import { formatShortcut } from '../../utils/shortcuts';
 
@@ -327,9 +328,27 @@ export function QuickAccessWindow() {
         </>
       ) : (
         <>
-          <div data-tauri-drag-region className="h-2.5 w-full shrink-0" />
-          <div className="px-5 pt-1 pb-3 border-b border-[var(--border-subtle)] flex items-center gap-3 shrink-0">
-            <span data-tauri-drag-region className="inline-flex items-center shrink-0 cursor-grab active:cursor-grabbing">
+          <div
+            data-tauri-drag-region
+            onMouseDown={(e) => {
+              if (e.button === 0 && isTauriRuntime()) {
+                void getCurrentWindow().startDragging();
+              }
+            }}
+            className="h-5 w-full shrink-0 flex items-center justify-center cursor-grab active:cursor-grabbing select-none"
+          >
+            <span className="w-9 h-1 rounded-full bg-[var(--border-strong)]/75 pointer-events-none" />
+          </div>
+          <div className="px-5 pt-0.5 pb-3 border-b border-[var(--border-subtle)] flex items-center gap-3 shrink-0">
+            <span
+              data-tauri-drag-region
+              onMouseDown={(e) => {
+                if (e.button === 0 && isTauriRuntime()) {
+                  void getCurrentWindow().startDragging();
+                }
+              }}
+              className="inline-flex items-center shrink-0 cursor-grab active:cursor-grabbing"
+            >
               <Search size={17} className="text-[var(--accent-primary)] pointer-events-none" />
             </span>
             <input

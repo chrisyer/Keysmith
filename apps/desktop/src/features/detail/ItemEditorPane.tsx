@@ -26,7 +26,8 @@ import {
   User,
   X,
 } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { GeneratorPopover } from '../../components/GeneratorPopover';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
 import { isCustomWindowChrome } from '../../components/WindowChrome';
@@ -169,6 +170,21 @@ function getCommonFieldPresets(dict: Dictionary): CommonFieldPreset[] {
   ];
 }
 
+const SINGLETON_PRESET_IDS = new Set(['username', 'password', 'totp']);
+
+function hasExistingSingletonPreset(draft: ItemDraft, presetId: string): boolean {
+  if (!SINGLETON_PRESET_IDS.has(presetId)) return false;
+  const allFields = draft.sections.flatMap((s) => s.fields);
+  if (presetId === 'username') return allFields.some((f) => f.purpose === 'username');
+  if (presetId === 'password') {
+    return allFields.some((f) => f.purpose === 'password' || f.fieldType === 'password');
+  }
+  if (presetId === 'totp') {
+    return allFields.some((f) => f.purpose === 'totp' || f.fieldType === 'totp');
+  }
+  return false;
+}
+
 interface ItemEditorPaneProps {
   initialDraft: ItemDraft;
   isNew: boolean;
@@ -180,7 +196,6 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
   const iconPopUid = useId().replace(/:/g, '');
   const iconPopoverId = `icon-pop-${iconPopUid}`;
   const iconAnchorName = `--icon-btn-${iconPopUid}`;
-  const addFieldBaseId = useId().replace(/:/g, '');
   const iconPopoverRef = useRef<HTMLDivElement>(null);
   const commonPresets = getCommonFieldPresets(dict);
 
@@ -193,13 +208,82 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
   const [saving, setSaving] = useState(false);
   const [sshGenerating, setSshGenerating] = useState(false);
   const [qrBusyFieldId, setQrBusyFieldId] = useState<string | null>(null);
-  const [dragInfo, setDragInfo] = useState<{ sectionId: string; fieldIndex: number } | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [addMenuState, setAddMenuState] = useState<{
+    sectionId: string;
+    top?: number;
+    bottom?: number;
+    left: number;
+    maxHeight: number;
+  } | null>(null);
+  const [pointerDrag, setPointerDrag] = useState<{
+    sectionId: string;
+    fromIdx: number;
+    overIdx: number;
+  } | null>(null);
+
+  const pointerDragRef = useRef<{
+    sectionId: string;
+    fromIdx: number;
+    overIdx: number;
+  } | null>(null);
+  const draftRef = useRef(draft);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const fieldCardRefs = useRef(new Map<string, HTMLDivElement>());
+  draftRef.current = draft;
+
+  const isDirty = useMemo(
+    () => JSON.stringify(draft) !== JSON.stringify(initialDraft),
+    [draft, initialDraft],
+  );
+  const isDirtyRef = useRef(isDirty);
+  const confirmDiscardRef = useRef(confirmDiscard);
+  const addMenuStateRef = useRef(addMenuState);
+  isDirtyRef.current = isDirty;
+  confirmDiscardRef.current = confirmDiscard;
+  addMenuStateRef.current = addMenuState;
 
   useEffect(() => {
     setDraft(structuredClone(initialDraft));
     setDomainIconHost(initialDraft.icon?.kind === 'domain' ? initialDraft.icon.host : '');
     setLinkedSearch('');
+    setConfirmDiscard(false);
+    setAddMenuState(null);
+    setPointerDrag(null);
+    pointerDragRef.current = null;
   }, [initialDraft]);
+
+  useEffect(() => {
+    if (!isDirty && confirmDiscard) {
+      setConfirmDiscard(false);
+    }
+  }, [isDirty, confirmDiscard]);
+
+  useEffect(() => {
+    if (!addMenuState) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (target && addMenuRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest('[data-add-field-trigger="true"]')) return;
+      setAddMenuState(null);
+    };
+    const onKeyDownCapture = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setAddMenuState(null);
+      }
+    };
+    const onResize = () => setAddMenuState(null);
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDownCapture, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDownCapture, true);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [addMenuState]);
 
   const vaults = useVaultStore((s) => s.vaults);
   const allItems = useVaultStore((s) => s.items);
@@ -210,6 +294,30 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
   const getFilter = useUiStore((s) => s.getFilter);
   const stopEditing = useUiStore((s) => s.stopEditing);
   const showToast = useUiStore((s) => s.showToast);
+
+  useEffect(() => {
+    const onRequestCancel = () => {
+      if (addMenuStateRef.current) {
+        setAddMenuState(null);
+        return;
+      }
+      if (!isDirtyRef.current) {
+        stopEditing();
+        return;
+      }
+      setConfirmDiscard((prev) => !prev);
+    };
+    window.addEventListener('ks:editor-request-cancel', onRequestCancel);
+    return () => window.removeEventListener('ks:editor-request-cancel', onRequestCancel);
+  }, [stopEditing]);
+
+  const requestCancel = () => {
+    if (!isDirty) {
+      stopEditing();
+      return;
+    }
+    setConfirmDiscard(true);
+  };
 
   const tpl = TEMPLATE_MAP[draft.category] ?? TEMPLATE_MAP.login;
 
@@ -268,33 +376,120 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
     }));
   };
 
+  const startFieldPointerDrag = (
+    e: React.PointerEvent,
+    sectionId: string,
+    fromIdx: number,
+  ) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const initial = { sectionId, fromIdx, overIdx: fromIdx };
+    pointerDragRef.current = initial;
+    setPointerDrag(initial);
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const cur = pointerDragRef.current;
+      if (!cur) return;
+      const fields =
+        draftRef.current.sections.find((s) => s.id === cur.sectionId)?.fields ?? [];
+      if (fields.length <= 1) return;
+
+      let rank = 0;
+      for (let i = 0; i < fields.length; i += 1) {
+        if (i === cur.fromIdx) continue;
+        const el = fieldCardRefs.current.get(`${cur.sectionId}:${fields[i].id}`);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.top + rect.height / 2 < moveEvent.clientY) {
+          rank += 1;
+        }
+      }
+      if (rank !== cur.overIdx) {
+        const next = { ...cur, overIdx: rank };
+        pointerDragRef.current = next;
+        setPointerDrag(next);
+      }
+    };
+
+    const handleEnd = () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleEnd);
+      window.removeEventListener('pointercancel', handleEnd);
+      const cur = pointerDragRef.current;
+      pointerDragRef.current = null;
+      setPointerDrag(null);
+      if (cur && cur.fromIdx !== cur.overIdx) {
+        moveField(cur.sectionId, cur.fromIdx, cur.overIdx);
+      }
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleEnd);
+    window.addEventListener('pointercancel', handleEnd);
+  };
+
+  const openAddFieldMenu = (
+    e: React.MouseEvent<HTMLButtonElement>,
+    sectionId: string,
+  ) => {
+    if (addMenuState?.sectionId === sectionId) {
+      setAddMenuState(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const menuWidth = 248;
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - menuWidth - 12));
+    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    const spaceAbove = rect.top - 12;
+    if (spaceBelow >= 220 || spaceBelow >= spaceAbove) {
+      setAddMenuState({
+        sectionId,
+        top: rect.bottom + 6,
+        left,
+        maxHeight: Math.max(160, Math.min(360, spaceBelow)),
+      });
+    } else {
+      setAddMenuState({
+        sectionId,
+        bottom: window.innerHeight - rect.top + 6,
+        left,
+        maxHeight: Math.max(160, Math.min(360, spaceAbove)),
+      });
+    }
+  };
+
   const addFieldToSection = (sectionId: string, preset?: CommonFieldPreset) => {
-    setDraft((prev) => ({
-      ...prev,
-      sections: prev.sections.map((sec) =>
-        sec.id !== sectionId
-          ? sec
-          : {
-              ...sec,
-              fields: [
-                ...sec.fields,
-                {
-                  id: makeId('f'),
-                  label: preset
-                    ? preset.id === 'custom_text'
-                      ? dict.editor.customFieldDefault
-                      : preset.label
-                    : dict.editor.customFieldDefault,
-                  fieldType: preset?.fieldType ?? 'text',
-                  value: '',
-                  sensitive: preset?.sensitive ?? false,
-                  copyable: true,
-                  purpose: preset?.purpose,
-                },
-              ],
-            },
-      ),
-    }));
+    setDraft((prev) => {
+      if (preset && hasExistingSingletonPreset(prev, preset.id)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        sections: prev.sections.map((sec) =>
+          sec.id !== sectionId
+            ? sec
+            : {
+                ...sec,
+                fields: [
+                  ...sec.fields,
+                  {
+                    id: makeId('f'),
+                    label: preset
+                      ? preset.id === 'custom_text'
+                        ? dict.editor.customFieldDefault
+                        : preset.label
+                      : dict.editor.customFieldDefault,
+                    fieldType: preset?.fieldType ?? 'text',
+                    value: '',
+                    sensitive: preset?.sensitive ?? false,
+                    copyable: true,
+                    purpose: preset?.purpose,
+                  },
+                ],
+              },
+        ),
+      };
+    });
   };
 
   const removeField = (sectionId: string, fieldId: string) => {
@@ -480,88 +675,88 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
       onSubmit={(e) => void handleSave(e)}
       className="h-full flex flex-col bg-[var(--bg-detail)] overflow-hidden"
     >
-      {/* Sticky Editor Top Bar */}
-      <header
-        data-tauri-drag-region={customChrome ? true : undefined}
-        onDoubleClick={(e) => {
-          if (customChrome && e.target === e.currentTarget) {
-            void getCurrentWindow().toggleMaximize();
-          }
-        }}
-        className={`px-5 ${customChrome ? 'pr-[126px]' : ''} py-4 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-3 shrink-0 bg-[var(--bg-detail)]`}
-      >
-        <div className="flex items-center gap-3 min-w-[200px] flex-1">
-          <button
-            type="button"
-            popoverTarget={iconPopoverId}
-            style={{ anchorName: iconAnchorName } as React.CSSProperties}
-            title={dict.editor.customIconTitle}
-            className="relative group rounded-xl cursor-pointer shrink-0"
-          >
-            <ItemIconBadge icon={draft.icon} category={draft.category} title={draft.title} size="md" />
-            <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-strong)] flex items-center justify-center text-[var(--text-secondary)]">
-              <Palette size={9} />
-            </span>
-          </button>
+      {/* Sticky Editor Top Bar: Row 1 (Icon + Title + Cancel/Save aligned with window controls), Row 2 (Metadata) */}
+      <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-detail)] shrink-0">
+        <div
+          data-tauri-drag-region={customChrome ? true : undefined}
+          onDoubleClick={(e) => {
+            if (customChrome && e.target === e.currentTarget) {
+              void getCurrentWindow().toggleMaximize();
+            }
+          }}
+          className={`px-5 ${customChrome ? 'pr-[126px]' : ''} pt-3.5 flex items-center justify-between gap-3 flex-nowrap`}
+        >
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <button
+              type="button"
+              popoverTarget={iconPopoverId}
+              style={{ anchorName: iconAnchorName } as React.CSSProperties}
+              title={dict.editor.customIconTitle}
+              className="relative group rounded-xl cursor-pointer shrink-0"
+            >
+              <ItemIconBadge icon={draft.icon} category={draft.category} title={draft.title} size="md" />
+              <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-strong)] flex items-center justify-center text-[var(--text-secondary)]">
+                <Palette size={9} />
+              </span>
+            </button>
 
-          <div
-            ref={iconPopoverRef}
-            id={iconPopoverId}
-            popover="auto"
-            style={{ positionAnchor: iconAnchorName } as React.CSSProperties}
-            className="ks-popover ks-anchored-popover w-[250px]"
-          >
-            <div className="p-3 flex flex-col gap-3 text-xs">
-              <div className="font-semibold text-[var(--text-primary)]">{dict.editor.customIconTitle}</div>
-              <div>
-                <div className="text-[11px] text-[var(--text-secondary)] mb-1.5">{dict.editor.presetBadgeColor}</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {ICON_COLOR_PRESETS.map((color) => (
+            <div
+              ref={iconPopoverRef}
+              id={iconPopoverId}
+              popover="auto"
+              style={{ positionAnchor: iconAnchorName } as React.CSSProperties}
+              className="ks-popover ks-anchored-popover w-[250px]"
+            >
+              <div className="p-3 flex flex-col gap-3 text-xs">
+                <div className="font-semibold text-[var(--text-primary)]">{dict.editor.customIconTitle}</div>
+                <div>
+                  <div className="text-[11px] text-[var(--text-secondary)] mb-1.5">{dict.editor.presetBadgeColor}</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ICON_COLOR_PRESETS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => {
+                          setDraft((p) => ({
+                            ...p,
+                            icon: { kind: 'preset', name: tpl.iconName, color },
+                          }));
+                          iconPopoverRef.current?.hidePopover?.();
+                        }}
+                        className="w-6 h-6 rounded-lg border border-black/15 cursor-pointer"
+                        style={{ backgroundColor: color }}
+                        aria-label={fmt(dict.editor.pickColorAria, { color })}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="pt-2 border-t border-[var(--border-subtle)] flex flex-col gap-1.5">
+                  <div className="text-[11px] text-[var(--text-secondary)]">{dict.editor.orDomainFavicon}</div>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={domainIconHost}
+                      onChange={(e) => setDomainIconHost(e.target.value)}
+                      placeholder="github.com"
+                      className="flex-1 px-2 py-1 rounded-md bg-[var(--bg-input)] border border-[var(--border-strong)] text-xs font-mono-tabular text-[var(--text-primary)]"
+                    />
                     <button
-                      key={color}
                       type="button"
                       onClick={() => {
-                        setDraft((p) => ({
-                          ...p,
-                          icon: { kind: 'preset', name: tpl.iconName, color },
-                        }));
+                        const cleanHost = domainIconHost.trim().replace(/^https?:\/\//i, '').split('/')[0];
+                        if (!cleanHost) return;
+                        setDraft((p) => ({ ...p, icon: { kind: 'domain', host: cleanHost } }));
                         iconPopoverRef.current?.hidePopover?.();
                       }}
-                      className="w-6 h-6 rounded-lg border border-black/15 cursor-pointer"
-                      style={{ backgroundColor: color }}
-                      aria-label={fmt(dict.editor.pickColorAria, { color })}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div className="pt-2 border-t border-[var(--border-subtle)] flex flex-col gap-1.5">
-                <div className="text-[11px] text-[var(--text-secondary)]">{dict.editor.orDomainFavicon}</div>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    value={domainIconHost}
-                    onChange={(e) => setDomainIconHost(e.target.value)}
-                    placeholder="github.com"
-                    className="flex-1 px-2 py-1 rounded-md bg-[var(--bg-input)] border border-[var(--border-strong)] text-xs font-mono-tabular text-[var(--text-primary)]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const cleanHost = domainIconHost.trim().replace(/^https?:\/\//i, '').split('/')[0];
-                      if (!cleanHost) return;
-                      setDraft((p) => ({ ...p, icon: { kind: 'domain', host: cleanHost } }));
-                      iconPopoverRef.current?.hidePopover?.();
-                    }}
-                    className="px-2 py-1 rounded-md bg-[var(--accent-primary)] text-white text-[11px] cursor-pointer"
-                  >
-                    {dict.editor.applyBtn}
-                  </button>
+                      className="px-2 py-1 rounded-md bg-[var(--accent-primary)] text-white text-[11px] cursor-pointer"
+                    >
+                      {dict.editor.applyBtn}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div className="min-w-0 flex-1">
             <input
               type="text"
               value={draft.title}
@@ -569,68 +764,96 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
               placeholder={dict.editor.titlePlaceholder}
               required
               autoFocus
-              className="w-full px-2.5 py-1 -mx-2.5 rounded-lg text-[17px] font-semibold bg-transparent hover:bg-[var(--bg-hover)] focus:bg-[var(--bg-input)] border border-transparent focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/20 focus:outline-none text-[var(--text-primary)] transition-colors"
+              className="w-full min-w-0 flex-1 px-2.5 py-1 rounded-lg text-[17px] font-semibold bg-transparent hover:bg-[var(--bg-hover)] focus:bg-[var(--bg-input)] border border-transparent focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/20 focus:outline-none text-[var(--text-primary)] transition-colors"
             />
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="text-[11px] text-[var(--text-muted)]">{dict.categories[draft.category] ?? tpl.label}</span>
-              <span className="text-[var(--text-muted)]">·</span>
-              <select
-                value={draft.vaultId}
-                onChange={(e) => setDraft((p) => ({ ...p, vaultId: e.target.value }))}
-                aria-label={dict.editor.vaultSelectAria}
-                className="ks-select-sm min-w-[84px] text-[var(--text-primary)]"
-              >
-                {vaults
-                  .filter((v) => !v.isOrganization || v.id === draft.vaultId)
-                  .map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                    </option>
-                  ))}
-              </select>
-              <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)] cursor-pointer ml-1 whitespace-nowrap shrink-0">
-                <input
-                  type="checkbox"
-                  checked={Boolean(draft.archived)}
-                  onChange={(e) => setDraft((p) => ({ ...p, archived: e.target.checked }))}
-                  className="ks-checkbox"
-                />
-                <Archive size={11} />
-                <span>{dict.editor.archivedCheckbox}</span>
-              </label>
-              <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)] cursor-pointer ml-1 whitespace-nowrap shrink-0">
-                <input
-                  type="checkbox"
-                  checked={Boolean(draft.reprompt)}
-                  onChange={(e) => setDraft((p) => ({ ...p, reprompt: e.target.checked }))}
-                  className="ks-checkbox"
-                />
-                <Lock size={11} />
-                <span>{dict.editor.repromptLabel}</span>
-              </label>
-            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
+            <button
+              type="button"
+              onClick={requestCancel}
+              className="px-3 py-1.5 rounded-lg border border-[var(--border-strong)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-secondary)] cursor-pointer"
+            >
+              {dict.editor.cancel}
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white shadow-xs cursor-pointer"
+            >
+              <Check size={14} />
+              {saving
+                ? dict.editor.saving
+                : fmt(dict.editor.saveWithShortcut, { shortcut: formatShortcut(shortcuts.saveItem) })}
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
-          <button
-            type="button"
-            onClick={stopEditing}
-            className="px-3 py-1.5 rounded-lg border border-[var(--border-strong)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-secondary)] cursor-pointer"
+        <div className="px-5 pl-[64px] pt-2 pb-3 flex items-center flex-wrap gap-x-2.5 gap-y-1.5">
+          <span className="text-[11px] text-[var(--text-muted)]">{dict.categories[draft.category] ?? tpl.label}</span>
+          <span className="text-[var(--text-muted)]">·</span>
+          <select
+            value={draft.vaultId}
+            onChange={(e) => setDraft((p) => ({ ...p, vaultId: e.target.value }))}
+            aria-label={dict.editor.vaultSelectAria}
+            className="ks-select-sm min-w-[84px] text-[var(--text-primary)]"
           >
-            {dict.editor.cancel}
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white shadow-xs cursor-pointer"
-          >
-            <Check size={14} />
-            {saving
-              ? dict.editor.saving
-              : fmt(dict.editor.saveWithShortcut, { shortcut: formatShortcut(shortcuts.saveItem) })}
-          </button>
+            {vaults
+              .filter((v) => !v.isOrganization || v.id === draft.vaultId)
+              .map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+          </select>
+          <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)] cursor-pointer ml-1 whitespace-nowrap shrink-0">
+            <input
+              type="checkbox"
+              checked={Boolean(draft.archived)}
+              onChange={(e) => setDraft((p) => ({ ...p, archived: e.target.checked }))}
+              className="ks-checkbox"
+            />
+            <Archive size={11} />
+            <span>{dict.editor.archivedCheckbox}</span>
+          </label>
+          <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)] cursor-pointer ml-1 whitespace-nowrap shrink-0">
+            <input
+              type="checkbox"
+              checked={Boolean(draft.reprompt)}
+              onChange={(e) => setDraft((p) => ({ ...p, reprompt: e.target.checked }))}
+              className="ks-checkbox"
+            />
+            <Lock size={11} />
+            <span>{dict.editor.repromptLabel}</span>
+          </label>
         </div>
+
+        {confirmDiscard && (
+          <div className="px-5 py-2 bg-amber-500/10 border-t border-amber-500/25 flex items-center justify-between gap-3 text-xs">
+            <span className="text-amber-700 dark:text-amber-300 font-medium">
+              {dict.editor.discardConfirmTitle}
+            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setConfirmDiscard(false)}
+                className="px-2.5 py-1 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] cursor-pointer"
+              >
+                {dict.editor.keepEditingBtn}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmDiscard(false);
+                  stopEditing();
+                }}
+                className="px-2.5 py-1 rounded-md bg-[var(--status-danger)] hover:opacity-90 text-white font-medium cursor-pointer"
+              >
+                {dict.editor.discardConfirmBtn}
+              </button>
+            </div>
+          </div>
+        )}
       </header>
 
       {/* Scrollable Editor Body */}
@@ -681,26 +904,50 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
               {section.fields.map((field, fIdx) => {
                 const isSecret = field.sensitive || field.fieldType === 'password' || field.fieldType === 'totp' || field.fieldType === 'ssh_private_key';
                 const isMultiline = field.fieldType === 'multiline' || field.fieldType === 'ssh_private_key' || field.fieldType === 'ssh_public_key';
+                const isSectionDragging = pointerDrag?.sectionId === section.id;
+                const isDraggedCard = isSectionDragging && pointerDrag.fromIdx === fIdx;
+                const showDropBefore =
+                  isSectionDragging &&
+                  pointerDrag.overIdx < pointerDrag.fromIdx &&
+                  pointerDrag.overIdx === fIdx;
+                const showDropAfter =
+                  isSectionDragging &&
+                  pointerDrag.overIdx > pointerDrag.fromIdx &&
+                  pointerDrag.overIdx === fIdx;
 
                 return (
                   <div
                     key={field.id}
-                    draggable
-                    onDragStart={() => setDragInfo({ sectionId: section.id, fieldIndex: fIdx })}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => {
-                      if (dragInfo && dragInfo.sectionId === section.id) {
-                        moveField(section.id, dragInfo.fieldIndex, fIdx);
+                    ref={(el) => {
+                      const mapKey = `${section.id}:${field.id}`;
+                      if (el) {
+                        fieldCardRefs.current.set(mapKey, el);
+                      } else {
+                        fieldCardRefs.current.delete(mapKey);
                       }
-                      setDragInfo(null);
                     }}
-                    className="p-3 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] flex flex-col gap-2"
+                    className={`relative p-3 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] flex flex-col gap-2 transition-opacity ${
+                      isDraggedCard ? 'opacity-55 ring-1 ring-[var(--accent-primary)]/45' : ''
+                    }`}
                   >
+                    {showDropBefore && (
+                      <div className="pointer-events-none absolute -top-1.5 left-2 right-2 h-0.5 rounded-full bg-[var(--accent-primary)]" />
+                    )}
+                    {showDropAfter && (
+                      <div className="pointer-events-none absolute -bottom-1.5 left-2 right-2 h-0.5 rounded-full bg-[var(--accent-primary)]" />
+                    )}
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 flex-1 min-w-[160px]">
-                        <span className="cursor-grab text-[var(--text-muted)] shrink-0" title={dict.editor.dragSortTitle}>
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          onPointerDown={(e) => startFieldPointerDrag(e, section.id, fIdx)}
+                          aria-label={dict.editor.dragSortTitle}
+                          title={dict.editor.dragSortTitle}
+                          className="p-0.5 rounded hover:bg-[var(--bg-hover)] cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-primary)] shrink-0 touch-none"
+                        >
                           <GripVertical size={14} />
-                        </span>
+                        </button>
                         <input
                           type="text"
                           value={field.label}
@@ -831,12 +1078,12 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                     </div>
 
                     {field.fieldType === 'totp' && (
-                      <div className="flex items-center flex-wrap gap-2 pt-0.5">
+                      <div className="flex items-center flex-wrap gap-2 mt-0.5 pt-2 border-t border-[var(--border-subtle)]/70">
                         <button
                           type="button"
                           disabled={qrBusyFieldId === field.id}
                           onClick={() => void handleTotpFromScreen(section.id, field.id)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[var(--accent-primary)]/10 hover:bg-[var(--accent-primary)]/18 border border-[var(--accent-primary)]/30 text-[11px] font-medium text-[var(--accent-primary)] cursor-pointer disabled:opacity-60"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--bg-card)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer disabled:opacity-60"
                         >
                           <ScanLine size={11} />
                           {qrBusyFieldId === field.id ? dict.editor.qrRecognizing : dict.editor.scanQrScreen}
@@ -868,19 +1115,18 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
             </div>
 
             {(() => {
-              const safeSecId = section.id.replace(/[^a-zA-Z0-9_-]/g, '_');
-              const addFieldPopId = `add-field-pop-${addFieldBaseId}-${safeSecId}`;
-              const addFieldAnchorName = `--add-field-btn-${addFieldBaseId}-${safeSecId}`;
               const quickChips = commonPresets.filter(
                 (p) => p.id === 'totp' || p.id === 'password' || p.id === 'recovery_codes',
               );
+              const isMenuOpen = addMenuState?.sectionId === section.id;
 
               return (
-                <div className="flex items-center flex-wrap gap-2 pt-0.5">
+                <div className="flex items-center flex-wrap gap-2 mt-1 pt-3 border-t border-[var(--border-subtle)]">
                   <button
                     type="button"
-                    popoverTarget={addFieldPopId}
-                    style={{ anchorName: addFieldAnchorName } as React.CSSProperties}
+                    data-add-field-trigger="true"
+                    aria-expanded={isMenuOpen}
+                    onClick={(e) => openAddFieldMenu(e, section.id)}
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-detail)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--accent-primary)] cursor-pointer"
                   >
                     <Plus size={13} />
@@ -888,50 +1134,26 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
                     <ChevronDown size={12} className="opacity-70" />
                   </button>
 
-                  <div
-                    id={addFieldPopId}
-                    popover="auto"
-                    style={{ positionAnchor: addFieldAnchorName } as React.CSSProperties}
-                    className="ks-popover ks-anchored-popover w-[240px]"
-                  >
-                    <div className="p-1.5 flex flex-col gap-0.5 text-xs">
-                      <div className="px-2.5 py-1 text-[10.5px] font-semibold text-[var(--text-muted)]">
-                        {dict.editor.commonFieldsTitle}
-                      </div>
-                      {commonPresets.map((preset) => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => {
-                            addFieldToSection(section.id, preset);
-                            (document.getElementById(addFieldPopId) as HTMLElement | null)?.hidePopover?.();
-                          }}
-                          className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-left text-[var(--text-primary)] cursor-pointer"
-                        >
-                          <span className="inline-flex items-center gap-2 min-w-0">
-                            {preset.icon}
-                            <span className="truncate font-medium">{preset.label}</span>
-                          </span>
-                          <span className="text-[10.5px] text-[var(--text-muted)] shrink-0">
-                            {dict.editor.fieldTypes[preset.fieldType as keyof typeof dict.editor.fieldTypes] ??
-                              preset.fieldType}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {quickChips.map((chip) => (
-                    <button
-                      key={chip.id}
-                      type="button"
-                      onClick={() => addFieldToSection(section.id, chip)}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--bg-detail)] hover:bg-[var(--bg-selected)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
-                    >
-                      <Plus size={11} />
-                      <span>{chip.label}</span>
-                    </button>
-                  ))}
+                  {quickChips.map((chip) => {
+                    const alreadyAdded = hasExistingSingletonPreset(draft, chip.id);
+                    return (
+                      <button
+                        key={chip.id}
+                        type="button"
+                        disabled={alreadyAdded}
+                        title={alreadyAdded ? dict.editor.fieldAddedBadge : undefined}
+                        onClick={() => addFieldToSection(section.id, chip)}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[11px] ${
+                          alreadyAdded
+                            ? 'text-[var(--text-muted)] opacity-50 cursor-not-allowed'
+                            : 'hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer'
+                        }`}
+                      >
+                        {alreadyAdded ? <Check size={11} /> : <Plus size={11} />}
+                        <span>{chip.label}</span>
+                      </button>
+                    );
+                  })}
 
                   {(draft.category === 'ssh_key' ||
                     section.fields.some(
@@ -1268,6 +1490,68 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
           />
         </div>
       </div>
+
+      {addMenuState &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={addMenuRef}
+            role="menu"
+            data-ks-dropdown-open="true"
+            style={{
+              position: 'fixed',
+              left: addMenuState.left,
+              top: addMenuState.top,
+              bottom: addMenuState.bottom,
+              width: 248,
+              maxHeight: addMenuState.maxHeight,
+              zIndex: 70,
+            }}
+            className="rounded-xl border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-2xl overflow-y-auto ks-scroll p-1.5 flex flex-col gap-0.5 text-xs"
+          >
+            <div className="px-2.5 py-1 text-[10.5px] font-semibold text-[var(--text-muted)]">
+              {dict.editor.commonFieldsTitle}
+            </div>
+            {commonPresets.map((preset) => {
+              const alreadyAdded = hasExistingSingletonPreset(draft, preset.id);
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  role="menuitem"
+                  disabled={alreadyAdded}
+                  onClick={() => {
+                    if (alreadyAdded) return;
+                    addFieldToSection(addMenuState.sectionId, preset);
+                    setAddMenuState(null);
+                  }}
+                  className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-left ${
+                    alreadyAdded
+                      ? 'text-[var(--text-muted)] opacity-55 cursor-not-allowed'
+                      : 'hover:bg-[var(--bg-hover)] text-[var(--text-primary)] cursor-pointer'
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-2 min-w-0">
+                    {preset.icon}
+                    <span className="truncate font-medium">{preset.label}</span>
+                  </span>
+                  {alreadyAdded ? (
+                    <span className="inline-flex items-center gap-1 text-[10.5px] text-[var(--text-muted)] shrink-0">
+                      <Check size={11} />
+                      {dict.editor.fieldAddedBadge}
+                    </span>
+                  ) : (
+                    <span className="text-[10.5px] text-[var(--text-muted)] shrink-0">
+                      {dict.editor.fieldTypes[preset.fieldType as keyof typeof dict.editor.fieldTypes] ??
+                        preset.fieldType}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
     </form>
   );
 }

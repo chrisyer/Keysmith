@@ -96,8 +96,19 @@ export function useKeyboardShortcuts(searchInputRef: React.RefObject<HTMLInputEl
       }
 
       if (e.key === 'Escape' && ui.isEditing) {
+        if (
+          document.querySelector(
+            '[popover]:popover-open, [popover].\\:popover-open, [data-ks-dropdown-open="true"]',
+          )
+        ) {
+          return;
+        }
+        if (document.activeElement instanceof HTMLSelectElement) {
+          document.activeElement.blur();
+          return;
+        }
         e.preventDefault();
-        ui.stopEditing();
+        window.dispatchEvent(new CustomEvent('ks:editor-request-cancel'));
         return;
       }
 

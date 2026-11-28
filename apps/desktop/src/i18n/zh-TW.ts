@@ -365,6 +365,10 @@ export const zhTW = {
     linkedItemsLabel: '關聯項目',
     linkedItemsSearchPlaceholder: '搜尋要關聯的項目（如伺服器、SSH 金鑰、資料庫）...',
     linkedItemsEmpty: '尚無關聯項目',
+    fieldAddedBadge: '已新增',
+    discardConfirmTitle: '確定放棄未儲存的變更？',
+    discardConfirmBtn: '放棄變更',
+    keepEditingBtn: '繼續編輯',
     fieldTypes: {
       text: '文字',
       password: '密碼',
@@ -533,7 +537,6 @@ export const zhTW = {
     emergencyKitDesc: '產生可列印 A4 救援文件（含伺服器位址、信箱與離線手寫主密碼欄）',
     emergencyKitBtn: '下載緊急救援 PDF',
     sshAgentTitle: 'SSH Agent 生物辨識確認',
-    sshAgentDesc: '使用 SSH 金鑰簽章時要求 Touch ID / Windows Hello / Polkit 確認（60 秒快取）',
     trashPurgeTitle: '自動清空垃圾桶',
     trashPurgeDesc: '自動永久刪除移至垃圾桶超過保留天數的項目',
     days90: '每 90 天',

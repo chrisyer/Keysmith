@@ -365,6 +365,10 @@ export const de = {
     linkedItemsLabel: 'Verknüpfte Einträge',
     linkedItemsSearchPlaceholder: 'Einträge zum Verknüpfen suchen (SSH-Schlüssel, API-Token, Server)...',
     linkedItemsEmpty: 'Keine verknüpften Einträge',
+    fieldAddedBadge: 'Hinzugefügt',
+    discardConfirmTitle: 'Ungespeicherte Änderungen verwerfen?',
+    discardConfirmBtn: 'Änderungen verwerfen',
+    keepEditingBtn: 'Weiter bearbeiten',
     fieldTypes: {
       text: 'Text',
       password: 'Passwort',
@@ -533,7 +537,6 @@ export const de = {
     emergencyKitDesc: 'A4-Notfallblatt mit Server-URL, E-Mail und Feld für das Master-Passwort erstellen',
     emergencyKitBtn: 'Notfall-Kit-PDF herunterladen',
     sshAgentTitle: 'Biometrische SSH-Agent-Bestätigung',
-    sshAgentDesc: 'Touch ID / Windows Hello / Polkit vor SSH-Signaturen verlangen (60 Sek. Cache pro Schlüssel)',
     trashPurgeTitle: 'Papierkorb automatisch leeren',
     trashPurgeDesc: 'Alte Einträge im Papierkorb nach Ablauf der Frist endgültig löschen',
     days90: 'Alle 90 Tage',
