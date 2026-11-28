@@ -3,9 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 import { ColoredPassword } from '../../components/ColoredPassword';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
 import { TotpRow } from '../../components/TotpRow';
-import { useI18n } from '../../i18n';
+import { localizeBuiltinFieldLabel, useI18n } from '../../i18n';
 import { tauriClient } from '../../services/tauriClient';
 import type { AuthStatus, ItemDetail, ItemSummary } from '../../types/domain';
+import { formatShortcut } from '../../utils/shortcuts';
 
 export function QuickAccessWindow() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -14,22 +15,31 @@ export function QuickAccessWindow() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('Unlocked');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ItemSummary[]>([]);
+  const [loadingItems, setLoadingItems] = useState(true);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(true);
   const [previewDetail, setPreviewDetail] = useState<ItemDetail | null>(null);
   const [inlineMsg, setInlineMsg] = useState<string | null>(null);
   const queryRef = useRef(query);
   const authStatusRef = useRef(authStatus);
+  const lastFocusTsRef = useRef(Date.now());
   queryRef.current = query;
   authStatusRef.current = authStatus;
 
-  const refreshResults = async (search: string) => {
+  const refreshResults = async (search: string, showSpinner = false) => {
+    if (showSpinner) setLoadingItems(true);
     try {
-      const list = await tauriClient.itemList({ query: search, trashed: false, sortBy: 'title_asc' });
+      const list = await tauriClient.itemList({
+        query: search.trim(),
+        trashed: false,
+        sortBy: 'title_asc',
+      });
       setResults(list);
       setSelectedIdx(0);
     } catch {
       setResults([]);
+    } finally {
+      setLoadingItems(false);
     }
   };
 
@@ -38,12 +48,16 @@ export function QuickAccessWindow() {
       .sessionGetState()
       .then((s) => {
         setAuthStatus(s.status);
+        authStatusRef.current = s.status;
         if (s.status === 'Unlocked') {
-          void refreshResults('');
+          void refreshResults('', true);
+        } else {
+          setLoadingItems(false);
         }
       })
       .catch(() => {
         setAuthStatus('Locked');
+        setLoadingItems(false);
       });
 
     const unsubSession = tauriClient.onEvent('session:state_changed', ({ status }) => {
@@ -64,13 +78,18 @@ export function QuickAccessWindow() {
     });
 
     const onFocus = () => {
+      lastFocusTsRef.current = Date.now();
+      setInlineMsg(null);
+      if (!queryRef.current.trim()) {
+        setQuery('');
+      }
       inputRef.current?.focus();
       inputRef.current?.select();
       void tauriClient.sessionGetState().then((s) => {
         setAuthStatus(s.status);
         authStatusRef.current = s.status;
         if (s.status === 'Unlocked') {
-          void refreshResults(queryRef.current);
+          void refreshResults(queryRef.current, results.length === 0);
         }
       });
     };
@@ -88,14 +107,18 @@ export function QuickAccessWindow() {
     if (authStatus !== 'Unlocked') return;
     let active = true;
     void tauriClient
-      .itemList({ query, trashed: false, sortBy: 'title_asc' })
+      .itemList({ query: query.trim(), trashed: false, sortBy: 'title_asc' })
       .then((list) => {
         if (!active) return;
         setResults(list);
         setSelectedIdx(0);
+        setLoadingItems(false);
       })
       .catch(() => {
-        if (active) setResults([]);
+        if (active) {
+          setResults([]);
+          setLoadingItems(false);
+        }
       });
     return () => {
       active = false;
@@ -125,6 +148,7 @@ export function QuickAccessWindow() {
 
   const hideWindow = () => {
     setInlineMsg(null);
+    setQuery('');
     void tauriClient.windowHideQuickAccess();
   };
 
@@ -156,7 +180,11 @@ export function QuickAccessWindow() {
         await openInMain();
         return;
       }
-      await tauriClient.clipboardCopySecret(pw.value, pw.label, pw.sensitive);
+      await tauriClient.clipboardCopySecret(
+        pw.value,
+        localizeBuiltinFieldLabel(pw.label, dict, pw.purpose),
+        pw.sensitive,
+      );
       hideWindow();
       return;
     }
@@ -167,7 +195,11 @@ export function QuickAccessWindow() {
         setInlineMsg(dict.common.none);
         return;
       }
-      await tauriClient.clipboardCopySecret(user.value, user.label, false);
+      await tauriClient.clipboardCopySecret(
+        user.value,
+        localizeBuiltinFieldLabel(user.label, dict, user.purpose),
+        false,
+      );
       hideWindow();
       return;
     }
@@ -304,7 +336,18 @@ export function QuickAccessWindow() {
               ref={inputRef}
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (
+                  queryRef.current === '' &&
+                  next.length > 0 &&
+                  next.trim() === '' &&
+                  Date.now() - lastFocusTsRef.current < 180
+                ) {
+                  return;
+                }
+                setQuery(next);
+              }}
               autoFocus
               placeholder={dict.quickAccess.searchPlaceholder}
               aria-label={dict.common.search}
@@ -332,7 +375,11 @@ export function QuickAccessWindow() {
 
           <div className="flex-1 min-h-0 flex overflow-hidden">
             <div className="flex-1 overflow-y-auto ks-scroll p-2.5 flex flex-col gap-0.5">
-              {results.length === 0 ? (
+              {loadingItems && results.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)] py-12">
+                  {dict.quickAccess.loading}
+                </div>
+              ) : results.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)] py-12">
                   {dict.quickAccess.noMatch}
                 </div>
@@ -365,7 +412,7 @@ export function QuickAccessWindow() {
                       </div>
                       {selected && (
                         <span className="text-[11px] text-[var(--accent-primary)] font-medium shrink-0 flex items-center gap-1">
-                          ⏎ {item.hasPassword ? dict.quickAccess.copyPw : dict.quickAccess.copyFirst}
+                          {formatShortcut('Enter')} {item.hasPassword ? dict.quickAccess.copyPw : dict.quickAccess.copyFirst}
                           <ArrowRight size={11} />
                         </span>
                       )}
@@ -398,7 +445,12 @@ export function QuickAccessWindow() {
                     {previewPw && !repromptLocked && (
                       <button
                         type="button"
-                        onClick={() => void tauriClient.windowOpenLargeType(previewPw.label, previewPw.value)}
+                        onClick={() =>
+                          void tauriClient.windowOpenLargeType(
+                            localizeBuiltinFieldLabel(previewPw.label, dict, previewPw.purpose),
+                            previewPw.value,
+                          )
+                        }
                         title={dict.quickAccess.largeType}
                         aria-label={dict.quickAccess.largeType}
                         className="p-1.5 rounded-md hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
@@ -409,7 +461,9 @@ export function QuickAccessWindow() {
                     <button
                       type="button"
                       onClick={() => void openInMain()}
-                      title={`${dict.quickAccess.openInMain} (⌘O)`}
+                      title={fmt(dict.quickAccess.openInMainTitle, {
+                        shortcut: formatShortcut('CommandOrControl+O'),
+                      })}
                       aria-label={dict.quickAccess.openInMain}
                       className="p-1.5 rounded-md hover:bg-[var(--bg-hover)] text-[var(--accent-primary)] cursor-pointer"
                     >
@@ -420,6 +474,7 @@ export function QuickAccessWindow() {
 
                 <div className="flex-1 min-h-0 overflow-y-auto ks-scroll rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] divide-y divide-[var(--border-subtle)]">
                   {previewDetail.sections.flatMap((s) => s.fields).map((field) => {
+                    const fieldLabel = localizeBuiltinFieldLabel(field.label, dict, field.purpose);
                     if (field.fieldType === 'totp' && field.value) {
                       if (repromptLocked) {
                         return (
@@ -432,7 +487,7 @@ export function QuickAccessWindow() {
                             className="px-3 py-2 flex items-center justify-between gap-2 hover:bg-[var(--bg-hover)] cursor-pointer"
                           >
                             <div className="min-w-0">
-                              <div className="text-[10.5px] text-[var(--text-muted)]">{field.label}</div>
+                              <div className="text-[10.5px] text-[var(--text-muted)]">{fieldLabel}</div>
                               <div className="font-mono-tabular tracking-[0.18em] text-xs text-[var(--text-muted)] mt-0.5">
                                 ••••••
                               </div>
@@ -441,7 +496,7 @@ export function QuickAccessWindow() {
                           </div>
                         );
                       }
-                      return <TotpRow key={field.id} label={field.label} secretOrUri={field.value} />;
+                      return <TotpRow key={field.id} label={fieldLabel} secretOrUri={field.value} />;
                     }
                     return (
                       <div
@@ -453,14 +508,14 @@ export function QuickAccessWindow() {
                             void openInMain();
                             return;
                           }
-                          void tauriClient.clipboardCopySecret(field.value, field.label, field.sensitive);
-                          setInlineMsg(fmt('{copied}「{label}」', { copied: dict.common.copied, label: field.label }));
+                          void tauriClient.clipboardCopySecret(field.value, fieldLabel, field.sensitive);
+                          setInlineMsg(fmt(dict.quickAccess.copiedFieldInline, { label: fieldLabel }));
                           setTimeout(() => setInlineMsg(null), 1600);
                         }}
                         className="px-3 py-2 flex items-center justify-between gap-2 hover:bg-[var(--bg-hover)] cursor-pointer"
                       >
                         <div className="min-w-0">
-                          <div className="text-[10.5px] text-[var(--text-muted)]">{field.label}</div>
+                          <div className="text-[10.5px] text-[var(--text-muted)]">{fieldLabel}</div>
                           <div className="text-xs truncate mt-0.5">
                             {field.sensitive ? (
                               repromptLocked ? (
@@ -506,7 +561,7 @@ export function QuickAccessWindow() {
                   <button
                     type="button"
                     onClick={() => void triggerAutoType()}
-                    title="⌘⇧⏎"
+                    title={formatShortcut('CommandOrControl+Shift+Enter')}
                     className="py-1.5 px-2.5 rounded-lg border border-[var(--border-strong)] text-xs text-[var(--text-primary)] hover:bg-[var(--bg-hover)] inline-flex items-center gap-1 cursor-pointer"
                   >
                     <Keyboard size={12} />
@@ -520,11 +575,11 @@ export function QuickAccessWindow() {
           <div className="px-4 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-card)]/60 flex items-center justify-between flex-wrap gap-2 text-[10px] text-[var(--text-muted)] shrink-0">
             <div className="flex items-center gap-3 flex-wrap">
               <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">↑↓</kbd> {dict.quickAccess.legendSelect}</span>
-              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⏎</kbd> {dict.quickAccess.legendCopyPw}</span>
-              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⇧⏎</kbd> {dict.quickAccess.legendCopyUser}</span>
-              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⌥⏎</kbd> {dict.quickAccess.legendCopyTotp}</span>
-              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⌘⇧⏎</kbd> {dict.quickAccess.legendAutoType}</span>
-              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⌘O</kbd> {dict.quickAccess.legendOpenMain}</span>
+              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Enter')}</kbd> {dict.quickAccess.legendCopyPw}</span>
+              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Shift+Enter')}</kbd> {dict.quickAccess.legendCopyUser}</span>
+              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Alt+Enter')}</kbd> {dict.quickAccess.legendCopyTotp}</span>
+              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('CommandOrControl+Shift+Enter')}</kbd> {dict.quickAccess.legendAutoType}</span>
+              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('CommandOrControl+O')}</kbd> {dict.quickAccess.legendOpenMain}</span>
             </div>
             <span>{dict.quickAccess.legendEscHide}</span>
           </div>

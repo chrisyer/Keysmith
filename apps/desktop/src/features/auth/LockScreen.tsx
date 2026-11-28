@@ -1,5 +1,11 @@
 import { ArrowRight, Fingerprint, Globe, Loader2, Lock, LogOut, UserPlus } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  isCustomWindowChrome,
+  useWindowMaximized,
+  WindowControls,
+  WindowResizeHandles,
+} from '../../components/WindowChrome';
 import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
 import { isTauriRuntime } from '../../services/tauriClient';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -8,6 +14,8 @@ import { useVaultStore } from '../../stores/vaultStore';
 
 export function LockScreen() {
   const inTauri = isTauriRuntime();
+  const customChrome = isCustomWindowChrome();
+  const isMaximized = useWindowMaximized();
   const { dict, languageMode, setLanguageMode, fmt } = useI18n();
 
   const accountId = useSessionStore((s) => s.accountId);
@@ -110,12 +118,14 @@ export function LockScreen() {
     <div
       className={
         inTauri
-          ? 'h-dvh w-full flex flex-col bg-[var(--bg-elevated)] backdrop-blur-2xl overflow-hidden'
+          ? `h-dvh w-full flex flex-col bg-[var(--bg-elevated)] backdrop-blur-2xl overflow-hidden ${
+              customChrome && !isMaximized ? 'border border-[var(--border-strong)]' : ''
+            }`
           : 'w-full max-w-[390px] rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-2xl overflow-hidden flex flex-col'
       }
     >
-      {/* Top Bar (with drag region on desktop & clean compact language pill) */}
-      <div className="relative h-11 px-3.5 flex items-center justify-end shrink-0">
+      {/* Top Bar (with drag region on desktop & clean compact language pill + window controls) */}
+      <div className="relative h-11 px-3.5 flex items-center justify-end gap-1.5 shrink-0">
         {inTauri && <div data-tauri-drag-region className="absolute inset-0" />}
         <label className="relative z-10 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--bg-card)]/70 hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] cursor-pointer">
           <Globe size={12} className="shrink-0" />
@@ -133,7 +143,13 @@ export function LockScreen() {
             ))}
           </select>
         </label>
+        {customChrome && (
+          <div className="relative z-10 -mr-1.5">
+            <WindowControls compact maximized={isMaximized} />
+          </div>
+        )}
       </div>
+      {customChrome && <WindowResizeHandles disabled={isMaximized} />}
 
       {/* Main Centered Lock Content */}
       <div className="flex-1 overflow-y-auto ks-scroll px-7 pb-5 pt-2 flex flex-col items-center justify-center text-center">

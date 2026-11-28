@@ -457,6 +457,7 @@ fn handle_menu_action(app: &AppHandle, raw_id: &str) {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn build_app_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>> {
     let l = menu_labels(lang);
     let about_item = MenuItem::with_id(app, "app:about", l.about, true, None::<&str>)?;
@@ -987,13 +988,27 @@ pub fn run() {
 
             // Close-to-tray behavior + focus auto-sync check on main window
             if let Some(main_win) = handle.get_webview_window("main") {
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let _ = main_win.set_decorations(false);
+                }
                 let win_handle = handle.clone();
                 let win_core = Arc::clone(&core);
                 let focus_sync_poke = sync_poke.clone();
                 let last_focus_poke = Mutex::new(None::<std::time::Instant>);
                 main_win.on_window_event(move |event| match event {
                     WindowEvent::CloseRequested { api, .. } => {
-                        if win_core.session_get_state().close_to_tray {
+                        let allow_hide_to_tray = win_core.session_get_state().close_to_tray && {
+                            #[cfg(target_os = "linux")]
+                            {
+                                crate::linux_native::has_tray_watcher()
+                            }
+                            #[cfg(not(target_os = "linux"))]
+                            {
+                                true
+                            }
+                        };
+                        if allow_hide_to_tray {
                             api.prevent_close();
                             if let Some(w) = win_handle.get_webview_window("main") {
                                 let _ = w.hide();
@@ -1204,6 +1219,8 @@ pub fn run() {
             commands::browser_integration_status,
             commands::browser_integration_configure,
             commands::browser_open_extension_folder,
+            commands::platform_get_capabilities,
+            commands::app_quit,
             commands::app_check_update_info,
             commands::app_settings_get,
             commands::app_settings_update,

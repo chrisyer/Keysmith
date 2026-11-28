@@ -3,6 +3,12 @@ import { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
 import { LargeTypeModal } from './components/LargeTypeModal';
 import { PaneResizer } from './components/PaneResizer';
 import { ToastRegion } from './components/ToastRegion';
+import {
+  isCustomWindowChrome,
+  useWindowMaximized,
+  WindowResizeHandles,
+  WindowTitleBar,
+} from './components/WindowChrome';
 import { AuthScreen } from './features/auth/AuthScreen';
 import { LockScreen } from './features/auth/LockScreen';
 import { ItemDetailPane } from './features/detail/ItemDetailPane';
@@ -22,7 +28,7 @@ import { createEmptyDraft } from './services/templates';
 import { useSessionStore } from './stores/sessionStore';
 import { useUiStore } from './stores/uiStore';
 import { useVaultStore } from './stores/vaultStore';
-import { formatShortcutMac } from './utils/shortcuts';
+import { formatShortcutMac, isMacPlatform } from './utils/shortcuts';
 import { applyThemeMode, subscribeThemeChanges } from './utils/theme';
 import { ensurePopoverPolyfill } from './utils/topLayer';
 
@@ -58,10 +64,9 @@ function MainWorkspaceApp() {
   const retryInit = useSessionStore((s) => s.retryInit);
   const setAuthStatus = useSessionStore((s) => s.setAuthStatus);
 
-  const isMacDesktop =
-    isTauriRuntime() &&
-    typeof navigator !== 'undefined' &&
-    /Mac/i.test(navigator.platform || navigator.userAgent);
+  const isMacDesktop = isTauriRuntime() && isMacPlatform();
+  const customChrome = isCustomWindowChrome();
+  const isMaximized = useWindowMaximized();
 
   const vaults = useVaultStore((s) => s.vaults);
   const activeItem = useVaultStore((s) => s.activeItem);
@@ -102,6 +107,18 @@ function MainWorkspaceApp() {
 
   useKeyboardShortcuts(searchInputRef);
   useActivityTracker();
+
+  useEffect(() => {
+    if (!customChrome) return;
+    const onQuitShortcut = (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'q') {
+        e.preventDefault();
+        void tauriClient.appQuit();
+      }
+    };
+    window.addEventListener('keydown', onQuitShortcut);
+    return () => window.removeEventListener('keydown', onQuitShortcut);
+  }, [customChrome]);
 
   useEffect(() => {
     ensurePopoverPolyfill();
@@ -303,11 +320,17 @@ function MainWorkspaceApp() {
     return null;
   }, [isEditing, creatingDraftCategory, activeVaultId, vaults, activeItem, locale]);
 
+  const chromeBorderClass = customChrome && !isMaximized ? 'border border-[var(--border-strong)]' : '';
+
   if (!initialized) {
     return (
       <>
-        <div className="h-dvh w-full flex items-center justify-center bg-[var(--bg-sidebar)] text-xs text-[var(--text-muted)]">
-          {dict.app.initializing}
+        <div className={`h-dvh w-full flex flex-col bg-[var(--bg-sidebar)] ${chromeBorderClass}`}>
+          {customChrome && <WindowTitleBar maximized={isMaximized} />}
+          <div className="flex-1 flex items-center justify-center text-xs text-[var(--text-muted)]">
+            {dict.app.initializing}
+          </div>
+          {customChrome && <WindowResizeHandles disabled={isMaximized} />}
         </div>
         <ToastRegion />
       </>
@@ -317,22 +340,26 @@ function MainWorkspaceApp() {
   if (initError) {
     return (
       <>
-        <div className="h-dvh w-full flex items-center justify-center bg-[var(--bg-sidebar)] p-6">
-          <div className="w-full max-w-[380px] rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-xl p-7 text-center flex flex-col items-center">
-            <div className="w-11 h-11 rounded-xl bg-[var(--status-danger)]/10 border border-[var(--status-danger)]/25 flex items-center justify-center text-[var(--status-danger)] mb-4">
-              <AlertCircle size={20} />
+        <div className={`h-dvh w-full flex flex-col bg-[var(--bg-sidebar)] ${chromeBorderClass}`}>
+          {customChrome && <WindowTitleBar maximized={isMaximized} />}
+          <div className="flex-1 flex items-center justify-center p-6">
+            <div className="w-full max-w-[380px] rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-xl p-7 text-center flex flex-col items-center">
+              <div className="w-11 h-11 rounded-xl bg-[var(--status-danger)]/10 border border-[var(--status-danger)]/25 flex items-center justify-center text-[var(--status-danger)] mb-4">
+                <AlertCircle size={20} />
+              </div>
+              <h1 className="text-[15px] font-semibold text-[var(--text-primary)]">{dict.app.initFailed}</h1>
+              <p className="text-xs text-[var(--text-secondary)] mt-1.5">{initError}</p>
+              <button
+                type="button"
+                onClick={() => void retryInit()}
+                className="mt-5 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white cursor-pointer"
+              >
+                <RefreshCw size={13} />
+                {dict.app.retryInit}
+              </button>
             </div>
-            <h1 className="text-[15px] font-semibold text-[var(--text-primary)]">{dict.app.initFailed}</h1>
-            <p className="text-xs text-[var(--text-secondary)] mt-1.5">{initError}</p>
-            <button
-              type="button"
-              onClick={() => void retryInit()}
-              className="mt-5 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white cursor-pointer"
-            >
-              <RefreshCw size={13} />
-              {dict.app.retryInit}
-            </button>
           </div>
+          {customChrome && <WindowResizeHandles disabled={isMaximized} />}
         </div>
         <ToastRegion />
       </>
@@ -364,12 +391,14 @@ function MainWorkspaceApp() {
 
   return (
     <div
-      className={`h-dvh w-screen overflow-y-hidden overflow-x-auto flex text-[var(--text-primary)] ${
+      className={`h-dvh w-screen overflow-hidden flex flex-col text-[var(--text-primary)] ${
         vibrancyEnabled && isMacDesktop ? 'bg-transparent' : 'bg-[var(--bg-detail)]'
-      }`}
+      } ${chromeBorderClass}`}
     >
-      {/* Pane 1: Sidebar */}
-      <Sidebar />
+      {customChrome && <WindowTitleBar maximized={isMaximized} />}
+      <div className="flex-1 min-h-0 w-full overflow-y-hidden overflow-x-auto flex">
+        {/* Pane 1: Sidebar */}
+        <Sidebar />
 
       <PaneResizer
         ariaLabel={dict.app.resizeSidebarAria}
@@ -429,6 +458,9 @@ function MainWorkspaceApp() {
           </main>
         </>
       )}
+      </div>
+
+      {customChrome && <WindowResizeHandles disabled={isMaximized} />}
 
       {/* Modals & Top-Layer Overlays */}
       <LargeTypeModal />

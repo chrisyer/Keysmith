@@ -156,19 +156,74 @@ export function matchesShortcut(e: KeyboardEvent, combo: string): boolean {
   return actualKey.toLowerCase() === expectKey.toLowerCase();
 }
 
-export function formatShortcutMac(combo: string): string {
+export function isMacPlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const plat = navigator.platform || navigator.userAgent || '';
+  return /Mac/i.test(plat) && !/iPhone|iPad|iPod/i.test(plat);
+}
+
+export function isWindowsPlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const plat = navigator.platform || navigator.userAgent || '';
+  return /Win/i.test(plat);
+}
+
+export function isLinuxPlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const plat = navigator.platform || navigator.userAgent || '';
+  return !/Win/i.test(plat) && /Linux/i.test(plat);
+}
+
+export function formatShortcut(combo: string, platform?: 'mac' | 'other'): string {
   if (!combo) return '';
+  const useMac = platform ? platform === 'mac' : isMacPlatform();
   const parts = combo.split('+').map((p) => p.trim()).filter(Boolean);
+
+  if (useMac) {
+    return parts
+      .map((p) => {
+        const lower = p.toLowerCase();
+        if (lower === 'commandorcontrol' || lower === 'cmdorctrl' || lower === 'command' || lower === 'cmd') return '⌘';
+        if (lower === 'ctrl' || lower === 'control') return '⌃';
+        if (lower === 'alt' || lower === 'option') return '⌥';
+        if (lower === 'shift') return '⇧';
+        if (lower === 'backspace') return '⌫';
+        if (lower === 'delete') return '⌦';
+        if (lower === 'enter' || lower === 'return') return '⏎';
+        if (lower === 'escape' || lower === 'esc') return 'Esc';
+        if (lower === 'comma') return ',';
+        if (lower === 'space') return 'Space';
+        if (lower === 'arrowup') return '↑';
+        if (lower === 'arrowdown') return '↓';
+        if (lower === 'arrowleft') return '←';
+        if (lower === 'arrowright') return '→';
+        return p.length === 1 ? p.toUpperCase() : p;
+      })
+      .join('');
+  }
+
   return parts
     .map((p) => {
       const lower = p.toLowerCase();
-      if (lower === 'commandorcontrol' || lower === 'cmdorctrl' || lower === 'command') return '⌘';
-      if (lower === 'ctrl' || lower === 'control') return '⌃';
-      if (lower === 'alt' || lower === 'option') return '⌥';
-      if (lower === 'shift') return '⇧';
-      if (lower === 'backspace') return '⌫';
-      if (lower === 'delete') return '⌦';
-      if (lower === 'enter' || lower === 'return') return '⏎';
+      if (
+        lower === 'commandorcontrol' ||
+        lower === 'cmdorctrl' ||
+        lower === 'command' ||
+        lower === 'cmd' ||
+        lower === 'meta' ||
+        lower === 'super' ||
+        lower === 'ctrl' ||
+        lower === 'control'
+      ) {
+        return 'Ctrl';
+      }
+      if (lower === 'alt' || lower === 'option') return 'Alt';
+      if (lower === 'shift') return 'Shift';
+      if (lower === 'backspace') return 'Backspace';
+      if (lower === 'delete') return 'Del';
+      if (lower === 'enter' || lower === 'return') return 'Enter';
+      if (lower === 'escape' || lower === 'esc') return 'Esc';
+      if (lower === 'comma') return ',';
       if (lower === 'space') return 'Space';
       if (lower === 'arrowup') return '↑';
       if (lower === 'arrowdown') return '↓';
@@ -176,7 +231,11 @@ export function formatShortcutMac(combo: string): string {
       if (lower === 'arrowright') return '→';
       return p.length === 1 ? p.toUpperCase() : p;
     })
-    .join('');
+    .join('+');
+}
+
+export function formatShortcutMac(combo: string): string {
+  return formatShortcut(combo);
 }
 
 export function mergeCustomShortcuts(custom?: Record<string, string> | null): ShortcutMap {

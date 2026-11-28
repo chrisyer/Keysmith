@@ -84,6 +84,20 @@ pub mod helpers {
         }
         None
     }
+    /// Runs a blocking closure on a dedicated OS thread outside any active Tokio runtime.
+    pub fn run_blocking_on_dedicated_thread<T, F>(name: &str, f: F) -> Result<T, String>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        let handle = std::thread::Builder::new()
+            .name(name.to_string())
+            .spawn(f)
+            .map_err(|e| format!("Failed to spawn thread {name}: {e}"))?;
+        handle
+            .join()
+            .map_err(|_| format!("Thread {name} panicked"))
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -159,22 +173,51 @@ mod imp {
             .unwrap_or(0)
     }
 
-    // MARK: - Biometric / Polkit User Verification + Secret Service Keyring
-
-    pub fn biometry_is_available() -> bool {
-        let Ok(session_conn) = Connection::session() else {
-            return false;
-        };
-        if !dbus_name_has_owner(&session_conn, "org.freedesktop.secrets") {
-            return false;
-        }
-        let Ok(sys_conn) = Connection::system() else {
-            return false;
-        };
-        dbus_name_has_owner(&sys_conn, "org.freedesktop.PolicyKit1")
+    fn run_on_dbus_thread<T, F>(name: &str, f: F) -> Result<T, CoreError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, CoreError> + Send + 'static,
+    {
+        super::helpers::run_blocking_on_dedicated_thread(name, f)
+            .map_err(CoreError::Biometric)?
     }
 
-    pub fn biometry_authenticate(reason: &str) -> Result<(), CoreError> {
+    // MARK: - Biometric / Polkit User Verification + Secret Service Keyring
+
+    pub fn is_polkit_policy_installed() -> bool {
+        Path::new("/usr/share/polkit-1/actions/dev.keysmith.desktop.policy").is_file()
+    }
+
+    pub fn has_tray_watcher() -> bool {
+        run_on_dbus_thread("keysmith-tray-probe", || {
+            let Ok(session_conn) = Connection::session() else {
+                return Ok(false);
+            };
+            Ok(
+                dbus_name_has_owner(&session_conn, "org.kde.StatusNotifierWatcher")
+                    || dbus_name_has_owner(&session_conn, "org.freedesktop.StatusNotifierWatcher"),
+            )
+        })
+        .unwrap_or(false)
+    }
+
+    pub fn biometry_is_available() -> bool {
+        run_on_dbus_thread("keysmith-dbus-probe", || {
+            let Ok(session_conn) = Connection::session() else {
+                return Ok(false);
+            };
+            if !dbus_name_has_owner(&session_conn, "org.freedesktop.secrets") {
+                return Ok(false);
+            }
+            let Ok(sys_conn) = Connection::system() else {
+                return Ok(false);
+            };
+            Ok(dbus_name_has_owner(&sys_conn, "org.freedesktop.PolicyKit1"))
+        })
+        .unwrap_or(false)
+    }
+
+    fn biometry_authenticate_sync(reason: &str) -> Result<(), CoreError> {
         let conn = Connection::system().map_err(|e| {
             CoreError::Biometric(format!(
                 "Failed to connect to system D-Bus for Polkit verification: {e}"
@@ -236,14 +279,25 @@ mod imp {
         ))
     }
 
+    pub fn biometry_authenticate(reason: &str) -> Result<(), CoreError> {
+        let owned_reason = reason.to_string();
+        run_on_dbus_thread("keysmith-polkit-auth", move || {
+            biometry_authenticate_sync(&owned_reason)
+        })
+    }
+
     pub fn keychain_save(account_id: &str, key: &[u8]) -> Result<(), CoreError> {
-        let entry = Entry::new(SECRET_SERVICE_NAME, account_id).map_err(|e| {
-            CoreError::Biometric(format!("Failed to open Secret Service entry: {e}"))
-        })?;
-        entry.set_secret(key).map_err(|e| {
-            CoreError::Biometric(format!(
-                "Failed to save unlock key into Freedesktop Secret Service: {e}"
-            ))
+        let owned_account = account_id.to_string();
+        let owned_key = Zeroizing::new(key.to_vec());
+        run_on_dbus_thread("keysmith-secret-save", move || {
+            let entry = Entry::new(SECRET_SERVICE_NAME, &owned_account).map_err(|e| {
+                CoreError::Biometric(format!("Failed to open Secret Service entry: {e}"))
+            })?;
+            entry.set_secret(&owned_key).map_err(|e| {
+                CoreError::Biometric(format!(
+                    "Failed to save unlock key into Freedesktop Secret Service: {e}"
+                ))
+            })
         })
     }
 
@@ -251,29 +305,36 @@ mod imp {
         account_id: &str,
         reason: &str,
     ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
-        biometry_authenticate(reason)?;
-        let entry = Entry::new(SECRET_SERVICE_NAME, account_id).map_err(|e| {
-            CoreError::Biometric(format!("Failed to open Secret Service entry: {e}"))
-        })?;
-        let secret = entry.get_secret().map_err(|e| {
-            CoreError::Biometric(format!(
-                "Failed to load unlock key from Freedesktop Secret Service: {e}"
-            ))
-        })?;
-        Ok(Zeroizing::new(secret))
+        let owned_account = account_id.to_string();
+        let owned_reason = reason.to_string();
+        run_on_dbus_thread("keysmith-secret-load", move || {
+            biometry_authenticate_sync(&owned_reason)?;
+            let entry = Entry::new(SECRET_SERVICE_NAME, &owned_account).map_err(|e| {
+                CoreError::Biometric(format!("Failed to open Secret Service entry: {e}"))
+            })?;
+            let secret = entry.get_secret().map_err(|e| {
+                CoreError::Biometric(format!(
+                    "Failed to load unlock key from Freedesktop Secret Service: {e}"
+                ))
+            })?;
+            Ok(Zeroizing::new(secret))
+        })
     }
 
     pub fn keychain_delete(account_id: &str) -> Result<(), CoreError> {
-        let entry = match Entry::new(SECRET_SERVICE_NAME, account_id) {
-            Ok(e) => e,
-            Err(_) => return Ok(()),
-        };
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(CoreError::Biometric(format!(
-                "Failed to delete Secret Service unlock key: {e}"
-            ))),
-        }
+        let owned_account = account_id.to_string();
+        run_on_dbus_thread("keysmith-secret-delete", move || {
+            let entry = match Entry::new(SECRET_SERVICE_NAME, &owned_account) {
+                Ok(e) => e,
+                Err(_) => return Ok(()),
+            };
+            match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(e) => Err(CoreError::Biometric(format!(
+                    "Failed to delete Secret Service unlock key: {e}"
+                ))),
+            }
+        })
     }
 
     // MARK: - Sleep & Screen-Lock Observers
@@ -802,5 +863,23 @@ mod tests {
             Some("ja-JP".to_string())
         );
         assert_eq!(parse_linux_locale_env(Some("C"), None, None, Some("POSIX")), None);
+    }
+
+    #[tokio::test]
+    async fn dedicated_thread_helper_avoids_tokio_nested_runtime_panic() {
+        let value = run_blocking_on_dedicated_thread("test-nested-tokio", || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build inner runtime");
+            rt.block_on(async { 42usize })
+        });
+        assert_eq!(value, Ok(42));
+
+        #[cfg(target_os = "linux")]
+        {
+            let _ = super::biometry_is_available();
+            let _ = super::has_tray_watcher();
+        }
     }
 }

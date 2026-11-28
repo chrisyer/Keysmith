@@ -1761,6 +1761,51 @@ pub async fn item_share_to_organization(
     Ok(updated)
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformCapabilities {
+    pub os: &'static str,
+    pub has_tray_host: bool,
+    pub supports_vibrancy: bool,
+    pub polkit_policy_installed: bool,
+    pub custom_window_chrome: bool,
+}
+
+#[tauri::command]
+pub async fn platform_get_capabilities() -> PlatformCapabilities {
+    let os = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    };
+
+    #[cfg(target_os = "linux")]
+    let has_tray_host = crate::linux_native::has_tray_watcher();
+    #[cfg(not(target_os = "linux"))]
+    let has_tray_host = true;
+
+    #[cfg(target_os = "linux")]
+    let polkit_policy_installed = crate::linux_native::is_polkit_policy_installed();
+    #[cfg(not(target_os = "linux"))]
+    let polkit_policy_installed = true;
+
+    PlatformCapabilities {
+        os,
+        has_tray_host,
+        supports_vibrancy: cfg!(target_os = "macos"),
+        polkit_policy_installed,
+        custom_window_chrome: !cfg!(target_os = "macos"),
+    }
+}
+
+#[tauri::command]
+pub fn app_quit(app: AppHandle, state: State<'_, AppState>) {
+    let _ = state.core.checkpoint_storage();
+    app.exit(0);
+}
+
 #[tauri::command]
 pub async fn app_check_update_info() -> Result<AppUpdateInfo, CoreError> {
     let current = env!("CARGO_PKG_VERSION").to_string();

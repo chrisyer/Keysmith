@@ -1,5 +1,11 @@
 import { AlertTriangle, ArrowLeft, CheckCircle2, Eye, EyeOff, Globe, KeyRound, Loader2, Server } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import {
+  isCustomWindowChrome,
+  useWindowMaximized,
+  WindowResizeHandles,
+  WindowTitleBar,
+} from '../../components/WindowChrome';
 import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
 import { evaluatePasswordStrength } from '../../services/generator';
 import { isTauriRuntime, KeysmithIpcError, tauriClient } from '../../services/tauriClient';
@@ -31,6 +37,8 @@ function meetsRegistrationPasswordFloor(pw: string): boolean {
 
 export function AuthScreen() {
   const inTauri = isTauriRuntime();
+  const customChrome = isCustomWindowChrome();
+  const isMaximized = useWindowMaximized();
   const { dict, languageMode, setLanguageMode, fmt } = useI18n();
 
   const addingAccount = useSessionStore((s) => s.addingAccount);
@@ -199,8 +207,17 @@ export function AuthScreen() {
   };
 
   return (
-    <div className="h-dvh w-full flex items-center justify-center bg-[var(--bg-sidebar)] p-6">
-      {inTauri && <div data-tauri-drag-region className="fixed top-0 left-0 right-0 h-9" />}
+    <div
+      className={`h-dvh w-full flex flex-col bg-[var(--bg-sidebar)] ${
+        customChrome && !isMaximized ? 'border border-[var(--border-strong)]' : ''
+      }`}
+    >
+      {customChrome ? (
+        <WindowTitleBar maximized={isMaximized} />
+      ) : (
+        inTauri && <div data-tauri-drag-region className="fixed top-0 left-0 right-0 h-9" />
+      )}
+      <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center p-6">
       <div className="w-full max-w-[440px] rounded-xl bg-[var(--bg-elevated)] backdrop-blur-2xl border border-[var(--border-strong)] shadow-xl overflow-hidden">
         <div className="px-6 pt-5 pb-4 border-b border-[var(--border-subtle)] bg-[var(--bg-card)]/50">
           <div className="flex items-center justify-between gap-2">
@@ -564,6 +581,8 @@ export function AuthScreen() {
           )}
         </form>
       </div>
+      </div>
+      {customChrome && <WindowResizeHandles disabled={isMaximized} />}
     </div>
   );
 }

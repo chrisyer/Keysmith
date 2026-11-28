@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { getDictionary, resolveLocale } from '../i18n';
+import { getDictionary, localizeBuiltinFieldLabel, resolveLocale } from '../i18n';
 import { isTauriRuntime, tauriClient } from '../services/tauriClient';
 import { useSessionStore } from '../stores/sessionStore';
 import { useUiStore } from '../stores/uiStore';
@@ -133,16 +133,18 @@ export function useKeyboardShortcuts(searchInputRef: React.RefObject<HTMLInputEl
           ui.showToast({ label: item.title, text: dict.detail.repromptDesc, kind: 'warning' });
           return;
         }
-        ui.openLargeType(pwField.label, pwField.value);
+        const pwLabel = localizeBuiltinFieldLabel(pwField.label, dict, pwField.purpose);
+        ui.openLargeType(pwLabel, pwField.value);
         return;
       }
 
       if (matchesShortcut(e, sc.copyUsername) && userField) {
         e.preventDefault();
-        void tauriClient.clipboardCopySecret(userField.value, userField.label, false);
+        const userLabel = localizeBuiltinFieldLabel(userField.label, dict, userField.purpose);
+        void tauriClient.clipboardCopySecret(userField.value, userLabel, false);
         ui.showToast({
-          label: userField.label,
-          text: dict.detail.copiedPlainToast.replace('{label}', userField.label),
+          label: userLabel,
+          text: dict.detail.copiedPlainToast.replace('{label}', userLabel),
           kind: 'info',
         });
         return;
@@ -175,11 +177,12 @@ export function useKeyboardShortcuts(searchInputRef: React.RefObject<HTMLInputEl
           ui.showToast({ label: item.title, text: dict.detail.repromptDesc, kind: 'warning' });
           return;
         }
-        void tauriClient.clipboardCopySecret(pwField.value, pwField.label, true);
+        const pwLabel = localizeBuiltinFieldLabel(pwField.label, dict, pwField.purpose);
+        void tauriClient.clipboardCopySecret(pwField.value, pwLabel, true);
         ui.showToast({
-          label: pwField.label,
+          label: pwLabel,
           text: dict.detail.copiedSensitiveToast
-            .replace('{label}', pwField.label)
+            .replace('{label}', pwLabel)
             .replace('{secs}', String(session.clipboardClearSeconds)),
           kind: 'clipboard',
         });

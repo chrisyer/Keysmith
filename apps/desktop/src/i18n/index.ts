@@ -116,6 +116,110 @@ export function formatMessage(template: string, vars?: Record<string, string | n
   );
 }
 
+/**
+ * Translates canonical built-in field labels produced by Rust core cipher decoding
+ * (`crates/keysmith-core/src/domain/codec.rs`) into the active UI language at render time,
+ * leaving user-created custom field labels untouched.
+ */
+export function localizeBuiltinFieldLabel(
+  label: string,
+  dict: Dictionary,
+  purpose?: string,
+): string {
+  const trimmed = label.trim();
+  if (!trimmed) {
+    if (purpose === 'username') return dict.templates.fields.username;
+    if (purpose === 'password') return dict.templates.fields.password;
+    if (purpose === 'totp') return dict.templates.fields.oneTimePassword;
+    return label;
+  }
+
+  switch (trimmed.toLowerCase()) {
+    case '用户名':
+    case 'username':
+      return dict.templates.fields.username;
+    case '密码':
+    case 'password':
+      return dict.templates.fields.password;
+    case '一次性密码':
+    case '一次性验证码':
+    case 'one-time password':
+    case 'totp':
+      return dict.templates.fields.oneTimePassword;
+    case '持卡人':
+    case '持卡人姓名':
+    case 'cardholder name':
+      return dict.templates.fields.cardholderName;
+    case '卡号':
+    case 'card number':
+      return dict.templates.fields.cardNumber;
+    case '有效期':
+    case 'expiration':
+      return dict.templates.fields.expiration;
+    case '安全码 cvv':
+    case '安全码':
+    case 'security code (cvv)':
+      return dict.templates.fields.securityCodeCvv;
+    case '卡组织':
+    case 'card type':
+      return dict.templates.fields.cardType;
+    case '名':
+    case 'first name':
+      return dict.templates.fields.firstName;
+    case '姓':
+    case 'last name':
+      return dict.templates.fields.lastName;
+    case '公司':
+    case 'company':
+    case 'company / title':
+      return dict.templates.fields.companyTitle;
+    case '邮箱':
+    case 'email':
+      return dict.templates.fields.email;
+    case '电话':
+    case 'phone':
+      return dict.templates.fields.phone;
+    case '地址':
+    case 'address':
+      return dict.templates.fields.address;
+    case '身份证/社保号':
+    case 'national id / ssn':
+      return dict.templates.fields.nationalIdSsn;
+    case '护照号':
+    case 'passport number':
+      return dict.templates.fields.passportNumber;
+    case '驾照号':
+    case 'license number':
+      return dict.templates.fields.licenseNumber;
+    default:
+      return label;
+  }
+}
+
+/**
+ * Translates canonical built-in section titles produced by Rust core cipher decoding
+ * into the active UI language at render time, leaving custom section titles untouched.
+ */
+export function localizeBuiltinSectionTitle(title: string, dict: Dictionary): string {
+  const trimmed = title.trim();
+  switch (trimmed.toLowerCase()) {
+    case '自定义字段':
+    case 'custom fields':
+      return dict.detail.customFields;
+    case '联系方式':
+    case 'contact information':
+      return dict.templates.sections.contactInfo;
+    case '证件号码':
+    case 'identification':
+      return dict.templates.sections.identification;
+    case '卡片信息':
+    case 'billing & bank':
+      return dict.templates.sections.billingBank;
+    default:
+      return title;
+  }
+}
+
 export function useI18n() {
   const languageMode = useUiStore((s) => s.languageMode);
   const setLanguageMode = useUiStore((s) => s.setLanguageMode);

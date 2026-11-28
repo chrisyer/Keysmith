@@ -44,6 +44,7 @@ import type {
   ImportSummary,
   LocalSnapshotInfo,
   MaskedEmailProvider,
+  PlatformCapabilities,
   SshAgentStatus,
   SyncMode,
 } from '../../types/domain';
@@ -52,6 +53,7 @@ import { openExternalUrl } from '../../utils/opener';
 import {
   DEFAULT_GLOBAL_QUICK_ACCESS_SHORTCUT,
   DEFAULT_SHORTCUTS,
+  formatShortcut,
   formatShortcutMac,
   keyboardEventToCombo,
   SHORTCUT_ACTION_ORDER,
@@ -123,6 +125,8 @@ export function SettingsModal() {
   const [sshBusy, setSshBusy] = useState(false);
   const [copiedSshSocket, setCopiedSshSocket] = useState(false);
   const [copiedSshSnippet, setCopiedSshSnippet] = useState(false);
+  const [platformCaps, setPlatformCaps] = useState<PlatformCapabilities | null>(null);
+  const [copiedPolkitCmd, setCopiedPolkitCmd] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState(displayName);
 
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
@@ -189,8 +193,36 @@ export function SettingsModal() {
     if (!open) {
       setRecordingTarget(null);
       setShortcutFeedback(null);
+      return;
     }
+    let active = true;
+    void tauriClient
+      .platformGetCapabilities()
+      .then((caps) => {
+        if (active) setPlatformCaps(caps);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, [open]);
+
+  const fallbackPlat = typeof navigator !== 'undefined' ? navigator.platform || navigator.userAgent : '';
+  const resolvedOs =
+    platformCaps?.os ??
+    (/Win/i.test(fallbackPlat) ? 'windows' : /Linux/i.test(fallbackPlat) ? 'linux' : 'macos');
+  const isMacOs = resolvedOs === 'macos';
+  const isWindowsOs = resolvedOs === 'windows';
+  const isLinuxOs = resolvedOs === 'linux';
+  const supportsVibrancy = platformCaps?.supportsVibrancy ?? isMacOs;
+  const defaultSshSocketPath = isLinuxOs
+    ? '$HOME/.local/share/dev.keysmith.desktop/ssh-agent.sock'
+    : isWindowsOs
+      ? '\\\\.\\pipe\\keysmith-ssh-agent'
+      : '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock';
+  const effectiveSshSocketPath = sshStatus?.socketPath ?? defaultSshSocketPath;
+  const polkitInstallCommand =
+    'sudo install -Dm644 apps/desktop/src-tauri/resources/linux/dev.keysmith.desktop.policy /usr/share/polkit-1/actions/dev.keysmith.desktop.policy';
 
   useEffect(() => {
     if (!open || tab !== 'ssh') return;
@@ -527,18 +559,20 @@ export function SettingsModal() {
                 </div>
 
                 <div className="pt-3 border-t border-[var(--border-subtle)] flex flex-col gap-2.5">
-                  <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
-                    <div>
-                      <div className="font-medium text-[var(--text-primary)]">{dict.settings.vibrancy}</div>
-                      <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.vibrancyDesc}</div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={vibrancyEnabled}
-                      onChange={(e) => void updatePreferences({ vibrancyEnabled: e.target.checked })}
-                      className="ks-checkbox"
-                    />
-                  </label>
+                  {supportsVibrancy && (
+                    <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
+                      <div>
+                        <div className="font-medium text-[var(--text-primary)]">{dict.settings.vibrancy}</div>
+                        <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.vibrancyDesc}</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={vibrancyEnabled}
+                        onChange={(e) => void updatePreferences({ vibrancyEnabled: e.target.checked })}
+                        className="ks-checkbox"
+                      />
+                    </label>
+                  )}
 
                   <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
                     <div>
@@ -557,17 +591,14 @@ export function SettingsModal() {
             )}
 
             {tab === 'security' && (() => {
-              const plat = typeof navigator !== 'undefined' ? navigator.platform || navigator.userAgent : '';
-              const isWindows = /Win/i.test(plat);
-              const isLinux = !isWindows && /Linux/i.test(plat);
-              const bioTitle = isWindows
+              const bioTitle = isWindowsOs
                 ? dict.settings.windowsHello
-                : isLinux
+                : isLinuxOs
                   ? dict.settings.linuxBio
                   : dict.settings.touchId;
-              const bioDesc = isWindows
+              const bioDesc = isWindowsOs
                 ? dict.settings.windowsHelloDesc
-                : isLinux
+                : isLinuxOs
                   ? dict.settings.linuxBioDesc
                   : dict.settings.touchIdDesc;
               return (
@@ -586,6 +617,35 @@ export function SettingsModal() {
                     aria-label={bioTitle}
                   />
                 </label>
+
+                {isLinuxOs && platformCaps && !platformCaps.polkitPolicyInstalled && (
+                  <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-[var(--text-primary)] flex flex-col gap-2">
+                    <p className="text-amber-700 dark:text-amber-300 leading-relaxed">
+                      {dict.settings.polkitPolicyMissingHint}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 min-w-0 font-mono-tabular text-[11px] px-2.5 py-1.5 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] break-all select-all">
+                        {polkitInstallCommand}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void tauriClient.clipboardCopySecret(polkitInstallCommand, 'Polkit policy', false);
+                          setCopiedPolkitCmd(true);
+                          setTimeout(() => setCopiedPolkitCmd(false), 1500);
+                        }}
+                        aria-label={dict.common.copy}
+                        className="p-1.5 rounded-md hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer shrink-0"
+                      >
+                        {copiedPolkitCmd ? (
+                          <Check size={13} className="text-[var(--status-success)]" />
+                        ) : (
+                          <Copy size={13} />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
                   <div>
@@ -656,8 +716,14 @@ export function SettingsModal() {
 
                 <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
                   <div>
-                    <div className="font-medium text-[var(--text-primary)]">{dict.settings.closeToTray}</div>
-                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.closeToTrayDesc}</div>
+                    <div className="font-medium text-[var(--text-primary)]">
+                      {isMacOs ? dict.settings.closeToTray : dict.settings.closeToTraySystem}
+                    </div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">
+                      {fmt(isMacOs ? dict.settings.closeToTrayDesc : dict.settings.closeToTraySystemDesc, {
+                        shortcut: formatShortcut('CommandOrControl+Q'),
+                      })}
+                    </div>
                   </div>
                   <input
                     type="checkbox"
@@ -666,6 +732,12 @@ export function SettingsModal() {
                     className="ks-checkbox"
                   />
                 </label>
+
+                {isLinuxOs && platformCaps && !platformCaps.hasTrayHost && (
+                  <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
+                    {dict.settings.noTrayHostHint}
+                  </div>
+                )}
 
                 <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
                   <div>
@@ -880,23 +952,19 @@ export function SettingsModal() {
                     />
                   </label>
 
-                  <div className="pt-2.5 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
-                    <span className="text-xs text-[var(--text-secondary)] shrink-0">
+                  <div className="pt-2.5 border-t border-[var(--border-subtle)] flex flex-col gap-1.5">
+                    <span className="text-xs text-[var(--text-secondary)]">
                       {dict.settings.sshSection.socketLabel}
                     </span>
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <code className="font-mono-tabular text-[11px] px-2 py-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-primary)] truncate">
-                        {sshStatus?.socketPath ??
-                          '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock'}
+                    <div className="flex items-start gap-1.5 min-w-0">
+                      <code className="flex-1 min-w-0 font-mono-tabular text-[11px] px-2.5 py-1.5 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-primary)] break-all whitespace-pre-wrap select-all">
+                        {effectiveSshSocketPath}
                       </code>
                       <button
                         type="button"
                         onClick={() => {
-                          const sock =
-                            sshStatus?.socketPath ??
-                            '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock';
                           void tauriClient.clipboardCopySecret(
-                            sock,
+                            effectiveSshSocketPath,
                             dict.settings.sshSection.socketLabel,
                             false,
                           );
@@ -989,7 +1057,7 @@ export function SettingsModal() {
                     </div>
                   </div>
 
-                  <pre className="p-3 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] font-mono-tabular text-[11.5px] leading-relaxed text-[var(--text-primary)] overflow-x-auto select-all">{`Host *\n  IdentityAgent "${sshStatus?.socketPath ?? '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock'}"`}</pre>
+                  <pre className="p-3 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] font-mono-tabular text-[11.5px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-all select-all">{`Host *\n  IdentityAgent "${effectiveSshSocketPath}"`}</pre>
 
                   <div className="flex flex-wrap items-center gap-2">
                     {!sshStatus?.sshConfigConfigured ? (

@@ -29,7 +29,7 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { formatRelativeTime } from '../../utils/format';
-import { formatShortcutMac } from '../../utils/shortcuts';
+import { formatShortcutMac, isMacPlatform } from '../../utils/shortcuts';
 
 export function Sidebar() {
   const { dict, fmt } = useI18n();
@@ -96,6 +96,7 @@ export function Sidebar() {
   const currentVault = vaults.find((v) => v.id === activeVaultId);
   const riskCount = watchtowerReport?.totalRiskItems ?? 0;
   const inTauri = isTauriRuntime();
+  const isMacDesktop = inTauri && isMacPlatform();
 
   useEffect(() => {
     void refreshSavedAccounts();
@@ -140,8 +141,10 @@ export function Sidebar() {
     >
       {/* Top macOS Titlebar Spacer + Account & Vault Switchers */}
       <div className="flex flex-col">
-        {inTauri ? (
+        {isMacDesktop ? (
           <div data-tauri-drag-region className="h-[38px] w-full shrink-0 select-none" />
+        ) : inTauri ? (
+          <div className="h-2 w-full shrink-0 select-none" />
         ) : (
           <div className="px-3.5 pt-3 pb-1 flex items-center gap-2 select-none" aria-hidden="true">
             <span className="w-3 h-3 rounded-full bg-[#FF5F57] border border-black/10" />
@@ -537,7 +540,7 @@ export function Sidebar() {
       {/* Footer Status Bar */}
       <div
         className={`px-2.5 py-2 border-t border-[var(--border-subtle)] flex items-center justify-between gap-1 shrink-0 ${
-          vibrancyEnabled && inTauri ? 'bg-transparent' : 'bg-[var(--bg-sidebar)]'
+          vibrancyEnabled && isMacDesktop ? 'bg-transparent' : 'bg-[var(--bg-sidebar)]'
         }`}
       >
         <button

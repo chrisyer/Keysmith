@@ -4,11 +4,12 @@ import { ColoredPassword } from '../../components/ColoredPassword';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
 import { ModalDialog } from '../../components/ModalDialog';
 import { TotpRow } from '../../components/TotpRow';
-import { useI18n } from '../../i18n';
+import { localizeBuiltinFieldLabel, useI18n } from '../../i18n';
 import { tauriClient } from '../../services/tauriClient';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import type { ItemDetail, ItemSummary } from '../../types/domain';
+import { formatShortcut } from '../../utils/shortcuts';
 
 export function QuickAccessModal() {
   const { dict, fmt } = useI18n();
@@ -107,11 +108,12 @@ export function QuickAccessModal() {
         setInlineMsg(dict.quickAccess.noPasswordField);
         return;
       }
-      await tauriClient.clipboardCopySecret(pw.value, pw.label, true);
+      const pwLabel = localizeBuiltinFieldLabel(pw.label, dict, pw.purpose);
+      await tauriClient.clipboardCopySecret(pw.value, pwLabel, true);
       handleClose();
       showToast({
-        label: pw.label,
-        text: fmt(dict.quickAccess.copiedPwToast, { title: detail.title, label: pw.label }),
+        label: pwLabel,
+        text: fmt(dict.quickAccess.copiedPwToast, { title: detail.title, label: pwLabel }),
         kind: 'clipboard',
       });
       return;
@@ -123,10 +125,11 @@ export function QuickAccessModal() {
         setInlineMsg(dict.quickAccess.noUsernameField);
         return;
       }
-      await tauriClient.clipboardCopySecret(user.value, user.label, false);
+      const userLabel = localizeBuiltinFieldLabel(user.label, dict, user.purpose);
+      await tauriClient.clipboardCopySecret(user.value, userLabel, false);
       handleClose();
       showToast({
-        label: user.label,
+        label: userLabel,
         text: fmt(dict.quickAccess.copiedUserToast, { value: user.value }),
         kind: 'info',
       });
@@ -297,7 +300,7 @@ export function QuickAccessModal() {
                     </div>
                     {selected && (
                       <span className="text-[11px] text-[var(--accent-primary)] font-medium shrink-0 flex items-center gap-1">
-                        ⏎ {dict.quickAccess.copyPw}
+                        {formatShortcut('Enter')} {dict.quickAccess.copyPw}
                         <ArrowRight size={12} />
                       </span>
                     )}
@@ -329,7 +332,9 @@ export function QuickAccessModal() {
                 <button
                   type="button"
                   onClick={() => void openInMain()}
-                  title={dict.quickAccess.openInMainTitle}
+                  title={fmt(dict.quickAccess.openInMainTitle, {
+                    shortcut: formatShortcut('CommandOrControl+O'),
+                  })}
                   aria-label={dict.quickAccess.openInMain}
                   className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--accent-primary)] cursor-pointer shrink-0"
                 >
@@ -339,6 +344,7 @@ export function QuickAccessModal() {
 
               <div className="rounded-xl bg-[var(--bg-detail)] border border-[var(--border-subtle)] divide-y divide-[var(--border-subtle)]">
                 {previewDetail.sections.flatMap((s) => s.fields).map((field) => {
+                  const fieldLabel = localizeBuiltinFieldLabel(field.label, dict, field.purpose);
                   if (field.fieldType === 'totp' && field.value) {
                     if (repromptLocked) {
                       return (
@@ -351,7 +357,7 @@ export function QuickAccessModal() {
                           className="px-3 py-2 flex items-center justify-between gap-2 hover:bg-[var(--bg-hover)] cursor-pointer"
                         >
                           <div className="min-w-0">
-                            <div className="text-[10px] text-[var(--text-muted)]">{field.label}</div>
+                            <div className="text-[10px] text-[var(--text-muted)]">{fieldLabel}</div>
                             <div className="font-mono-tabular tracking-[0.18em] text-xs text-[var(--text-muted)] mt-0.5">
                               ••••••
                             </div>
@@ -360,7 +366,7 @@ export function QuickAccessModal() {
                         </div>
                       );
                     }
-                    return <TotpRow key={field.id} label={field.label} secretOrUri={field.value} />;
+                    return <TotpRow key={field.id} label={fieldLabel} secretOrUri={field.value} />;
                   }
                   return (
                     <div
@@ -372,14 +378,14 @@ export function QuickAccessModal() {
                           void openInMain();
                           return;
                         }
-                        void tauriClient.clipboardCopySecret(field.value, field.label, field.sensitive);
-                        setInlineMsg(fmt(dict.quickAccess.copiedFieldInline, { label: field.label }));
+                        void tauriClient.clipboardCopySecret(field.value, fieldLabel, field.sensitive);
+                        setInlineMsg(fmt(dict.quickAccess.copiedFieldInline, { label: fieldLabel }));
                         setTimeout(() => setInlineMsg(null), 1600);
                       }}
                       className="px-3 py-2 flex items-center justify-between gap-2 hover:bg-[var(--bg-hover)] cursor-pointer"
                     >
                       <div className="min-w-0">
-                        <div className="text-[10px] text-[var(--text-muted)]">{field.label}</div>
+                        <div className="text-[10px] text-[var(--text-muted)]">{fieldLabel}</div>
                         <div className="text-xs truncate mt-0.5">
                           {field.sensitive ? (
                             repromptLocked ? (
@@ -425,7 +431,7 @@ export function QuickAccessModal() {
                 <button
                   type="button"
                   onClick={() => void triggerAutoType()}
-                  title="⌘⇧⏎"
+                  title={formatShortcut('CommandOrControl+Shift+Enter')}
                   className="py-1.5 px-2.5 rounded-lg border border-[var(--border-strong)] text-xs text-[var(--text-primary)] hover:bg-[var(--bg-hover)] inline-flex items-center gap-1 cursor-pointer"
                 >
                   <Keyboard size={12} />
@@ -440,11 +446,11 @@ export function QuickAccessModal() {
         <div className="px-4 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-card)]/60 flex items-center justify-between flex-wrap gap-2 text-[10px] text-[var(--text-muted)]">
           <div className="flex items-center gap-3 flex-wrap">
             <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">↑↓</kbd> {dict.quickAccess.legendSelect}</span>
-            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⏎</kbd> {dict.quickAccess.legendCopyPw}</span>
-            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⇧⏎</kbd> {dict.quickAccess.legendCopyUser}</span>
-            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⌥⏎</kbd> {dict.quickAccess.legendCopyTotp}</span>
-            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⌘⇧⏎</kbd> {dict.quickAccess.legendAutoType}</span>
-            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">⌘O</kbd> {dict.quickAccess.legendOpenMain}</span>
+            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Enter')}</kbd> {dict.quickAccess.legendCopyPw}</span>
+            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Shift+Enter')}</kbd> {dict.quickAccess.legendCopyUser}</span>
+            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Alt+Enter')}</kbd> {dict.quickAccess.legendCopyTotp}</span>
+            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('CommandOrControl+Shift+Enter')}</kbd> {dict.quickAccess.legendAutoType}</span>
+            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('CommandOrControl+O')}</kbd> {dict.quickAccess.legendOpenMain}</span>
           </div>
           <span>{dict.quickAccess.legendClose}</span>
         </div>

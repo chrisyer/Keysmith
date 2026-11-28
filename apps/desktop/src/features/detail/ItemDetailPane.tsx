@@ -38,7 +38,11 @@ import { ColoredPassword } from '../../components/ColoredPassword';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
 import { MarkdownPreview } from '../../components/MarkdownPreview';
 import { TotpRow } from '../../components/TotpRow';
-import { useI18n } from '../../i18n';
+import {
+  localizeBuiltinFieldLabel,
+  localizeBuiltinSectionTitle,
+  useI18n,
+} from '../../i18n';
 import { isTauriRuntime, tauriClient } from '../../services/tauriClient';
 import { TEMPLATE_MAP } from '../../services/templates';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -47,7 +51,7 @@ import { useVaultStore } from '../../stores/vaultStore';
 import type { AttachmentDownloadResult, ItemDetail, ItemField, OrganizationInfo } from '../../types/domain';
 import { extractDomain, formatCardNumber, formatDateTime, maskCardNumber } from '../../utils/format';
 import { openExternalUrl } from '../../utils/opener';
-import { formatShortcutMac } from '../../utils/shortcuts';
+import { formatShortcut, formatShortcutMac } from '../../utils/shortcuts';
 
 function isPreviewableAttachment(fileName: string): boolean {
   return /\.(png|jpe?g|webp|gif|svg|pdf|md|markdown|json|txt|csv|pem|pub|log|ya?ml|toml)$/i.test(
@@ -87,6 +91,7 @@ function FieldRow({
 }: FieldRowProps) {
   const { dict, fmt } = useI18n();
   const [justCopied, setJustCopied] = useState(false);
+  const displayLabel = localizeBuiltinFieldLabel(field.label, dict, field.purpose);
 
   if (field.fieldType === 'totp' && field.value.trim()) {
     if (repromptLocked) {
@@ -96,7 +101,7 @@ function FieldRow({
           className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg hover:bg-[var(--bg-hover)] cursor-pointer"
         >
           <div>
-            <div className="text-[11.5px] font-medium text-[var(--text-secondary)]">{field.label}</div>
+            <div className="text-[11.5px] font-medium text-[var(--text-secondary)]">{displayLabel}</div>
             <div className="mt-1 font-mono-tabular tracking-[0.18em] text-[13.5px] text-[var(--text-muted)]">
               ••••••
             </div>
@@ -105,7 +110,7 @@ function FieldRow({
         </div>
       );
     }
-    return <TotpRow label={field.label} secretOrUri={field.value} />;
+    return <TotpRow label={displayLabel} secretOrUri={field.value} />;
   }
 
   const displayValue = (() => {
@@ -124,7 +129,7 @@ function FieldRow({
       onRequireReprompt?.();
       return;
     }
-    onCopy(field.value, field.label, field.sensitive);
+    onCopy(field.value, displayLabel, field.sensitive);
     setJustCopied(true);
     setTimeout(() => setJustCopied(false), 1400);
   };
@@ -152,7 +157,7 @@ function FieldRow({
       }`}
     >
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-medium text-[var(--text-secondary)]">{field.label}</div>
+        <div className="text-xs font-medium text-[var(--text-secondary)]">{displayLabel}</div>
         <div className="mt-1 text-sm leading-relaxed" data-selectable="true">
           {field.sensitive && field.purpose !== 'card_number' ? (
             (isMultiline && !revealed) || repromptLocked ? (
@@ -188,7 +193,7 @@ function FieldRow({
               onToggleReveal();
             }}
             title={revealed ? dict.detail.hideFieldTitle : dict.detail.showFieldTitle}
-            aria-label={fmt(revealed ? dict.detail.hideFieldAria : dict.detail.showFieldAria, { label: field.label })}
+            aria-label={fmt(revealed ? dict.detail.hideFieldAria : dict.detail.showFieldAria, { label: displayLabel })}
             className="p-2 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
           >
             {revealed && !repromptLocked ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -203,10 +208,10 @@ function FieldRow({
                 onRequireReprompt?.();
                 return;
               }
-              onLargeType(field.label, field.value);
+              onLargeType(displayLabel, field.value);
             }}
             title={dict.detail.largeTypeTitle}
-            aria-label={fmt(dict.detail.largeTypeFieldAria, { label: field.label })}
+            aria-label={fmt(dict.detail.largeTypeFieldAria, { label: displayLabel })}
             className="p-2 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
           >
             <Maximize2 size={15} />
@@ -217,7 +222,7 @@ function FieldRow({
             type="button"
             onClick={handleCopy}
             title={dict.common.copy}
-            aria-label={fmt(dict.detail.copyFieldAria, { label: field.label })}
+            aria-label={fmt(dict.detail.copyFieldAria, { label: displayLabel })}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-[var(--bg-selected)] text-[12.5px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
           >
             {justCopied ? (
@@ -558,7 +563,9 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
               )}
             </div>
             <p className="text-[13px] text-[var(--text-secondary)] mt-1 truncate">
-              {item.urls[0]?.uri ? extractDomain(item.urls[0].uri) : item.subtitle || tpl.description}
+              {item.urls[0]?.uri
+                ? extractDomain(item.urls[0].uri)
+                : item.subtitle || dict.categories[item.category] || tpl.label}
             </p>
           </div>
         </div>
@@ -567,7 +574,10 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
           <button
             type="button"
             onClick={() => void toggleFavorite(item.id, !item.favorite, getFilter())}
-            title={item.favorite ? dict.detail.favoriteRemoveTitle : dict.detail.favoriteAddTitle}
+            title={fmt(
+              item.favorite ? dict.detail.favoriteRemoveTitle : dict.detail.favoriteAddTitle,
+              { shortcut: formatShortcut(shortcuts.toggleFavorite) },
+            )}
             aria-label={item.favorite ? dict.detail.favoriteRemoveAria : dict.detail.favoriteAddAria}
             className="p-2 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer"
           >
@@ -1045,7 +1055,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                 >
                   <span className="flex items-center gap-1.5">
                     {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                    {section.title}
+                    {localizeBuiltinSectionTitle(section.title, dict)}
                   </span>
                   <span className="font-mono-tabular text-[10px] text-[var(--text-muted)]">
                     {fmt(dict.detail.sectionItemCount, { count: section.fields.length })}

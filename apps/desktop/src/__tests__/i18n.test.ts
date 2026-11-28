@@ -4,9 +4,12 @@ import {
   formatMessage,
   getDictionary,
   isValidLanguageMode,
+  localizeBuiltinFieldLabel,
+  localizeBuiltinSectionTitle,
   resolveLocale,
 } from '../i18n';
 import { createEmptyDraft } from '../services/templates';
+import { formatShortcut } from '../utils/shortcuts';
 
 function collectLeafKeys(obj: Record<string, unknown>, prefix = ''): string[] {
   const keys: string[] = [];
@@ -78,5 +81,30 @@ describe('Desktop i18n dictionaries', () => {
         }
       }
     }
+  });
+
+  it('localizes built-in decoded field labels and section titles while keeping custom labels intact', () => {
+    const en = getDictionary('en');
+    expect(localizeBuiltinFieldLabel('用户名', en)).toBe('Username');
+    expect(localizeBuiltinFieldLabel('密码', en)).toBe('Password');
+    expect(localizeBuiltinFieldLabel('一次性密码', en)).toBe('One-Time Password');
+    expect(localizeBuiltinFieldLabel('', en, 'username')).toBe('Username');
+    expect(localizeBuiltinFieldLabel('API Recovery Seed', en)).toBe('API Recovery Seed');
+    expect(localizeBuiltinSectionTitle('自定义字段', en)).toBe('Custom Fields');
+    expect(localizeBuiltinSectionTitle('Custom Section', en)).toBe('Custom Section');
+
+    const ja = getDictionary('ja');
+    expect(localizeBuiltinFieldLabel('Username', ja)).toBe(ja.templates.fields.username);
+    expect(localizeBuiltinSectionTitle('卡片信息', ja)).toBe(ja.templates.sections.billingBank);
+  });
+
+  it('formats shortcuts cleanly for both macOS and Linux/Windows platforms', () => {
+    expect(formatShortcut('CommandOrControl+Shift+Space', 'mac')).toBe('⌘⇧Space');
+    expect(formatShortcut('CommandOrControl+Shift+Space', 'other')).toBe('Ctrl+Shift+Space');
+    expect(formatShortcut('CommandOrControl+,', 'mac')).toBe('⌘,');
+    expect(formatShortcut('CommandOrControl+,', 'other')).toBe('Ctrl+,');
+    expect(formatShortcut('CommandOrControl+Shift+Enter', 'mac')).toBe('⌘⇧⏎');
+    expect(formatShortcut('CommandOrControl+Shift+Enter', 'other')).toBe('Ctrl+Shift+Enter');
+    expect(formatShortcut('Alt+Enter', 'other')).toBe('Alt+Enter');
   });
 });

@@ -234,7 +234,7 @@ export function ItemList({ searchInputRef }: ItemListProps) {
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={`${dict.list.searchPlaceholder} (${formatShortcutMac(shortcuts.search)})`}
               aria-label={dict.common.search}
-              className="w-full pl-9 pr-14 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              className={`w-full pl-9 ${searchQuery ? 'pr-14' : 'pr-8'} py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] focus:border-[var(--accent-primary)] focus:outline-none text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]`}
             />
             <div className="absolute right-1.5 flex items-center gap-0.5">
               {searchQuery && (

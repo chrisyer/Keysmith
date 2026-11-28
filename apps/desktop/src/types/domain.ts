@@ -601,3 +601,11 @@ export interface BrowserIntegrationStatus {
   extensionDir?: string | null;
   browsers: BrowserInstallInfo[];
 }
+
+export interface PlatformCapabilities {
+  os: 'macos' | 'windows' | 'linux' | string;
+  hasTrayHost: boolean;
+  supportsVibrancy: boolean;
+  polkitPolicyInstalled: boolean;
+  customWindowChrome: boolean;
+}

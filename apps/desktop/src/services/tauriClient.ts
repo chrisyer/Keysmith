@@ -25,6 +25,7 @@ import type {
   KdfConfig,
   LocalSnapshotInfo,
   OrganizationInfo,
+  PlatformCapabilities,
   SendCreateFileInput,
   SendCreateTextInput,
   SendItem,
@@ -247,6 +248,8 @@ export interface KeysmithClient {
   appCheckUpdateInfo(): Promise<AppUpdateInfo>;
   appSettingsGet(): Promise<AppSettings>;
   appSettingsUpdate(patch: AppSettingsPatch): Promise<AppSettings>;
+  platformGetCapabilities(): Promise<PlatformCapabilities>;
+  appQuit(): Promise<void>;
 }
 
 async function invokeCore<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -741,6 +744,14 @@ class KeysmithTauriClient implements KeysmithClient {
 
   appSettingsUpdate(patch: AppSettingsPatch): Promise<AppSettings> {
     return invokeCore<AppSettings>('app_settings_update', { patch });
+  }
+
+  platformGetCapabilities(): Promise<PlatformCapabilities> {
+    return invokeCore<PlatformCapabilities>('platform_get_capabilities');
+  }
+
+  appQuit(): Promise<void> {
+    return invokeCore<void>('app_quit');
   }
 }
 
@@ -2115,6 +2126,20 @@ class KeysmithPrototypeClient implements KeysmithClient {
     };
     this.emit('ui:settings_changed', { ...this.appSettings });
     return this.appSettingsGet();
+  }
+
+  async platformGetCapabilities(): Promise<PlatformCapabilities> {
+    return {
+      os: 'macos',
+      hasTrayHost: true,
+      supportsVibrancy: true,
+      polkitPolicyInstalled: true,
+      customWindowChrome: false,
+    };
+  }
+
+  async appQuit(): Promise<void> {
+    // no-op in web prototype mode
   }
 }
 

@@ -41,6 +41,7 @@ import type {
   UrlMatchRule,
 } from '../../types/domain';
 import { makeId } from '../../utils/format';
+import { formatShortcut } from '../../utils/shortcuts';
 
 const ICON_COLOR_PRESETS = [
   '#0572EC',
@@ -173,6 +174,7 @@ interface ItemEditorPaneProps {
 
 export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
   const { dict, fmt } = useI18n();
+  const shortcuts = useUiStore((s) => s.shortcuts);
   const iconPopUid = useId().replace(/:/g, '');
   const iconPopoverId = `icon-pop-${iconPopUid}`;
   const iconAnchorName = `--icon-btn-${iconPopUid}`;
@@ -612,7 +614,9 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-xs font-medium text-white shadow-xs cursor-pointer"
           >
             <Check size={14} />
-            {saving ? dict.editor.saving : dict.editor.saveWithShortcut}
+            {saving
+              ? dict.editor.saving
+              : fmt(dict.editor.saveWithShortcut, { shortcut: formatShortcut(shortcuts.saveItem) })}
           </button>
         </div>
       </header>
