@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::ipc_socket::{resolve_app_data_dir, resolve_socket_path, APP_SUPPORT_DIR_NAME};
+use crate::ipc_socket::{
+    resolve_app_data_dir, resolve_socket_path, APP_SUPPORT_DIR_NAME, NMH_TOKEN_FILE_NAME,
+};
 
 pub const NMH_HOST_NAME: &str = APP_SUPPORT_DIR_NAME;
 pub const KEYSMITH_EXTENSION_ID: &str = "ianpdijhflnmmhbmjdhiombdghhpfkmg";
@@ -162,8 +164,35 @@ pub fn write_nmh_message<W: Write>(writer: &mut W, payload: &[u8]) -> Result<(),
     Ok(())
 }
 
+fn resolve_nmh_token_path(sock_path: &Path) -> Option<PathBuf> {
+    #[cfg(unix)]
+    if let Some(parent) = sock_path.parent() {
+        return Some(parent.join(NMH_TOKEN_FILE_NAME));
+    }
+    resolve_app_data_dir().map(|d| d.join(NMH_TOKEN_FILE_NAME))
+}
+
+fn read_nmh_auth_token(sock_path: &Path) -> Result<String, String> {
+    let token_path = resolve_nmh_token_path(sock_path).ok_or_else(|| {
+        "Keysmith desktop app is not running or IPC auth token is missing. Please open Keysmith first."
+            .to_string()
+    })?;
+    let raw = std::fs::read_to_string(&token_path).map_err(|_| {
+        "Keysmith desktop app is not running or IPC auth token is missing. Please open Keysmith first."
+            .to_string()
+    })?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(
+            "Keysmith desktop app is not running or IPC auth token is missing. Please open Keysmith first."
+                .to_string(),
+        );
+    }
+    Ok(trimmed.to_string())
+}
+
 fn forward_nmh_request(sock_path: &Path, raw_bytes: &[u8]) -> Vec<u8> {
-    let parsed: Value = match serde_json::from_slice(raw_bytes) {
+    let mut parsed: Value = match serde_json::from_slice(raw_bytes) {
         Ok(v) => v,
         Err(err) => {
             return serde_json::to_vec(&json!({
@@ -184,6 +213,15 @@ fn forward_nmh_request(sock_path: &Path, raw_bytes: &[u8]) -> Vec<u8> {
         }))
         .unwrap_or_default()
     };
+
+    let Some(obj) = parsed.as_object_mut() else {
+        return err_response("Invalid JSON request: expected JSON object".to_string());
+    };
+    let token = match read_nmh_auth_token(sock_path) {
+        Ok(t) => t,
+        Err(msg) => return err_response(msg),
+    };
+    obj.insert("authToken".to_string(), Value::String(token));
 
     let mut line_bytes = match serde_json::to_vec(&parsed) {
         Ok(b) => b,
@@ -786,5 +824,62 @@ mod tests {
         let mut cursor = Cursor::new(buf);
         assert_eq!(read_nmh_message(&mut cursor).unwrap().unwrap(), msg);
         assert!(read_nmh_message(&mut cursor).unwrap().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn forward_nmh_request_injects_nmh_auth_token_and_overwrites_spoofed_token() {
+        use std::os::unix::net::UnixListener;
+
+        let temp_dir = std::env::temp_dir().join(format!("ks_nmh_fwd_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let sock_path = temp_dir.join("keysmith.sock");
+        let listener = UnixListener::bind(&sock_path).unwrap();
+
+        // Missing token must fail cleanly without panicking.
+        let missing_reply: Value = serde_json::from_slice(&forward_nmh_request(
+            &sock_path,
+            br#"{"id":7,"method":"status","params":{}}"#,
+        ))
+        .unwrap();
+        assert_eq!(missing_reply["id"], 7);
+        assert_eq!(missing_reply["ok"], false);
+
+        // Write real ipc-nmh.token and verify forwarding injects it over any spoofed value.
+        let expected_token = "deadbeef0123456789abcdef";
+        std::fs::write(temp_dir.join(NMH_TOKEN_FILE_NAME), format!("{expected_token}\n")).unwrap();
+
+        let server_handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(&stream);
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let received: Value = serde_json::from_str(line.trim_end()).unwrap();
+            assert_eq!(received["id"], 7);
+            assert_eq!(received["method"], "status");
+            assert_eq!(received["authToken"], expected_token);
+
+            let mut writer = stream;
+            writer
+                .write_all(br#"{"id":7,"ok":true,"result":{"status":"Unlocked"}}"#)
+                .unwrap();
+            writer.write_all(b"\n").unwrap();
+            writer.flush().unwrap();
+        });
+
+        let ok_reply: Value = serde_json::from_slice(&forward_nmh_request(
+            &sock_path,
+            br#"{"id":7,"method":"status","authToken":"spoofed-cli-token","params":{}}"#,
+        ))
+        .unwrap();
+        server_handle.join().unwrap();
+
+        assert_eq!(ok_reply["id"], 7);
+        assert_eq!(ok_reply["ok"], true);
+        assert_eq!(ok_reply["result"]["status"], "Unlocked");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

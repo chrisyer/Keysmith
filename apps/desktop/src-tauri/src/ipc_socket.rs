@@ -40,7 +40,7 @@ use crate::events::{UiFocusItemPayload, EVENT_UI_FOCUS_ITEM};
 
 pub const APP_SUPPORT_DIR_NAME: &str = "dev.keysmith.desktop";
 const SOCKET_FILE_NAME: &str = "keysmith.sock";
-const NMH_TOKEN_FILE_NAME: &str = "ipc-nmh.token";
+pub const NMH_TOKEN_FILE_NAME: &str = "ipc-nmh.token";
 const CLI_TOKEN_FILE_NAME: &str = "ipc-cli.token";
 #[cfg(windows)]
 const WINDOWS_PIPE_NAME: &str = r"\\.\pipe\dev.keysmith.desktop";
