@@ -19,7 +19,7 @@
       <img src="https://img.shields.io/github/v/release/chrisyer/Keysmith?logo=github&label=Version" alt="Latest Release" />
     </a>
     <a href="https://github.com/chrisyer/Keysmith/releases">
-      <img src="https://img.shields.io/badge/Platform-macOS%2013%2B%20%7C%20Windows%2010%2B-0572EC?logo=apple" alt="Supported Platforms" />
+      <img src="https://img.shields.io/badge/Platform-macOS%2013%2B%20%7C%20Windows%2010%2B%20%7C%20Linux%20x64-0572EC?logo=linux" alt="Supported Platforms" />
     </a>
     <img src="https://img.shields.io/badge/Stack-Rust%20%2B%20Tauri%20v2%20%2B%20React%2019-DEA584?logo=rust" alt="Tech Stack" />
     <img src="https://img.shields.io/badge/Browser%20Extension-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white" alt="Chrome Manifest V3 Extension" />
@@ -71,6 +71,17 @@ _Keysmith is an independent, local-first desktop client, CLI, and browser extens
 Download `Keysmith_<version>_x64-setup.exe` (NSIS) or the `.msi` installer from [GitHub Releases](https://github.com/chrisyer/Keysmith/releases) and run the installer.
 
 On launch, Keysmith extracts the browser extension to `%APPDATA%\dev.keysmith.desktop\browser-extension` and automatically registers Native Messaging for Chrome, Edge, Brave, Chromium, and Vivaldi.
+
+### Linux (x64 · Debian/Ubuntu, Fedora/RHEL, AppImage)
+
+Linux desktop support is implemented on `main` (`.deb`, `.rpm`, and `.AppImage` packages will ship with `v0.1.5+`):
+
+- **Secret Service + Polkit**: Stores unlock keys via Freedesktop Secret Service (`gnome-keyring` / `kwallet`) and verifies presence with Polkit (`dev.keysmith.desktop.unlock`, bundled in `/usr/share/polkit-1/actions/` for `.deb`/`.rpm`).
+- **Wayland & X11**: Supports clipboard auto-clear (`arboard` + `wl-copy`/`xclip`), screen lock & sleep auto-lock (`logind` + Freedesktop/GNOME/Cinnamon `ScreenSaver`), XDG Autostart (`~/.config/autostart/keysmith.desktop`), Auto-Type (`wtype`/`ydotool`/`xdotool`), TOTP QR screen scanning (`grim`/`import`/`spectacle`/`gnome-screenshot`/`scrot`), and automatic Chromium Native Messaging configuration under `$XDG_CONFIG_HOME` (`~/.config`).
+- **System build dependencies (building from source on Debian/Ubuntu):**
+  ```bash
+  sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libdbus-1-dev libssl-dev pkg-config
+  ```
 
 ### macOS (macOS 13+ Apple Silicon & Intel)
 

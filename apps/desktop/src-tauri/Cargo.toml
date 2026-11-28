@@ -4,7 +4,7 @@ version = "0.1.4"
 edition = "2021"
 license = "MPL-2.0"
 authors = ["chrisyer"]
-description = "Keysmith macOS desktop shell powered by Tauri v2"
+description = "Keysmith cross-platform desktop shell powered by Tauri v2"
 repository = "https://github.com/chrisyer/Keysmith"
 
 [lib]
@@ -46,6 +46,11 @@ window-vibrancy = "0.8"
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+arboard = { version = "3", features = ["wayland-data-control"] }
+keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+zbus = { version = "5", default-features = false, features = ["tokio", "blocking-api"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = ["Foundation", "Security_Credentials_UI"] }

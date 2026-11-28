@@ -1149,7 +1149,11 @@ mod macos_impl {
         {
             return crate::windows_native::pasteboard_write(text, is_sensitive);
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::pasteboard_write(text, is_sensitive);
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             let _ = is_sensitive;
             let mut clipboard = arboard::Clipboard::new()
@@ -1161,40 +1165,61 @@ mod macos_impl {
     }
 
     pub fn pasteboard_clear_if_matches(expected_digest: &[u8; 32]) -> Result<(), CoreError> {
-        let mut clipboard = match arboard::Clipboard::new() {
-            Ok(cb) => cb,
-            Err(_) => return Ok(()),
-        };
-        if let Ok(current) = clipboard.get_text() {
-            let cur_digest: [u8; 32] = Sha256::digest(current.as_bytes()).into();
-            if &cur_digest == expected_digest {
-                let _ = clipboard.clear();
-            }
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::pasteboard_clear_if_matches(expected_digest);
         }
-        Ok(())
+        #[cfg(not(target_os = "linux"))]
+        {
+            let mut clipboard = match arboard::Clipboard::new() {
+                Ok(cb) => cb,
+                Err(_) => return Ok(()),
+            };
+            if let Ok(current) = clipboard.get_text() {
+                let cur_digest: [u8; 32] = Sha256::digest(current.as_bytes()).into();
+                if &cur_digest == expected_digest {
+                    let _ = clipboard.clear();
+                }
+            }
+            Ok(())
+        }
     }
 
     pub fn pasteboard_clear_unconditional() -> Result<(), CoreError> {
-        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            let _ = clipboard.clear();
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::pasteboard_clear_unconditional();
         }
-        Ok(())
+        #[cfg(not(target_os = "linux"))]
+        {
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                let _ = clipboard.clear();
+            }
+            Ok(())
+        }
     }
 
     pub fn pasteboard_read_image_png_base64() -> Option<String> {
-        let mut clipboard = arboard::Clipboard::new().ok()?;
-        let img = clipboard.get_image().ok()?;
-        let rgba = image::RgbaImage::from_raw(
-            img.width as u32,
-            img.height as u32,
-            img.bytes.into_owned(),
-        )?;
-        let dyn_img = image::DynamicImage::ImageRgba8(rgba);
-        let mut png_bytes = Vec::new();
-        dyn_img
-            .write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
-            .ok()?;
-        Some(B64.encode(png_bytes))
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::pasteboard_read_image_png_base64();
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let mut clipboard = arboard::Clipboard::new().ok()?;
+            let img = clipboard.get_image().ok()?;
+            let rgba = image::RgbaImage::from_raw(
+                img.width as u32,
+                img.height as u32,
+                img.bytes.into_owned(),
+            )?;
+            let dyn_img = image::DynamicImage::ImageRgba8(rgba);
+            let mut png_bytes = Vec::new();
+            dyn_img
+                .write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+                .ok()?;
+            Some(B64.encode(png_bytes))
+        }
     }
 
     pub fn set_app_dock_icon(_png_bytes: &[u8]) {}
@@ -1220,7 +1245,9 @@ mod macos_impl {
     ) {
         #[cfg(target_os = "windows")]
         crate::windows_native::register_sleep_and_screen_lock_observers(on_trigger);
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        crate::linux_native::register_sleep_and_screen_lock_observers(on_trigger);
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         let _ = on_trigger;
     }
 
@@ -1253,7 +1280,11 @@ mod macos_impl {
             }
             return Ok(());
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::set_launch_at_login(enabled);
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             let _ = enabled;
             Ok(())
@@ -1265,7 +1296,11 @@ mod macos_impl {
         {
             return crate::windows_native::biometry_is_available();
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::biometry_is_available();
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             false
         }
@@ -1276,7 +1311,11 @@ mod macos_impl {
         {
             return crate::windows_native::biometry_authenticate(reason);
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::biometry_authenticate(reason);
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             let _ = reason;
             Err(CoreError::Biometric(
@@ -1290,7 +1329,11 @@ mod macos_impl {
         {
             return crate::windows_native::keychain_save(account_id, key);
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::keychain_save(account_id, key);
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             let _ = (account_id, key);
             Err(CoreError::Biometric(
@@ -1308,7 +1351,11 @@ mod macos_impl {
             biometry_authenticate(reason)?;
             return crate::windows_native::keychain_load(account_id);
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::keychain_load_with_reason(account_id, reason);
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             let _ = (account_id, reason);
             Err(CoreError::Biometric(
@@ -1324,7 +1371,11 @@ mod macos_impl {
         {
             return crate::windows_native::keychain_delete(account_id);
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::keychain_delete(account_id);
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             let _ = account_id;
             Ok(())
@@ -1332,12 +1383,21 @@ mod macos_impl {
     }
 
     pub fn system_preferred_language() -> Option<String> {
-        None
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::system_preferred_language();
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
     }
 
     pub fn record_frontmost_external_app() {
         #[cfg(target_os = "windows")]
         crate::windows_native::record_frontmost_external_app();
+        #[cfg(target_os = "linux")]
+        crate::linux_native::record_frontmost_external_app();
     }
 
     pub fn auto_type_sequence(steps: &[super::AutoTypeStep]) -> Result<(), CoreError> {
@@ -1345,7 +1405,11 @@ mod macos_impl {
         {
             return crate::windows_native::auto_type_sequence(steps);
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::auto_type_sequence(steps);
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             let _ = steps;
             Err(CoreError::Validation(
@@ -1359,7 +1423,11 @@ mod macos_impl {
         {
             return crate::windows_native::scan_screen_totp_qr();
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            return crate::linux_native::scan_screen_totp_qr();
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             Err(CoreError::Validation(
                 "Screen QR scanning is not supported on this platform".to_string(),

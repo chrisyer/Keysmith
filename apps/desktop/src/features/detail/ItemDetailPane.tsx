@@ -941,9 +941,12 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                   className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-strong)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-primary)] cursor-pointer"
                 >
                   <Fingerprint size={13} />
-                  {/Win/i.test(typeof navigator !== 'undefined' ? navigator.platform || navigator.userAgent : '')
-                    ? dict.detail.repromptUseWindowsHello
-                    : dict.detail.repromptUseTouchId}
+                  {(() => {
+                    const plat = typeof navigator !== 'undefined' ? navigator.platform || navigator.userAgent : '';
+                    if (/Win/i.test(plat)) return dict.detail.repromptUseWindowsHello;
+                    if (/Linux/i.test(plat)) return dict.detail.repromptUseLinuxBio;
+                    return dict.detail.repromptUseTouchId;
+                  })()}
                 </button>
               )}
             </form>

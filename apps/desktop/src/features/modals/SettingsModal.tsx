@@ -557,9 +557,19 @@ export function SettingsModal() {
             )}
 
             {tab === 'security' && (() => {
-              const isWindows = typeof navigator !== 'undefined' && /Win/i.test(navigator.platform || navigator.userAgent);
-              const bioTitle = isWindows ? dict.settings.windowsHello : dict.settings.touchId;
-              const bioDesc = isWindows ? dict.settings.windowsHelloDesc : dict.settings.touchIdDesc;
+              const plat = typeof navigator !== 'undefined' ? navigator.platform || navigator.userAgent : '';
+              const isWindows = /Win/i.test(plat);
+              const isLinux = !isWindows && /Linux/i.test(plat);
+              const bioTitle = isWindows
+                ? dict.settings.windowsHello
+                : isLinux
+                  ? dict.settings.linuxBio
+                  : dict.settings.touchId;
+              const bioDesc = isWindows
+                ? dict.settings.windowsHelloDesc
+                : isLinux
+                  ? dict.settings.linuxBioDesc
+                  : dict.settings.touchIdDesc;
               return (
               <div className="flex flex-col gap-2.5 text-[13px]">
                 <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">

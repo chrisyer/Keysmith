@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod events;
 pub mod ipc_socket;
+pub mod linux_native;
 pub mod macos;
 pub mod nmh;
 #[cfg(target_os = "windows")]

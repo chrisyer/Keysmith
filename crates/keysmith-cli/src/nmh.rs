@@ -121,24 +121,53 @@ impl BrowserTarget {
         }
     }
 
-    pub fn manifest_dir(self, home: &Path) -> PathBuf {
-        let app_support = home.join("Library").join("Application Support");
+    pub fn linux_manifest_dir(self, config_dir: &Path) -> PathBuf {
         match self {
-            Self::Chrome => app_support
-                .join("Google")
-                .join("Chrome")
+            Self::Chrome => config_dir
+                .join("google-chrome")
                 .join("NativeMessagingHosts"),
-            Self::Edge => app_support
-                .join("Microsoft Edge")
+            Self::Edge => config_dir
+                .join("microsoft-edge")
                 .join("NativeMessagingHosts"),
-            Self::Arc => app_support
-                .join("Arc")
-                .join("User Data")
+            Self::Arc => config_dir
+                .join("chromium")
                 .join("NativeMessagingHosts"),
-            Self::Brave => app_support
+            Self::Brave => config_dir
                 .join("BraveSoftware")
                 .join("Brave-Browser")
                 .join("NativeMessagingHosts"),
+        }
+    }
+
+    pub fn manifest_dir(self, home: &Path) -> PathBuf {
+        #[cfg(target_os = "linux")]
+        {
+            let config_dir = std::env::var_os("XDG_CONFIG_HOME")
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".config"));
+            return self.linux_manifest_dir(&config_dir);
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let app_support = home.join("Library").join("Application Support");
+            match self {
+                Self::Chrome => app_support
+                    .join("Google")
+                    .join("Chrome")
+                    .join("NativeMessagingHosts"),
+                Self::Edge => app_support
+                    .join("Microsoft Edge")
+                    .join("NativeMessagingHosts"),
+                Self::Arc => app_support
+                    .join("Arc")
+                    .join("User Data")
+                    .join("NativeMessagingHosts"),
+                Self::Brave => app_support
+                    .join("BraveSoftware")
+                    .join("Brave-Browser")
+                    .join("NativeMessagingHosts"),
+            }
         }
     }
 }

@@ -226,9 +226,91 @@ jobs:
           path: dist-release/*
           if-no-files-found: error
 
+  build-linux:
+    name: Build Linux (x64)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: meta
+        run: |
+          RAW_TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            RAW_TAG="${{ inputs.tag }}"
+          fi
+          VERSION="${RAW_TAG#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "main" ]; then
+            VERSION="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libdbus-1-dev \
+            libssl-dev \
+            pkg-config \
+            rpm \
+            squashfs-tools \
+            xdg-utils
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-unknown-linux-gnu
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build Linux deb, rpm, and AppImage bundles
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          cd apps/desktop
+          npx tauri build --bundles deb,rpm,appimage
+
+      - name: Collect Linux installers
+        run: |
+          mkdir -p dist-release
+          cp target/release/bundle/deb/*.deb dist-release/
+          cp target/release/bundle/rpm/*.rpm dist-release/
+          cp target/release/bundle/appimage/*.AppImage dist-release/
+          ls -la dist-release/
+
+      - name: Build & package Keysmith Linux CLI
+        run: |
+          mkdir -p dist-release
+          cargo build --release --manifest-path crates/keysmith-cli/Cargo.toml
+          TAR_PATH="dist-release/keysmith-cli-${{ steps.meta.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz"
+          tar -czf "$TAR_PATH" -C "target/release" ks keysmith-ssh-agent
+
+      - name: Upload Linux build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: keysmith-linux-x64
+          path: dist-release/*
+          if-no-files-found: error
+
   publish-release:
     name: Publish GitHub Release
-    needs: [build-macos, build-windows, build-extension]
+    needs: [build-macos, build-windows, build-linux, build-extension]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
@@ -250,6 +332,15 @@ jobs:
         with:
           generate_release_notes: true
           body: |
+            ### Linux Installation
+            - **Debian / Ubuntu:** Download and install `Keysmith_<version>_amd64.deb` (`sudo apt install ./Keysmith_<version>_amd64.deb` — includes the Polkit policy `/usr/share/polkit-1/actions/dev.keysmith.desktop.policy`).
+            - **Fedora / RHEL / openSUSE:** Download and install `Keysmith-<version>-1.x86_64.rpm`.
+            - **Universal AppImage (one-line install script verifies SHA-256 and installs to `~/.local/bin/keysmith`):**
+              ```bash
+              curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/main/install.sh | sh
+              ```
+            - **Secret Service & Auto-Type:** Requires a Freedesktop Secret Service daemon (`gnome-keyring` or `kwallet`) + Polkit for biometric/presence unlock. Wayland Auto-Type/QR scan uses `wtype`/`ydotool` + `grim`/`spectacle`; X11 uses `xdotool` + `import`/`scrot`.
+
             ### Windows Installation
             - Download and run `Keysmith_<version>_x64-setup.exe` (NSIS) or `Keysmith_<version>_x64_en-US.msi`.
             - On first launch, the desktop app automatically extracts the browser extension to `%APPDATA%\dev.keysmith.desktop\browser-extension` and registers `NativeMessagingHosts` in the Windows Registry for Chrome / Edge / Brave / Chromium / Vivaldi.

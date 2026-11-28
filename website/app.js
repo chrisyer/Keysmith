@@ -24,7 +24,7 @@ const I18N = {
       platMac: 'macOS 13+',
       platWin: 'Windows 10/11',
       platExt: 'Chrome / Edge / Arc / Brave 插件',
-      platNext: 'Android / iOS / Linux 规划中',
+      platNext: 'Linux (main) · iOS / Android 推进中',
     },
     preview: {
       regionAria: 'Keysmith 桌面端三栏交互预览',
@@ -132,9 +132,10 @@ const I18N = {
     },
     plat: {
       eyebrow: '全平台路线图',
-      title: '现已覆盖桌面与浏览器，即将登陆 Android、iOS 与 Linux',
+      title: '已支持 macOS / Windows / 浏览器与 Linux 源码构建，即将登陆 Android 与 iOS',
       desc: '核心加密、Vaultwarden 协议、TOTP 与 Passkey 引擎均封装在跨平台的 Rust `keysmith-core` 中，所有终端将共享同一套高安全审计底座与一致体验。',
       statusReady: '已发布 · v0.1.4',
+      statusLinux: '已合入 main · v0.1.5+ 发布安装包',
       statusExt: '已发布 · v0.3.0',
       statusPlanned: '即将推出',
       macDesc:
@@ -145,7 +146,7 @@ const I18N = {
       extDesc:
         '兼容 Chrome / Edge / Arc / Brave / Vivaldi。支持内联填充、WebAuthn Passkey 拦截保存与认证、SSO 登录自动接管以及安全密码生成器。',
       linuxDesc:
-        '规划提供 AppImage / .deb / Flatpak 包，接入 Secret Service / Polkit 生物认证、Wayland/X11 自动键入，并完整复用 OpenSSH Agent 与 CLI 工具链。',
+        '支持 .deb / .rpm / AppImage 构建，接入 Secret Service + Polkit 验证、logind/ScreenSaver 自动锁定、Wayland/X11 自动键入与扫码，以及 OpenSSH Agent 和 CLI 工具链。',
       iosDesc:
         '通过 Swift + UniFFI 绑定 Rust `keysmith-core`，接入 Face ID / Touch ID 与系统 AutoFill Credential / Passkey Provider，在 iPhone 与 Safari 中原生无缝填充。',
       androidDesc:
@@ -203,7 +204,7 @@ const I18N = {
       platMac: 'macOS 13+',
       platWin: 'Windows 10/11',
       platExt: 'Chrome / Edge / Arc / Brave Extension',
-      platNext: 'Android / iOS / Linux Coming Soon',
+      platNext: 'Linux (main) · iOS / Android In Progress',
     },
     preview: {
       regionAria: 'Keysmith desktop 3-pane interactive preview',
@@ -311,9 +312,10 @@ const I18N = {
     },
     plat: {
       eyebrow: 'Cross-Platform Roadmap',
-      title: 'Available on Desktop & Browsers today—Android, iOS & Linux next',
+      title: 'Desktop, Browser & Linux Source Ready—Android & iOS Next',
       desc: 'All cryptography, Vaultwarden sync, TOTP, and Passkey logic live inside the shared Rust keysmith-core crate, bringing identical security guarantees to every upcoming platform.',
       statusReady: 'Available · v0.1.4',
+      statusLinux: 'In main · Packages in v0.1.5+',
       statusExt: 'Available · v0.3.0',
       statusPlanned: 'Planned / Coming Soon',
       macDesc:
@@ -324,7 +326,7 @@ const I18N = {
       extDesc:
         'Works with Chrome, Edge, Arc, Brave, and Vivaldi. Inline autofill, WebAuthn Passkeys, TOTP copy, SSO login capture, and built-in password generator.',
       linuxDesc:
-        'Upcoming AppImage / .deb / Flatpak builds with Secret Service & Polkit unlock, Wayland/X11 Auto-Type, and full OpenSSH Agent + ks CLI parity.',
+        'Supports .deb / .rpm / AppImage bundling on main with Secret Service + Polkit auth, logind/ScreenSaver auto-lock, Wayland/X11 Auto-Type & QR scan, plus OpenSSH Agent + ks CLI parity.',
       iosDesc:
         'Powered by Rust keysmith-core via Swift + UniFFI bindings, integrating Face ID / Touch ID and native iOS AutoFill Credential & Passkey Provider.',
       androidDesc:

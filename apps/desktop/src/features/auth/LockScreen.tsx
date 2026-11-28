@@ -58,6 +58,7 @@ export function LockScreen() {
   };
 
   const isWindows = typeof navigator !== 'undefined' && /Win/i.test(navigator.platform || navigator.userAgent);
+  const isLinux = typeof navigator !== 'undefined' && !isWindows && /Linux/i.test(navigator.platform || navigator.userAgent);
 
   const handleTouchId = useCallback(
     async (isAuto = false) => {
@@ -192,8 +193,16 @@ export function LockScreen() {
               <Fingerprint size={17} />
             )}
             {touchScanning
-              ? (isWindows ? dict.lock.windowsHelloVerifying : dict.lock.touchIdVerifying)
-              : (isWindows ? dict.lock.windowsHelloBtn : dict.lock.touchIdBtn)}
+              ? isWindows
+                ? dict.lock.windowsHelloVerifying
+                : isLinux
+                  ? dict.lock.linuxBioVerifying
+                  : dict.lock.touchIdVerifying
+              : isWindows
+                ? dict.lock.windowsHelloBtn
+                : isLinux
+                  ? dict.lock.linuxBioBtn
+                  : dict.lock.touchIdBtn}
           </button>
         )}
 

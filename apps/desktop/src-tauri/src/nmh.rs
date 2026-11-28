@@ -360,6 +360,38 @@ pub fn sync_bundled_extension_dir(resource_dir: Option<&Path>) -> Option<PathBuf
     locate_source_extension_dir(resource_dir)
 }
 
+fn write_nmh_manifest_for_dir(
+    manifest_dir: &Path,
+    host_str: &str,
+    extra_extension_ids: &[String],
+    label: &str,
+) -> (PathBuf, bool) {
+    let manifest_path = manifest_dir.join(format!("{NMH_HOST_NAME}.json"));
+    let origins = collect_origins(&manifest_path, extra_extension_ids);
+    let manifest = json!({
+        "name": NMH_HOST_NAME,
+        "description": "Keysmith Desktop Native Messaging Host",
+        "path": host_str,
+        "type": "stdio",
+        "allowed_origins": origins,
+    });
+    let configured = std::fs::create_dir_all(manifest_dir)
+        .map_err(|e| format!("Failed to create {}: {e}", manifest_dir.display()))
+        .and_then(|_| {
+            serde_json::to_vec_pretty(&manifest)
+                .map_err(|e| format!("Failed to serialize NMH JSON: {e}"))
+        })
+        .and_then(|bytes| {
+            std::fs::write(&manifest_path, bytes)
+                .map_err(|e| format!("Failed to write {}: {e}", manifest_path.display()))
+        })
+        .map_err(|err| {
+            eprintln!("[keysmith-nmh] failed for {label}: {err}");
+        })
+        .is_ok();
+    (manifest_path, configured)
+}
+
 pub fn auto_install_nmh_in_home(
     home: &Path,
     host_path: &Path,
@@ -372,40 +404,84 @@ pub fn auto_install_nmh_in_home(
     for def in MACOS_BROWSERS {
         let base = def.base_dir(home);
         let detected = base.is_dir();
-        let manifest_path = def.manifest_dir(home).join(format!("{NMH_HOST_NAME}.json"));
-
-        let configured = if detected {
-            let origins = collect_origins(&manifest_path, extra_extension_ids);
-            let manifest = json!({
-                "name": NMH_HOST_NAME,
-                "description": "Keysmith Desktop Native Messaging Host",
-                "path": host_str,
-                "type": "stdio",
-                "allowed_origins": origins,
-            });
-            match manifest_path
-                .parent()
-                .ok_or_else(|| "Invalid manifest dir".to_string())
-                .and_then(|dir| {
-                    std::fs::create_dir_all(dir)
-                        .map_err(|e| format!("Failed to create {}: {e}", dir.display()))
-                })
-                .and_then(|_| {
-                    serde_json::to_vec_pretty(&manifest)
-                        .map_err(|e| format!("Failed to serialize NMH JSON: {e}"))
-                })
-                .and_then(|bytes| {
-                    std::fs::write(&manifest_path, bytes)
-                        .map_err(|e| format!("Failed to write {}: {e}", manifest_path.display()))
-                }) {
-                Ok(()) => true,
-                Err(err) => {
-                    eprintln!("[keysmith-nmh] failed for {}: {err}", def.label);
-                    false
-                }
-            }
+        let manifest_dir = def.manifest_dir(home);
+        let (manifest_path, configured) = if detected {
+            write_nmh_manifest_for_dir(&manifest_dir, &host_str, extra_extension_ids, def.label)
         } else {
-            false
+            (manifest_dir.join(format!("{NMH_HOST_NAME}.json")), false)
+        };
+
+        browsers.push(BrowserInstallInfo {
+            id: def.id.to_string(),
+            label: def.label.to_string(),
+            detected,
+            configured,
+            manifest_path: manifest_path.to_string_lossy().to_string(),
+        });
+    }
+
+    BrowserIntegrationStatus {
+        extension_id: KEYSMITH_EXTENSION_ID.to_string(),
+        host_path: host_str,
+        extension_dir: extension_dir.map(|p| p.to_string_lossy().to_string()),
+        browsers,
+    }
+}
+
+pub fn auto_install_linux_nmh_in_config_dir(
+    config_dir: &Path,
+    host_path: &Path,
+    extension_dir: Option<&Path>,
+    extra_extension_ids: &[String],
+) -> BrowserIntegrationStatus {
+    struct LinuxBrowserDef {
+        id: &'static str,
+        label: &'static str,
+        rel_dir: &'static [&'static str],
+    }
+
+    const LINUX_BROWSERS: &[LinuxBrowserDef] = &[
+        LinuxBrowserDef {
+            id: "chrome",
+            label: "Google Chrome",
+            rel_dir: &["google-chrome"],
+        },
+        LinuxBrowserDef {
+            id: "chromium",
+            label: "Chromium",
+            rel_dir: &["chromium"],
+        },
+        LinuxBrowserDef {
+            id: "edge",
+            label: "Microsoft Edge",
+            rel_dir: &["microsoft-edge"],
+        },
+        LinuxBrowserDef {
+            id: "brave",
+            label: "Brave",
+            rel_dir: &["BraveSoftware", "Brave-Browser"],
+        },
+        LinuxBrowserDef {
+            id: "vivaldi",
+            label: "Vivaldi",
+            rel_dir: &["vivaldi"],
+        },
+    ];
+
+    let host_str = host_path.to_string_lossy().to_string();
+    let mut browsers = Vec::with_capacity(LINUX_BROWSERS.len());
+
+    for def in LINUX_BROWSERS {
+        let mut base = config_dir.to_path_buf();
+        for seg in def.rel_dir {
+            base.push(seg);
+        }
+        let detected = base.is_dir();
+        let manifest_dir = base.join("NativeMessagingHosts");
+        let (manifest_path, configured) = if detected {
+            write_nmh_manifest_for_dir(&manifest_dir, &host_str, extra_extension_ids, def.label)
+        } else {
+            (manifest_dir.join(format!("{NMH_HOST_NAME}.json")), false)
         };
 
         browsers.push(BrowserInstallInfo {
@@ -539,9 +615,18 @@ pub fn auto_install_nmh_for_detected_browsers(
     resource_dir: Option<&Path>,
     extra_extension_ids: &[String],
 ) -> BrowserIntegrationStatus {
+    #[cfg(target_os = "linux")]
+    let host_path = std::env::var_os("APPIMAGE")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_exe().and_then(|p| p.canonicalize()).ok())
+        .unwrap_or_else(|| PathBuf::from("keysmith-desktop"));
+
+    #[cfg(not(target_os = "linux"))]
     let host_path = std::env::current_exe()
         .and_then(|p| p.canonicalize())
         .unwrap_or_else(|_| PathBuf::from("keysmith-desktop"));
+
     let ext_dir = sync_bundled_extension_dir(resource_dir);
 
     #[cfg(windows)]
@@ -549,7 +634,24 @@ pub fn auto_install_nmh_for_detected_browsers(
         return auto_install_windows_browsers(&host_path, ext_dir.as_deref(), extra_extension_ids);
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        let config_dir = std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config"))
+            })
+            .unwrap_or_else(|| PathBuf::from("/tmp"));
+        return auto_install_linux_nmh_in_config_dir(
+            &config_dir,
+            &host_path,
+            ext_dir.as_deref(),
+            extra_extension_ids,
+        );
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -641,6 +743,39 @@ mod tests {
             .any(|v| v.as_str() == Some(&format!("chrome-extension://{custom_id}/"))));
 
         let _ = std::fs::remove_dir_all(&temp_home);
+    }
+
+    #[test]
+    fn auto_install_linux_nmh_writes_detected_xdg_browsers() {
+        let temp_cfg =
+            std::env::temp_dir().join(format!("ks_linux_nmh_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_cfg);
+
+        std::fs::create_dir_all(temp_cfg.join("google-chrome")).unwrap();
+        std::fs::create_dir_all(temp_cfg.join("BraveSoftware/Brave-Browser")).unwrap();
+
+        let host_bin = PathBuf::from("/home/alice/.local/bin/keysmith");
+        let ext_dir = PathBuf::from("/home/alice/.local/share/dev.keysmith.desktop/browser-extension");
+        let status = auto_install_linux_nmh_in_config_dir(
+            &temp_cfg,
+            &host_bin,
+            Some(&ext_dir),
+            &["cccccccccccccccccccccccccccccccc".to_string()],
+        );
+
+        let chrome = status.browsers.iter().find(|b| b.id == "chrome").unwrap();
+        assert!(chrome.detected && chrome.configured);
+        let brave = status.browsers.iter().find(|b| b.id == "brave").unwrap();
+        assert!(brave.detected && brave.configured);
+        let edge = status.browsers.iter().find(|b| b.id == "edge").unwrap();
+        assert!(!edge.detected && !edge.configured);
+
+        let parsed: Value =
+            serde_json::from_slice(&std::fs::read(&chrome.manifest_path).unwrap()).unwrap();
+        assert_eq!(parsed["path"], host_bin.to_string_lossy().as_ref());
+        assert_eq!(parsed["name"], NMH_HOST_NAME);
+
+        let _ = std::fs::remove_dir_all(&temp_cfg);
     }
 
     #[test]

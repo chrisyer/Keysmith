@@ -53,6 +53,22 @@
     },
     "macOS": {
       "minimumSystemVersion": "13.0"
+    },
+    "linux": {
+      "deb": {
+        "section": "utils",
+        "files": {
+          "/usr/share/polkit-1/actions/dev.keysmith.desktop.policy": "linux/dev.keysmith.desktop.policy"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/share/polkit-1/actions/dev.keysmith.desktop.policy": "linux/dev.keysmith.desktop.policy"
+        }
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
     }
   }
 }
