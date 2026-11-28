@@ -327,11 +327,11 @@ export function QuickAccessWindow() {
         </>
       ) : (
         <>
-          <div
-            data-tauri-drag-region
-            className="px-5 py-3.5 border-b border-[var(--border-subtle)] flex items-center gap-3 shrink-0"
-          >
-            <Search size={17} className="text-[var(--accent-primary)] shrink-0" />
+          <div data-tauri-drag-region className="h-2.5 w-full shrink-0" />
+          <div className="px-5 pt-1 pb-3 border-b border-[var(--border-subtle)] flex items-center gap-3 shrink-0">
+            <span data-tauri-drag-region className="inline-flex items-center shrink-0 cursor-grab active:cursor-grabbing">
+              <Search size={17} className="text-[var(--accent-primary)] pointer-events-none" />
+            </span>
             <input
               ref={inputRef}
               type="text"
@@ -572,13 +572,10 @@ export function QuickAccessWindow() {
             )}
           </div>
 
-          <div className="px-4 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-card)]/60 flex items-center justify-between flex-wrap gap-2 text-[10px] text-[var(--text-muted)] shrink-0">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">↑↓</kbd> {dict.quickAccess.legendSelect}</span>
+          <div className="px-4 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-card)]/60 flex items-center justify-between flex-wrap gap-x-4 gap-y-1.5 text-[10.5px] text-[var(--text-muted)] shrink-0">
+            <div className="flex items-center flex-wrap gap-x-3.5 gap-y-1">
               <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Enter')}</kbd> {dict.quickAccess.legendCopyPw}</span>
               <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Shift+Enter')}</kbd> {dict.quickAccess.legendCopyUser}</span>
-              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Alt+Enter')}</kbd> {dict.quickAccess.legendCopyTotp}</span>
-              <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('CommandOrControl+Shift+Enter')}</kbd> {dict.quickAccess.legendAutoType}</span>
               <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('CommandOrControl+O')}</kbd> {dict.quickAccess.legendOpenMain}</span>
             </div>
             <span>{dict.quickAccess.legendEscHide}</span>

@@ -1,3 +1,4 @@
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   AlertTriangle,
   Archive,
@@ -38,6 +39,7 @@ import { ColoredPassword } from '../../components/ColoredPassword';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
 import { MarkdownPreview } from '../../components/MarkdownPreview';
 import { TotpRow } from '../../components/TotpRow';
+import { isCustomWindowChrome } from '../../components/WindowChrome';
 import {
   localizeBuiltinFieldLabel,
   localizeBuiltinSectionTitle,
@@ -51,7 +53,7 @@ import { useVaultStore } from '../../stores/vaultStore';
 import type { AttachmentDownloadResult, ItemDetail, ItemField, OrganizationInfo } from '../../types/domain';
 import { extractDomain, formatCardNumber, formatDateTime, maskCardNumber } from '../../utils/format';
 import { openExternalUrl } from '../../utils/opener';
-import { formatShortcut, formatShortcutMac } from '../../utils/shortcuts';
+import { formatShortcut, formatShortcutMac, isLinuxPlatform, isWindowsPlatform } from '../../utils/shortcuts';
 
 function isPreviewableAttachment(fileName: string): boolean {
   return /\.(png|jpe?g|webp|gif|svg|pdf|md|markdown|json|txt|csv|pem|pub|log|ya?ml|toml)$/i.test(
@@ -179,8 +181,8 @@ function FieldRow({
         </div>
       </div>
 
-      {/* Hover / Focus Reveal Action Bar */}
-      <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex items-center gap-1 shrink-0 pt-1">
+      {/* Persistent Field Action Bar (Always Discoverable) */}
+      <div className="flex items-center gap-1 shrink-0 pt-1 opacity-80 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
         {field.sensitive && field.value && (
           <button
             type="button"
@@ -212,7 +214,7 @@ function FieldRow({
             }}
             title={dict.detail.largeTypeTitle}
             aria-label={fmt(dict.detail.largeTypeFieldAria, { label: displayLabel })}
-            className="p-2 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
+            className="p-2 rounded-md hover:bg-[var(--bg-selected)] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] opacity-60 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity cursor-pointer"
           >
             <Maximize2 size={15} />
           </button>
@@ -536,10 +538,20 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
     });
   };
 
+  const customChrome = isCustomWindowChrome();
+
   return (
     <div className="h-full flex flex-col bg-[var(--bg-detail)] overflow-hidden">
       {/* Sticky Header */}
-      <header className="px-5 sm:px-7 pt-5 pb-4 border-b border-[var(--border-subtle)] flex flex-wrap items-start justify-between gap-3 shrink-0">
+      <header
+        data-tauri-drag-region={customChrome ? true : undefined}
+        onDoubleClick={(e) => {
+          if (customChrome && e.target === e.currentTarget) {
+            void getCurrentWindow().toggleMaximize();
+          }
+        }}
+        className={`px-5 sm:px-7 ${customChrome ? 'pr-[126px] sm:pr-[126px]' : ''} pt-4 pb-4 border-b border-[var(--border-subtle)] flex flex-wrap items-start justify-between gap-3 shrink-0`}
+      >
         <div className="flex items-center gap-3.5 min-w-[200px] flex-1">
           <ItemIconBadge icon={item.icon} category={item.category} title={item.title} size="lg" />
           <div className="min-w-0 flex-1">
@@ -1268,7 +1280,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                   </button>
                 </div>
 
-                <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 flex items-center gap-1 shrink-0">
+                <div className="opacity-75 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex items-center gap-1 shrink-0">
                   <button
                     type="button"
                     onClick={() => void handleCopy(u.uri, u.label || dict.detail.urlDefaultLabel, false)}
@@ -1296,7 +1308,12 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
           const pubKeyField = allFields.find(
             (f) => f.fieldType === 'ssh_public_key' && f.value.trim(),
           );
-          const socketVal = sshSocketPath || '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock';
+          const fallbackSshSocket = isLinuxPlatform()
+            ? '$HOME/.local/share/dev.keysmith.desktop/ssh-agent.sock'
+            : isWindowsPlatform()
+              ? '\\\\.\\pipe\\keysmith-ssh-agent'
+              : '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock';
+          const socketVal = sshSocketPath || fallbackSshSocket;
           if (!pubKeyField && !sshSocketPath) return null;
           return (
             <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] p-4 flex flex-col gap-3">
@@ -1309,7 +1326,10 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
                   <div className="text-[11px] text-[var(--text-secondary)] mt-0.5 leading-relaxed">
                     {dict.detail.sshWizardDesc}
                   </div>
-                  <code className="block mt-2 px-2.5 py-1.5 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] font-mono-tabular text-[11px] text-[var(--text-primary)] truncate">
+                  <code
+                    title={`IdentityAgent "${socketVal}"`}
+                    className="block mt-2 px-2.5 py-1.5 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] font-mono-tabular text-[11px] text-[var(--text-primary)] overflow-x-auto whitespace-nowrap ks-scroll select-all"
+                  >
                     IdentityAgent &quot;{socketVal}&quot;
                   </code>
                 </div>
@@ -1429,12 +1449,19 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
         )}
 
         {/* Encrypted Attachments */}
-        {!item.deletedAt && (
+        {!item.deletedAt && (() => {
+          const attCount = item.attachments?.length ?? 0;
+          const isCompactEmpty = attCount === 0 && !previewAtt;
+          return (
           <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
+            <div
+              className={`px-4 py-2.5 flex items-center justify-between gap-2 ${
+                isCompactEmpty ? '' : 'border-b border-[var(--border-subtle)]'
+              }`}
+            >
               <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--text-secondary)]">
                 <Paperclip size={13} />
-                {fmt(dict.detail.attachments, { count: item.attachments?.length ?? 0 })}
+                {fmt(dict.detail.attachments, { count: attCount })}
               </span>
               <div>
                 <input
@@ -1455,11 +1482,7 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
               </div>
             </div>
 
-            {(item.attachments?.length ?? 0) === 0 ? (
-              <div className="px-4 py-3 text-[11px] text-[var(--text-secondary)]">
-                {dict.detail.attachmentsEmpty}
-              </div>
-            ) : (
+            {attCount > 0 && (
               <div className="divide-y divide-[var(--border-subtle)]">
                 {item.attachments?.map((att) => {
                   const isImage = /\.(png|jpe?g|webp|gif|svg)$/i.test(att.fileName);
@@ -1560,7 +1583,8 @@ export function ItemDetailPane({ item }: ItemDetailPaneProps) {
               );
             })()}
           </div>
-        )}
+          );
+        })()}
 
         {/* Tags */}
         {item.tags.length > 0 && (

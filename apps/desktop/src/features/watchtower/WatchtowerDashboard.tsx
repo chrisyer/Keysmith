@@ -1,3 +1,4 @@
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   AlertOctagon,
   CalendarClock,
@@ -9,6 +10,7 @@ import {
   ShieldCheck,
   Smartphone,
 } from 'lucide-react';
+import { isCustomWindowChrome } from '../../components/WindowChrome';
 import { useI18n } from '../../i18n';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
@@ -53,6 +55,13 @@ export function WatchtowerDashboard() {
 
   return (
     <div className="h-full overflow-y-auto ks-scroll bg-[var(--bg-detail)] p-7">
+      {isCustomWindowChrome() && (
+        <div
+          data-tauri-drag-region
+          onDoubleClick={() => void getCurrentWindow().toggleMaximize()}
+          className="h-6 -mt-7 mb-2 -mx-7 shrink-0"
+        />
+      )}
       <div className="max-w-3xl mx-auto flex flex-col gap-5">
         <div className="p-6 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col sm:flex-row items-center gap-6">
           <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">

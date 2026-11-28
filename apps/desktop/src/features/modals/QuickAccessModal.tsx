@@ -443,13 +443,10 @@ export function QuickAccessModal() {
         </div>
 
         {/* Keyboard Legend Footer */}
-        <div className="px-4 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-card)]/60 flex items-center justify-between flex-wrap gap-2 text-[10px] text-[var(--text-muted)]">
-          <div className="flex items-center gap-3 flex-wrap">
-            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">↑↓</kbd> {dict.quickAccess.legendSelect}</span>
+        <div className="px-4 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-card)]/60 flex items-center justify-between flex-wrap gap-x-4 gap-y-1.5 text-[10.5px] text-[var(--text-muted)]">
+          <div className="flex items-center flex-wrap gap-x-3.5 gap-y-1">
             <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Enter')}</kbd> {dict.quickAccess.legendCopyPw}</span>
             <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Shift+Enter')}</kbd> {dict.quickAccess.legendCopyUser}</span>
-            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('Alt+Enter')}</kbd> {dict.quickAccess.legendCopyTotp}</span>
-            <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('CommandOrControl+Shift+Enter')}</kbd> {dict.quickAccess.legendAutoType}</span>
             <span><kbd className="font-mono-tabular px-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)]">{formatShortcut('CommandOrControl+O')}</kbd> {dict.quickAccess.legendOpenMain}</span>
           </div>
           <span>{dict.quickAccess.legendClose}</span>

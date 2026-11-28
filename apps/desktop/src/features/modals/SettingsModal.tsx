@@ -10,6 +10,7 @@ import {
   History,
   Info,
   Keyboard,
+  KeyRound,
   LogOut,
   Mail,
   Monitor,
@@ -26,7 +27,7 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ModalDialog } from '../../components/ModalDialog';
 import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
 import { AboutContent } from './AboutModal';
@@ -37,7 +38,6 @@ import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import type {
   AccountSummary,
-  AppUpdateInfo,
   BrowserIntegrationStatus,
   ExportFormat,
   ImportFormat,
@@ -49,7 +49,6 @@ import type {
   SyncMode,
 } from '../../types/domain';
 import { formatDateTime } from '../../utils/format';
-import { openExternalUrl } from '../../utils/opener';
 import {
   DEFAULT_GLOBAL_QUICK_ACCESS_SHORTCUT,
   DEFAULT_SHORTCUTS,
@@ -121,6 +120,7 @@ export function SettingsModal() {
   const [browserBusy, setBrowserBusy] = useState(false);
   const [extraExtId, setExtraExtId] = useState('');
   const [copiedExtId, setCopiedExtId] = useState(false);
+  const [copiedExtDir, setCopiedExtDir] = useState(false);
   const [sshStatus, setSshStatus] = useState<SshAgentStatus | null>(null);
   const [sshBusy, setSshBusy] = useState(false);
   const [copiedSshSocket, setCopiedSshSocket] = useState(false);
@@ -128,10 +128,9 @@ export function SettingsModal() {
   const [platformCaps, setPlatformCaps] = useState<PlatformCapabilities | null>(null);
   const [copiedPolkitCmd, setCopiedPolkitCmd] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState(displayName);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
 
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
-  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   // 'global' | ShortcutActionId | null
   const [recordingTarget, setRecordingTarget] = useState<'global' | ShortcutActionId | null>(null);
@@ -207,6 +206,12 @@ export function SettingsModal() {
     };
   }, [open]);
 
+  useEffect(() => {
+    if (open) {
+      contentScrollRef.current?.scrollTo({ top: 0 });
+    }
+  }, [tab, open]);
+
   const fallbackPlat = typeof navigator !== 'undefined' ? navigator.platform || navigator.userAgent : '';
   const resolvedOs =
     platformCaps?.os ??
@@ -221,6 +226,21 @@ export function SettingsModal() {
       ? '\\\\.\\pipe\\keysmith-ssh-agent'
       : '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock';
   const effectiveSshSocketPath = sshStatus?.socketPath ?? defaultSshSocketPath;
+  const bioBindingNote = isWindowsOs
+    ? dict.settings.biometricBindingNoteWindows
+    : isLinuxOs
+      ? dict.settings.biometricBindingNoteLinux
+      : dict.settings.biometricBindingNoteMac;
+  const sshBioTitle = isWindowsOs
+    ? dict.settings.sshSection.bioTitleWindows
+    : isLinuxOs
+      ? dict.settings.sshSection.bioTitleLinux
+      : dict.settings.sshSection.bioTitleMac;
+  const sshBioDesc = isWindowsOs
+    ? dict.settings.sshSection.bioDescWindows
+    : isLinuxOs
+      ? dict.settings.sshSection.bioDescLinux
+      : dict.settings.sshSection.bioDescMac;
   const polkitInstallCommand =
     'sudo install -Dm644 apps/desktop/src-tauri/resources/linux/dev.keysmith.desktop.policy /usr/share/polkit-1/actions/dev.keysmith.desktop.policy';
 
@@ -416,22 +436,6 @@ export function SettingsModal() {
     }
   };
 
-  const handleCheckUpdate = async () => {
-    setCheckingUpdate(true);
-    try {
-      const info = await tauriClient.appCheckUpdateInfo();
-      setUpdateInfo(info);
-    } catch (err) {
-      showToast({
-        label: dict.settings.appVersion,
-        text: err instanceof Error ? err.message : 'Failed',
-        kind: 'warning',
-      });
-    } finally {
-      setCheckingUpdate(false);
-    }
-  };
-
   const themeOptions: Array<{ id: ThemeMode; label: string; icon: typeof Monitor }> = [
     {
       id: 'system',
@@ -478,7 +482,7 @@ export function SettingsModal() {
               [
                 { id: 'appearance', label: dict.settings.tabs.appearance, icon: Palette },
                 { id: 'security', label: dict.settings.tabs.security, icon: Shield },
-                { id: 'ssh', label: dict.settings.tabs.ssh, icon: Terminal },
+                { id: 'ssh', label: dict.settings.tabs.ssh, icon: KeyRound },
                 { id: 'browser', label: dict.settings.tabs.browser, icon: Globe },
                 { id: 'import_export', label: dict.settings.tabs.import_export, icon: ArrowDownToLine },
                 { id: 'sync', label: dict.settings.tabs.sync, icon: RefreshCw },
@@ -505,7 +509,7 @@ export function SettingsModal() {
             })}
           </nav>
 
-          <div className="flex-1 overflow-y-auto ks-scroll p-5">
+          <div ref={contentScrollRef} className="flex-1 overflow-y-auto ks-scroll p-5">
             {tab === 'appearance' && (
               <div className="flex flex-col gap-5 text-[13px]">
                 <div>
@@ -513,12 +517,12 @@ export function SettingsModal() {
                     {dict.settings.languageLabel}
                   </h2>
                   <div className="relative flex items-center">
-                    <Globe size={15} className="absolute left-3 text-[var(--text-muted)] pointer-events-none" />
+                    <Globe size={15} className="absolute left-3 text-[var(--text-muted)] pointer-events-none z-10" />
                     <select
                       aria-label={dict.settings.languageLabel}
                       value={languageMode}
                       onChange={(e) => setLanguageMode(e.target.value as LanguageMode)}
-                      className="w-full pl-9 pr-3 py-2 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--border-strong)] focus:border-[var(--accent-primary)] focus:outline-none text-[13px] font-medium text-[var(--text-primary)] cursor-pointer"
+                      className="ks-select w-full !pl-9 font-medium"
                     >
                       {langOptions.map((opt) => (
                         <option key={opt.id} value={opt.id}>
@@ -607,7 +611,7 @@ export function SettingsModal() {
                   <div>
                     <div className="font-medium text-[var(--text-primary)]">{bioTitle}</div>
                     <div className="text-xs text-[var(--text-secondary)] mt-0.5">{bioDesc}</div>
-                    <div className="text-[11px] text-[var(--text-muted)] mt-1">{dict.settings.biometricBindingNote}</div>
+                    <div className="text-[11px] text-[var(--text-muted)] mt-1">{bioBindingNote}</div>
                   </div>
                   <input
                     type="checkbox"
@@ -624,7 +628,10 @@ export function SettingsModal() {
                       {dict.settings.polkitPolicyMissingHint}
                     </p>
                     <div className="flex items-center gap-2">
-                      <code className="flex-1 min-w-0 font-mono-tabular text-[11px] px-2.5 py-1.5 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] break-all select-all">
+                      <code
+                        title={polkitInstallCommand}
+                        className="flex-1 min-w-0 font-mono-tabular text-[11px] px-2.5 py-1.5 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] overflow-x-auto whitespace-nowrap ks-scroll select-all"
+                      >
                         {polkitInstallCommand}
                       </code>
                       <button
@@ -957,7 +964,10 @@ export function SettingsModal() {
                       {dict.settings.sshSection.socketLabel}
                     </span>
                     <div className="flex items-start gap-1.5 min-w-0">
-                      <code className="flex-1 min-w-0 font-mono-tabular text-[11px] px-2.5 py-1.5 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-primary)] break-all whitespace-pre-wrap select-all">
+                      <code
+                        title={effectiveSshSocketPath}
+                        className="flex-1 min-w-0 font-mono-tabular text-[11px] px-2.5 py-1.5 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-primary)] overflow-x-auto whitespace-nowrap ks-scroll select-all"
+                      >
                         {effectiveSshSocketPath}
                       </code>
                       <button
@@ -991,7 +1001,7 @@ export function SettingsModal() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-semibold text-[var(--text-primary)]">
-                          {dict.settings.sshSection.bioTitle}
+                          {sshBioTitle}
                         </span>
                         <span
                           className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${
@@ -1011,7 +1021,7 @@ export function SettingsModal() {
                         </span>
                       </div>
                       <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">
-                        {dict.settings.sshSection.bioDesc}
+                        {sshBioDesc}
                       </p>
                     </div>
                   </div>
@@ -1020,7 +1030,7 @@ export function SettingsModal() {
                     checked={sshBiometricConfirm}
                     onChange={(e) => void updatePreferences({ sshBiometricConfirm: e.target.checked })}
                     className="ks-checkbox shrink-0 mt-0.5"
-                    aria-label={dict.settings.sshSection.bioTitle}
+                    aria-label={sshBioTitle}
                   />
                 </label>
 
@@ -1057,7 +1067,7 @@ export function SettingsModal() {
                     </div>
                   </div>
 
-                  <pre className="p-3 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] font-mono-tabular text-[11.5px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-all select-all">{`Host *\n  IdentityAgent "${effectiveSshSocketPath}"`}</pre>
+                  <pre className="p-3 rounded-lg bg-[var(--bg-detail)] border border-[var(--border-subtle)] font-mono-tabular text-[11.5px] leading-relaxed text-[var(--text-primary)] overflow-x-auto whitespace-pre ks-scroll select-all">{`Host *\n  IdentityAgent "${effectiveSshSocketPath}"`}</pre>
 
                   <div className="flex flex-wrap items-center gap-2">
                     {!sshStatus?.sshConfigConfigured ? (
@@ -1126,10 +1136,7 @@ export function SettingsModal() {
                     <button
                       type="button"
                       onClick={() => {
-                        const sock =
-                          sshStatus?.socketPath ??
-                          '~/Library/Application Support/dev.keysmith.desktop/ssh-agent.sock';
-                        const snippet = `Host *\n  IdentityAgent "${sock}"\n`;
+                        const snippet = `Host *\n  IdentityAgent "${effectiveSshSocketPath}"\n`;
                         void tauriClient.clipboardCopySecret(
                           snippet,
                           dict.settings.sshSection.copySnippetBtn,
@@ -1224,41 +1231,47 @@ export function SettingsModal() {
                   <>
                     <div className="rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] divide-y divide-[var(--border-subtle)]">
                       {browserStatus.browsers.map((b) => (
-                        <div key={b.id} className="px-3.5 py-2.5 flex items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="font-medium text-[var(--text-primary)]">{b.label}</div>
-                            {b.detected && (
-                              <div className="text-[10.5px] text-[var(--text-muted)] font-mono-tabular truncate mt-0.5">
-                                {b.manifestPath}
-                              </div>
-                            )}
-                          </div>
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium shrink-0 ${
-                              b.configured
-                                ? 'bg-[var(--status-success)]/12 text-[var(--status-success)]'
+                        <div key={b.id} className="px-3.5 py-2.5 flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium text-[var(--text-primary)]">{b.label}</span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium shrink-0 ${
+                                b.configured
+                                  ? 'bg-[var(--status-success)]/12 text-[var(--status-success)]'
+                                  : b.detected
+                                    ? 'bg-[var(--status-warning)]/12 text-[var(--status-warning)]'
+                                    : 'bg-[var(--bg-detail)] text-[var(--text-muted)] border border-[var(--border-subtle)]'
+                              }`}
+                            >
+                              {b.configured
+                                ? dict.settings.browserSection.configuredBadge
                                 : b.detected
-                                  ? 'bg-[var(--status-warning)]/12 text-[var(--status-warning)]'
-                                  : 'bg-[var(--bg-detail)] text-[var(--text-muted)] border border-[var(--border-subtle)]'
-                            }`}
-                          >
-                            {b.configured
-                              ? dict.settings.browserSection.configuredBadge
-                              : b.detected
-                                ? dict.settings.browserSection.detectedUnconfiguredBadge
-                                : dict.settings.browserSection.notDetectedBadge}
-                          </span>
+                                  ? dict.settings.browserSection.detectedUnconfiguredBadge
+                                  : dict.settings.browserSection.notDetectedBadge}
+                            </span>
+                          </div>
+                          {b.detected && (
+                            <code
+                              title={b.manifestPath}
+                              className="block w-full font-mono-tabular text-[10.5px] text-[var(--text-muted)] overflow-x-auto whitespace-nowrap ks-scroll select-all"
+                            >
+                              {b.manifestPath}
+                            </code>
+                          )}
                         </div>
                       ))}
                     </div>
 
-                    <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-2">
-                      <div className="flex items-center justify-between gap-2">
+                    <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col gap-2.5">
+                      <div className="flex flex-col gap-1">
                         <span className="text-[11px] text-[var(--text-secondary)]">
                           {dict.settings.browserSection.extensionIdLabel}
                         </span>
-                        <div className="flex items-center gap-1.5">
-                          <code className="font-mono-tabular text-[11px] px-2 py-0.5 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-primary)]">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <code
+                            title={browserStatus.extensionId}
+                            className="flex-1 min-w-0 font-mono-tabular text-[11px] px-2 py-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-primary)] overflow-x-auto whitespace-nowrap ks-scroll select-all"
+                          >
                             {browserStatus.extensionId}
                           </code>
                           <button
@@ -1273,7 +1286,7 @@ export function SettingsModal() {
                               setTimeout(() => setCopiedExtId(false), 1500);
                             }}
                             aria-label={dict.common.copy}
-                            className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer"
+                            className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer shrink-0"
                           >
                             {copiedExtId ? (
                               <Check size={12} className="text-[var(--status-success)]" />
@@ -1284,13 +1297,38 @@ export function SettingsModal() {
                         </div>
                       </div>
                       {browserStatus.extensionDir && (
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-[11px] text-[var(--text-secondary)] shrink-0">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[11px] text-[var(--text-secondary)]">
                             {dict.settings.browserSection.extensionDirLabel}
                           </span>
-                          <span className="font-mono-tabular text-[10.5px] text-[var(--text-muted)] truncate">
-                            {browserStatus.extensionDir}
-                          </span>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <code
+                              title={browserStatus.extensionDir}
+                              className="flex-1 min-w-0 font-mono-tabular text-[10.5px] px-2 py-1 rounded bg-[var(--bg-detail)] border border-[var(--border-subtle)] text-[var(--text-muted)] overflow-x-auto whitespace-nowrap ks-scroll select-all"
+                            >
+                              {browserStatus.extensionDir}
+                            </code>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void tauriClient.clipboardCopySecret(
+                                  browserStatus.extensionDir!,
+                                  dict.settings.browserSection.extensionDirLabel,
+                                  false,
+                                );
+                                setCopiedExtDir(true);
+                                setTimeout(() => setCopiedExtDir(false), 1500);
+                              }}
+                              aria-label={dict.common.copy}
+                              className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer shrink-0"
+                            >
+                              {copiedExtDir ? (
+                                <Check size={12} className="text-[var(--status-success)]" />
+                              ) : (
+                                <Copy size={12} />
+                              )}
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1861,7 +1899,7 @@ export function SettingsModal() {
                       const nextMode = e.target.value as SyncMode;
                       void updateAppSettings({ syncMode: nextMode });
                     }}
-                    className="ks-input border-[var(--border-strong)] text-xs shrink-0"
+                    className="ks-select text-xs shrink-0"
                   >
                     <option value="auto">{dict.settings.syncModeAuto}</option>
                     <option value="manual">{dict.settings.syncModeManual}</option>
@@ -1941,44 +1979,6 @@ export function SettingsModal() {
                     </div>
                   </div>
                 )}
-
-                <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-semibold text-[var(--text-primary)]">{dict.settings.appVersion}</div>
-                    <div className="text-xs text-[var(--text-secondary)] mt-0.5 flex flex-wrap items-center gap-2">
-                      <span>{updateInfo ? `v${updateInfo.currentVersion}` : 'v0.1.4'}</span>
-                      {updateInfo?.updateAvailable && updateInfo.latestVersion && (
-                        <span className="px-2 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-primary)] font-medium">
-                          {fmt(dict.settings.newVersionAvailable, { version: updateInfo.latestVersion })}
-                        </span>
-                      )}
-                    </div>
-                    {updateInfo?.updateAvailable && updateInfo.notes && (
-                      <div className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">
-                        {updateInfo.notes}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {updateInfo?.updateAvailable && updateInfo.releaseUrl && (
-                      <button
-                        type="button"
-                        onClick={() => void openExternalUrl(updateInfo.releaseUrl!)}
-                        className="px-3 py-2 rounded-lg bg-[var(--accent-primary)] text-white text-xs font-medium cursor-pointer"
-                      >
-                        {dict.settings.download}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      disabled={checkingUpdate}
-                      onClick={() => void handleCheckUpdate()}
-                      className="px-3.5 py-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[13px] font-medium text-[var(--text-primary)] cursor-pointer"
-                    >
-                      {checkingUpdate ? dict.settings.checkingUpdate : dict.settings.checkUpdate}
-                    </button>
-                  </div>
-                </div>
 
                 <div className="flex items-center justify-between gap-3 pt-1">
                   <button

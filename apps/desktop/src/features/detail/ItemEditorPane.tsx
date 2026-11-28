@@ -1,3 +1,4 @@
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   Archive,
   ArrowDown,
@@ -28,6 +29,7 @@ import {
 import { useEffect, useId, useRef, useState } from 'react';
 import { GeneratorPopover } from '../../components/GeneratorPopover';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
+import { isCustomWindowChrome } from '../../components/WindowChrome';
 import { useI18n, type Dictionary } from '../../i18n';
 import { tauriClient } from '../../services/tauriClient';
 import { TEMPLATE_MAP } from '../../services/templates';
@@ -470,6 +472,8 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
     }
   };
 
+  const customChrome = isCustomWindowChrome();
+
   return (
     <form
       id="ks-item-editor-form"
@@ -477,7 +481,15 @@ export function ItemEditorPane({ initialDraft, isNew }: ItemEditorPaneProps) {
       className="h-full flex flex-col bg-[var(--bg-detail)] overflow-hidden"
     >
       {/* Sticky Editor Top Bar */}
-      <header className="px-5 py-4 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-3 shrink-0 bg-[var(--bg-detail)]">
+      <header
+        data-tauri-drag-region={customChrome ? true : undefined}
+        onDoubleClick={(e) => {
+          if (customChrome && e.target === e.currentTarget) {
+            void getCurrentWindow().toggleMaximize();
+          }
+        }}
+        className={`px-5 ${customChrome ? 'pr-[126px]' : ''} py-4 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-3 shrink-0 bg-[var(--bg-detail)]`}
+      >
         <div className="flex items-center gap-3 min-w-[200px] flex-1">
           <button
             type="button"

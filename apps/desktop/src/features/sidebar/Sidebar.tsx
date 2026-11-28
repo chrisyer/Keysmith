@@ -1,3 +1,4 @@
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   Archive,
   Building2,
@@ -95,8 +96,24 @@ export function Sidebar() {
 
   const currentVault = vaults.find((v) => v.id === activeVaultId);
   const riskCount = watchtowerReport?.totalRiskItems ?? 0;
+  const highRiskCount =
+    (watchtowerReport?.counts.breached ?? 0) +
+    (watchtowerReport?.counts.weak ?? 0) +
+    (watchtowerReport?.counts.reused ?? 0);
   const inTauri = isTauriRuntime();
   const isMacDesktop = inTauri && isMacPlatform();
+  const customChrome = inTauri && !isMacDesktop;
+
+  const allTemplates = [...PHASE1_TEMPLATES, ...PHASE2_TEMPLATES];
+  const populatedTemplates = allTemplates.filter(
+    (tpl) =>
+      (categoryCounts[tpl.category] ?? 0) > 0 ||
+      (activeView === 'category' && activeCategory === tpl.category),
+  );
+  const primaryTemplates = populatedTemplates.length > 0 ? populatedTemplates : PHASE1_TEMPLATES;
+  const hiddenTemplates = allTemplates.filter(
+    (tpl) => !primaryTemplates.some((p) => p.category === tpl.category),
+  );
 
   useEffect(() => {
     void refreshSavedAccounts();
@@ -139,12 +156,16 @@ export function Sidebar() {
       className="h-full shrink-0 flex flex-col justify-between overflow-hidden bg-[var(--bg-sidebar)]"
       aria-label="Sidebar"
     >
-      {/* Top macOS Titlebar Spacer + Account & Vault Switchers */}
+      {/* Top Titlebar Drag Spacer + Account & Vault Switchers */}
       <div className="flex flex-col">
         {isMacDesktop ? (
           <div data-tauri-drag-region className="h-[38px] w-full shrink-0 select-none" />
-        ) : inTauri ? (
-          <div className="h-2 w-full shrink-0 select-none" />
+        ) : customChrome ? (
+          <div
+            data-tauri-drag-region
+            onDoubleClick={() => void getCurrentWindow().toggleMaximize()}
+            className="h-3.5 w-full shrink-0 select-none"
+          />
         ) : (
           <div className="px-3.5 pt-3 pb-1 flex items-center gap-2 select-none" aria-hidden="true">
             <span className="w-3 h-3 rounded-full bg-[#FF5F57] border border-black/10" />
@@ -431,7 +452,13 @@ export function Sidebar() {
               {dict.sidebar.watchtower}
             </span>
             {riskCount > 0 && (
-              <span className="font-mono-tabular text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[var(--status-danger)]/15 text-[var(--status-danger)]">
+              <span
+                className={`font-mono-tabular text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                  highRiskCount > 0
+                    ? 'bg-[var(--status-danger)]/15 text-[var(--status-danger)]'
+                    : 'bg-[var(--status-warning)]/15 text-[var(--status-warning)]'
+                }`}
+              >
                 {riskCount}
               </span>
             )}
@@ -456,24 +483,28 @@ export function Sidebar() {
             {dict.sidebar.categories}
           </div>
           <div className="flex flex-col gap-0.5">
-            {PHASE1_TEMPLATES.map(renderCategoryRow)}
+            {primaryTemplates.map(renderCategoryRow)}
           </div>
 
-          <button
-            type="button"
-            onClick={() => setMoreCategoriesOpen((v) => !v)}
-            className="mt-1 w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
-          >
-            <span className="flex items-center gap-1">
-              {moreCategoriesOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              {fmt(dict.sidebar.moreCategories, { count: PHASE2_TEMPLATES.length })}
-            </span>
-          </button>
+          {hiddenTemplates.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => setMoreCategoriesOpen((v) => !v)}
+                className="mt-1 w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
+              >
+                <span className="flex items-center gap-1">
+                  {moreCategoriesOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  {fmt(dict.sidebar.moreCategories, { count: hiddenTemplates.length })}
+                </span>
+              </button>
 
-          {moreCategoriesOpen && (
-            <div className="mt-0.5 flex flex-col gap-0.5">
-              {PHASE2_TEMPLATES.map(renderCategoryRow)}
-            </div>
+              {moreCategoriesOpen && (
+                <div className="mt-0.5 flex flex-col gap-0.5">
+                  {hiddenTemplates.map(renderCategoryRow)}
+                </div>
+              )}
+            </>
           )}
         </div>
 

@@ -107,4 +107,18 @@ describe('Desktop i18n dictionaries', () => {
     expect(formatShortcut('CommandOrControl+Shift+Enter', 'other')).toBe('Ctrl+Shift+Enter');
     expect(formatShortcut('Alt+Enter', 'other')).toBe('Alt+Enter');
   });
+
+  it('keeps Linux-specific biometric and SSH guidance free of macOS/Windows terminology', () => {
+    for (const loc of SUPPORTED_LOCALES) {
+      const dict = getDictionary(loc.id);
+      const linuxCopy = [
+        dict.settings.biometricBindingNoteLinux,
+        dict.settings.sshSection.bioTitleLinux,
+        dict.settings.sshSection.bioDescLinux,
+      ].join(' ');
+      expect(linuxCopy, `${loc.id} Linux copy should not mention Keychain`).not.toMatch(/Keychain/i);
+      expect(linuxCopy, `${loc.id} Linux copy should not mention Windows Hello`).not.toMatch(/Windows Hello/i);
+      expect(linuxCopy, `${loc.id} Linux copy should not mention Touch ID`).not.toMatch(/Touch ID/i);
+    }
+  });
 });

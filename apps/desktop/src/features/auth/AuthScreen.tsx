@@ -1,10 +1,11 @@
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AlertTriangle, ArrowLeft, CheckCircle2, Eye, EyeOff, Globe, KeyRound, Loader2, Server } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   isCustomWindowChrome,
   useWindowMaximized,
+  WindowControls,
   WindowResizeHandles,
-  WindowTitleBar,
 } from '../../components/WindowChrome';
 import { SUPPORTED_LOCALES, useI18n, type LanguageMode } from '../../i18n';
 import { evaluatePasswordStrength } from '../../services/generator';
@@ -213,7 +214,14 @@ export function AuthScreen() {
       }`}
     >
       {customChrome ? (
-        <WindowTitleBar maximized={isMaximized} />
+        <div className="relative h-10 w-full flex items-center justify-end pr-2 pt-1.5 shrink-0">
+          <div
+            data-tauri-drag-region
+            onDoubleClick={() => void getCurrentWindow().toggleMaximize()}
+            className="absolute inset-0"
+          />
+          <WindowControls maximized={isMaximized} className="relative z-10" />
+        </div>
       ) : (
         inTauri && <div data-tauri-drag-region className="fixed top-0 left-0 right-0 h-9" />
       )}

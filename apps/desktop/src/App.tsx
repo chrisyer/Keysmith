@@ -1,3 +1,4 @@
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AlertCircle, KeyRound, Plus, RefreshCw } from 'lucide-react';
 import { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
 import { LargeTypeModal } from './components/LargeTypeModal';
@@ -6,8 +7,8 @@ import { ToastRegion } from './components/ToastRegion';
 import {
   isCustomWindowChrome,
   useWindowMaximized,
+  WindowControls,
   WindowResizeHandles,
-  WindowTitleBar,
 } from './components/WindowChrome';
 import { AuthScreen } from './features/auth/AuthScreen';
 import { LockScreen } from './features/auth/LockScreen';
@@ -326,7 +327,16 @@ function MainWorkspaceApp() {
     return (
       <>
         <div className={`h-dvh w-full flex flex-col bg-[var(--bg-sidebar)] ${chromeBorderClass}`}>
-          {customChrome && <WindowTitleBar maximized={isMaximized} />}
+          {customChrome && (
+            <div className="relative h-11 w-full flex items-center justify-end pr-2 pt-1.5 shrink-0">
+              <div
+                data-tauri-drag-region
+                onDoubleClick={() => void getCurrentWindow().toggleMaximize()}
+                className="absolute inset-0"
+              />
+              <WindowControls maximized={isMaximized} className="relative z-10" />
+            </div>
+          )}
           <div className="flex-1 flex items-center justify-center text-xs text-[var(--text-muted)]">
             {dict.app.initializing}
           </div>
@@ -341,7 +351,16 @@ function MainWorkspaceApp() {
     return (
       <>
         <div className={`h-dvh w-full flex flex-col bg-[var(--bg-sidebar)] ${chromeBorderClass}`}>
-          {customChrome && <WindowTitleBar maximized={isMaximized} />}
+          {customChrome && (
+            <div className="relative h-11 w-full flex items-center justify-end pr-2 pt-1.5 shrink-0">
+              <div
+                data-tauri-drag-region
+                onDoubleClick={() => void getCurrentWindow().toggleMaximize()}
+                className="absolute inset-0"
+              />
+              <WindowControls maximized={isMaximized} className="relative z-10" />
+            </div>
+          )}
           <div className="flex-1 flex items-center justify-center p-6">
             <div className="w-full max-w-[380px] rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-xl p-7 text-center flex flex-col items-center">
               <div className="w-11 h-11 rounded-xl bg-[var(--status-danger)]/10 border border-[var(--status-danger)]/25 flex items-center justify-center text-[var(--status-danger)] mb-4">
@@ -391,14 +410,18 @@ function MainWorkspaceApp() {
 
   return (
     <div
-      className={`h-dvh w-screen overflow-hidden flex flex-col text-[var(--text-primary)] ${
+      className={`relative h-dvh w-screen overflow-y-hidden overflow-x-auto flex text-[var(--text-primary)] ${
         vibrancyEnabled && isMacDesktop ? 'bg-transparent' : 'bg-[var(--bg-detail)]'
       } ${chromeBorderClass}`}
     >
-      {customChrome && <WindowTitleBar maximized={isMaximized} />}
-      <div className="flex-1 min-h-0 w-full overflow-y-hidden overflow-x-auto flex">
-        {/* Pane 1: Sidebar */}
-        <Sidebar />
+      {customChrome && (
+        <WindowControls
+          maximized={isMaximized}
+          className="fixed top-[18px] right-3 z-50"
+        />
+      )}
+      {/* Pane 1: Sidebar */}
+      <Sidebar />
 
       <PaneResizer
         ariaLabel={dict.app.resizeSidebarAria}
@@ -430,35 +453,43 @@ function MainWorkspaceApp() {
             ) : activeItem ? (
               <ItemDetailPane item={activeItem} />
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center px-8 bg-[var(--bg-detail)]">
-                <div className="w-12 h-12 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--accent-primary)] mb-3.5">
-                  <KeyRound size={22} />
-                </div>
-                <h2 className="text-base font-semibold text-[var(--text-primary)]">
-                  {dict.app.emptyTitle}
-                </h2>
-                <p className="text-[13px] text-[var(--text-secondary)] mt-1 max-w-xs leading-relaxed">
-                  {dict.app.emptyHint}
-                </p>
-                <div className="mt-4">
-                  <button
-                    type="button"
-                    onClick={() => setNewItemOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-[13.5px] font-medium text-white cursor-pointer"
-                  >
-                    <Plus size={15} />
-                    {dict.app.newItemBtn}
-                    <span className="opacity-75 font-mono-tabular text-xs ml-0.5">
-                      {formatShortcutMac(shortcuts.newItem)}
-                    </span>
-                  </button>
+              <div className="h-full flex flex-col bg-[var(--bg-detail)]">
+                {customChrome && (
+                  <div
+                    data-tauri-drag-region
+                    onDoubleClick={() => void getCurrentWindow().toggleMaximize()}
+                    className="h-11 w-full shrink-0"
+                  />
+                )}
+                <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
+                  <div className="w-12 h-12 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--accent-primary)] mb-3.5">
+                    <KeyRound size={22} />
+                  </div>
+                  <h2 className="text-base font-semibold text-[var(--text-primary)]">
+                    {dict.app.emptyTitle}
+                  </h2>
+                  <p className="text-[13px] text-[var(--text-secondary)] mt-1 max-w-xs leading-relaxed">
+                    {dict.app.emptyHint}
+                  </p>
+                  <div className="mt-4">
+                    <button
+                      type="button"
+                      onClick={() => setNewItemOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-[13.5px] font-medium text-white cursor-pointer"
+                    >
+                      <Plus size={15} />
+                      {dict.app.newItemBtn}
+                      <span className="opacity-75 font-mono-tabular text-xs ml-0.5">
+                        {formatShortcutMac(shortcuts.newItem)}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
           </main>
         </>
       )}
-      </div>
 
       {customChrome && <WindowResizeHandles disabled={isMaximized} />}
 

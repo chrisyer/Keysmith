@@ -1,4 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   Archive,
   ArrowUpDown,
@@ -18,15 +19,18 @@ import {
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { ItemIconBadge } from '../../components/ItemIconBadge';
+import { isCustomWindowChrome } from '../../components/WindowChrome';
 import { useI18n } from '../../i18n';
 import { tauriClient } from '../../services/tauriClient';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
-import type { SortBy } from '../../types/domain';
+import type { SortBy, WatchtowerIssueType } from '../../types/domain';
 import { formatShortcutMac } from '../../utils/shortcuts';
 
 const SORT_OPTION_IDS: SortBy[] = ['title_asc', 'title_desc', 'updated_desc', 'created_desc'];
+const HIGH_SEVERITY_ISSUES = new Set<WatchtowerIssueType>(['breached', 'weak', 'reused']);
+const MEDIUM_SEVERITY_ISSUES = new Set<WatchtowerIssueType>(['unsecured_url', 'expiring']);
 
 interface ItemListProps {
   searchInputRef: React.RefObject<HTMLInputElement | null>;
@@ -223,7 +227,15 @@ export function ItemList({ searchInputRef }: ItemListProps) {
       onKeyDown={handleListKeyDown}
     >
       {/* Search + Action Bar */}
-      <div className="p-3 pb-2.5 border-b border-[var(--border-subtle)] flex flex-col gap-2">
+      <div
+        data-tauri-drag-region={isCustomWindowChrome() ? true : undefined}
+        onDoubleClick={(e) => {
+          if (isCustomWindowChrome() && e.target === e.currentTarget) {
+            void getCurrentWindow().toggleMaximize();
+          }
+        }}
+        className="p-3 pb-2.5 border-b border-[var(--border-subtle)] flex flex-col gap-2"
+      >
         <div className="flex items-center gap-2">
           <div className="relative flex-1 min-w-0 flex items-center">
             <Search size={15} className="absolute left-3 text-[var(--text-muted)] pointer-events-none" />
@@ -506,12 +518,24 @@ export function ItemList({ searchInputRef }: ItemListProps) {
                           2FA
                         </span>
                       )}
-                      {item.issues.length > 0 && (
-                        <span
-                          className="w-2 h-2 rounded-full bg-[var(--status-danger)]"
-                          title={fmt(dict.list.watchtowerDotTitle, { count: item.issues.length })}
-                        />
-                      )}
+                      {(() => {
+                        if (item.issues.length === 0) return null;
+                        const hasHigh = item.issues.some((i) => HIGH_SEVERITY_ISSUES.has(i));
+                        const hasMedium = !hasHigh && item.issues.some((i) => MEDIUM_SEVERITY_ISSUES.has(i));
+                        const showAdvisory = !hasHigh && !hasMedium && activeView === 'watchtower';
+                        if (!hasHigh && !hasMedium && !showAdvisory) return null;
+                        const dotClass = hasHigh
+                          ? 'w-2 h-2 rounded-full bg-[var(--status-danger)]'
+                          : hasMedium
+                            ? 'w-1.5 h-1.5 rounded-full bg-[var(--status-warning)]/85'
+                            : 'w-1.5 h-1.5 rounded-full bg-[var(--text-muted)]/65';
+                        return (
+                          <span
+                            className={dotClass}
+                            title={fmt(dict.list.watchtowerDotTitle, { count: item.issues.length })}
+                          />
+                        );
+                      })()}
                     </div>
                   </button>
                 </div>

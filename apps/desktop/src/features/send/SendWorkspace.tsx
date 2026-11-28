@@ -1,3 +1,4 @@
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   Check,
   Copy,
@@ -11,6 +12,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isCustomWindowChrome } from '../../components/WindowChrome';
 import { useI18n } from '../../i18n';
 import { tauriClient } from '../../services/tauriClient';
 import { useUiStore } from '../../stores/uiStore';
@@ -457,6 +459,13 @@ export function SendWorkspace() {
 
       {/* Send Detail / Create Form */}
       <main className="flex-1 min-w-0 h-full overflow-y-auto ks-scroll px-7 py-6">
+        {isCustomWindowChrome() && (
+          <div
+            data-tauri-drag-region
+            onDoubleClick={() => void getCurrentWindow().toggleMaximize()}
+            className="h-5 -mt-6 mb-2 -mx-7 shrink-0"
+          />
+        )}
         {!isCreating && !selectedSend ? (
           <div className="h-full flex flex-col items-center justify-center text-center max-w-sm mx-auto">
             <div className="w-12 h-12 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--accent-primary)] mb-3">
@@ -479,7 +488,7 @@ export function SendWorkspace() {
           </div>
         ) : (
           <form onSubmit={(e) => void handleSubmit(e)} className="max-w-2xl mx-auto flex flex-col gap-5">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className={`flex items-center justify-between gap-3 flex-wrap ${isCustomWindowChrome() ? 'pr-[106px]' : ''}`}>
               <div>
                 <h2 className="text-lg font-semibold text-[var(--text-primary)]">
                   {isCreating

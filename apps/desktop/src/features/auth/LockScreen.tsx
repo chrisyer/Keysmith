@@ -124,8 +124,12 @@ export function LockScreen() {
           : 'w-full max-w-[390px] rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-2xl overflow-hidden flex flex-col'
       }
     >
-      {/* Top Bar (with drag region on desktop & clean compact language pill + window controls) */}
-      <div className="relative h-11 px-3.5 flex items-center justify-end gap-1.5 shrink-0">
+      {/* Top Bar (with integrated drag region, separated language selector on custom chrome, and no maximize on compact lock window) */}
+      <div
+        className={`relative h-11 px-3 flex items-center shrink-0 ${
+          customChrome ? 'justify-between' : 'justify-end'
+        }`}
+      >
         {inTauri && <div data-tauri-drag-region className="absolute inset-0" />}
         <label className="relative z-10 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--bg-card)]/70 hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] cursor-pointer">
           <Globe size={12} className="shrink-0" />
@@ -144,9 +148,12 @@ export function LockScreen() {
           </select>
         </label>
         {customChrome && (
-          <div className="relative z-10 -mr-1.5">
-            <WindowControls compact maximized={isMaximized} />
-          </div>
+          <WindowControls
+            compact
+            showMaximize={false}
+            maximized={isMaximized}
+            className="relative z-10"
+          />
         )}
       </div>
       {customChrome && <WindowResizeHandles disabled={isMaximized} />}
@@ -282,11 +289,11 @@ export function LockScreen() {
         </button>
 
         {confirmRemove ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => setConfirmRemove(false)}
-              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+              className="px-2 py-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
             >
               {dict.common.cancel}
             </button>
@@ -296,7 +303,7 @@ export function LockScreen() {
                 setConfirmRemove(false);
                 void logout(false);
               }}
-              className="text-[var(--status-danger)] font-medium cursor-pointer"
+              className="px-2.5 py-1 rounded-md bg-[var(--status-danger)] hover:opacity-90 text-white font-medium cursor-pointer"
             >
               {dict.common.confirm}
             </button>
@@ -305,7 +312,7 @@ export function LockScreen() {
           <button
             type="button"
             onClick={() => setConfirmRemove(true)}
-            className="inline-flex items-center gap-1.5 text-[var(--text-secondary)] hover:text-[var(--status-danger)] cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[var(--status-danger)] hover:bg-[var(--status-danger)]/10 font-medium transition-colors cursor-pointer"
           >
             <LogOut size={13} />
             {dict.lock.removeAccount}
