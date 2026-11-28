@@ -144,7 +144,7 @@ body {
   color: var(--text-primary);
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 a {
@@ -307,7 +307,10 @@ button {
 .hero-badge {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 0.5rem;
+  max-inline-size: 100%;
   padding: 0.35rem 0.9rem;
   border-radius: 999px;
   background-color: var(--accent-soft);
@@ -420,8 +423,10 @@ button {
 
 .mockup-titlebar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 0.45rem 0.75rem;
   padding: 0.7rem 1rem;
   background-color: var(--bg-card-alt);
   border-bottom: 1px solid var(--border-subtle);
@@ -461,6 +466,10 @@ button {
   display: grid;
   grid-template-columns: 215px 275px minmax(0, 1fr);
   min-height: 380px;
+}
+
+.mockup-grid > * {
+  min-inline-size: 0;
 }
 
 .mockup-sidebar {
@@ -609,15 +618,22 @@ button {
 
 .detail-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .detail-title-wrap {
   display: flex;
   align-items: center;
   gap: 0.8rem;
+  min-inline-size: 0;
+}
+
+.detail-title-wrap > *,
+.detail-field-card > * {
+  min-inline-size: 0;
 }
 
 .detail-fields {
@@ -731,6 +747,10 @@ button {
   gap: 1.25rem;
 }
 
+.bento-grid > * {
+  min-inline-size: 0;
+}
+
 .bento-card {
   padding: 1.5rem;
   border-radius: var(--radius-lg);
@@ -764,6 +784,7 @@ button {
   margin: 0;
   font-size: 0.91rem;
   color: var(--text-secondary);
+  overflow-wrap: break-word;
 }
 
 .bento-tags {
@@ -792,11 +813,17 @@ button {
   align-items: center;
 }
 
+.split-grid > * {
+  min-inline-size: 0;
+}
+
 .split-grid.is-reversed .split-visual {
   order: -1;
 }
 
 .visual-frame {
+  min-inline-size: 0;
+  max-inline-size: 100%;
   border-radius: var(--radius-xl);
   overflow: hidden;
   border: 1px solid var(--border-strong);
@@ -820,6 +847,11 @@ button {
   border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
 
+.editorial-block {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
 .editorial-block h3 {
   margin: 0.35rem 0 0.75rem;
   font-size: clamp(1.45rem, 2.5vw, 1.95rem);
@@ -831,6 +863,7 @@ button {
 .editorial-block p {
   margin: 0 0 1.1rem;
   color: var(--text-secondary);
+  overflow-wrap: break-word;
 }
 
 .feature-checklist {
@@ -847,6 +880,12 @@ button {
   align-items: flex-start;
   gap: 0.65rem;
   font-size: 0.93rem;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
+}
+
+.feature-checklist li > span:not(.check-dot) {
+  min-inline-size: 0;
 }
 
 .check-dot {
@@ -881,6 +920,7 @@ button {
 
 /* Comparison Table */
 .table-wrap {
+  max-inline-size: 100%;
   overflow-x: auto;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-subtle);
@@ -921,6 +961,9 @@ button {
 
 /* Terminal Card */
 .terminal-card {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
   margin-top: 1.25rem;
   border-radius: var(--radius-md);
   background-color: var(--bg-code);
@@ -931,8 +974,10 @@ button {
 
 .terminal-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 0.5rem;
   padding: 0.55rem 0.9rem;
   background-color: rgba(255, 255, 255, 0.04);
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
@@ -944,7 +989,9 @@ button {
 .terminal-card pre {
   margin: 0;
   padding: 1rem;
+  max-inline-size: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   font-family: var(--font-mono);
   font-size: 0.82rem;
   line-height: 1.65;
@@ -961,7 +1008,13 @@ button {
   gap: 1.15rem;
 }
 
+.platform-grid > * {
+  min-inline-size: 0;
+}
+
 .platform-card {
+  min-inline-size: 0;
+  max-inline-size: 100%;
   padding: 1.35rem;
   border-radius: var(--radius-lg);
   background-color: var(--bg-card);
@@ -974,9 +1027,10 @@ button {
 
 .platform-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.45rem 0.75rem;
 }
 
 .platform-name {
@@ -1006,6 +1060,7 @@ button {
   margin: 0;
   font-size: 0.88rem;
   color: var(--text-secondary);
+  overflow-wrap: break-word;
 }
 
 .shared-core-callout {
@@ -1021,9 +1076,19 @@ button {
   gap: 1rem;
 }
 
+.shared-core-callout > * {
+  min-inline-size: 0;
+}
+
+.shared-core-callout p {
+  overflow-wrap: break-word;
+}
+
 /* Accessible Installation Tabs (modern-web-guidance: tabs) */
 .install-tabs {
-  max-width: 900px;
+  inline-size: 100%;
+  max-inline-size: 900px;
+  min-inline-size: 0;
   margin-inline: auto;
 }
 
@@ -1071,13 +1136,18 @@ button {
 /* Grid stacking without gap; outer role="tabpanel" keeps zero padding/border/bg for hidden="until-found" */
 .tab-panels-stack {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .tab-panels-stack > [role="tabpanel"] {
   grid-area: 1 / 1;
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }
 
 .tab-panel-card {
+  min-inline-size: 0;
+  max-inline-size: 100%;
   padding: 1.5rem;
   border-radius: var(--radius-lg);
   background-color: var(--bg-card);
@@ -1094,6 +1164,15 @@ button {
   margin: 0 0 0.85rem;
   font-size: 0.9rem;
   color: var(--text-secondary);
+  overflow-wrap: break-word;
+}
+
+.editorial-block p code,
+.feature-checklist code,
+.platform-card code,
+.shared-core-callout code,
+.tab-panel-card p code {
+  overflow-wrap: anywhere;
 }
 
 .code-copy-btn {
@@ -1126,6 +1205,10 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.footer-inner > * {
+  min-inline-size: 0;
 }
 
 .footer-links {
@@ -1167,7 +1250,7 @@ button {
   }
 
   .mockup-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .mockup-sidebar,
@@ -1179,7 +1262,7 @@ button {
   .bento-grid,
   .platform-grid,
   .split-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .split-grid.is-reversed .split-visual {
@@ -1192,11 +1275,53 @@ button {
     width: min(100% - 1.5rem, 1160px);
   }
 
+  .nav-inner {
+    gap: 0.5rem;
+  }
+
+  .nav-actions {
+    gap: 0.4rem;
+  }
+
   .hero {
     padding-block: 3rem 2.25rem;
   }
 
   .section {
     padding-block: 3.25rem;
+  }
+
+  .mockup-detail {
+    padding: 1rem;
+  }
+
+  .arch-diagram-card {
+    padding: 0.85rem;
+  }
+
+  .terminal-card pre {
+    padding: 0.85rem;
+    font-size: 0.78rem;
+  }
+
+  .status-badge {
+    white-space: normal;
+    max-inline-size: 100%;
+  }
+
+  .shared-core-callout {
+    padding: 1rem 1.15rem;
+  }
+
+  .shared-core-callout .btn-secondary {
+    inline-size: 100%;
+  }
+
+  .tab-panel-card {
+    padding: 1.1rem;
+  }
+
+  .footer-inner {
+    align-items: flex-start;
   }
 }
