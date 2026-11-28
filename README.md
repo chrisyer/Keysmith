@@ -49,7 +49,7 @@ _Keysmith is an independent, local-first desktop client, CLI, and browser extens
 
 - **Zero-Knowledge Security Core (`crates/keysmith-core`)**:
   - Full Vaultwarden / Bitwarden protocol compatibility (`Argon2id` / `PBKDF2-SHA256` + `HKDF` + `AES-256-CBC-HMAC` `EncString Type 2` authenticate-then-decrypt).
-  - Minimal in-memory secret exposure (`zeroize`), zero plaintext cached in SQLite, automatic `401` token refresh, and offloaded crypto via `spawn_blocking`.
+  - Minimal in-memory secret exposure (`zeroize`), all vault secrets and session tokens encrypted at rest in SQLite (Type 2 AEAD), automatic `401` token refresh, and offloaded crypto via `spawn_blocking`.
   - **OS-Level Security Integration**: Auto-lock on sleep/lid-close/screen-lock, concealed/transient `NSPasteboard` clipboard protection with auto-clear countdown on macOS, screen-capture protection toggle, Touch ID / biometric unlock with configurable master-password reprompt intervals.
 - **Native Desktop App (`apps/desktop`)**:
   - Translucent sidebar vibrancy, system tray bar persistence, **Quick Access** global overlay (`⌘⇧Space`), and **Large Type** floating window cleared instantly on lock.
@@ -80,7 +80,7 @@ On launch, Keysmith extracts the browser extension to `%APPDATA%\dev.keysmith.de
 curl -fsSL https://raw.githubusercontent.com/chrisyer/Keysmith/v0.1.4/install.sh | sh
 ```
 
-> Inspect scripts before piping to `sh`. `install.sh` strictly requires a matching `SHA256SUMS.txt` checksum and leaves macOS Gatekeeper approval under your control.
+> Inspect scripts before piping to `sh`. Note: the `v0.1.4` release URL points to the latest tagged release installer; the hardened [`install.sh`](./install.sh) on `main` (which strictly requires a matching `SHA256SUMS.txt` checksum and leaves macOS Gatekeeper approval under your control without automatic `xattr -cr`) will ship in the upcoming release (`v0.1.5+`).
 
 #### Option 2: Homebrew Cask
 

@@ -194,7 +194,7 @@
         <section id="advantages" class="section container">
           <div class="section-header">
             <span class="section-eyebrow" data-i18n="adv.eyebrow">为什么选择 Keysmith</span>
-            <h2 class="section-title" data-i18n="adv.title">1Password 的精致体验，Bitwarden / Vaultwarden 的完全自主</h2>
+            <h2 class="section-title" data-i18n="adv.title">原生桌面级精致体验，Bitwarden / Vaultwarden 的完全自主</h2>
             <p class="section-desc" data-i18n="adv.desc">
               不再需要在闭源订阅付费和粗糙臃肿的开源客户端之间妥协。Keysmith 把企业级零知识密码学、极速原生交互与开发者生产力集成在同一个轻量客户端中。
             </p>
@@ -205,7 +205,7 @@
               <div class="bento-icon" aria-hidden="true">🛡️</div>
               <h3 data-i18n="adv.c1Title">端到端零知识 & 私有部署</h3>
               <p data-i18n="adv.c1Body">
-                完全兼容 Bitwarden / Vaultwarden 1.37+ 协议，采用 Argon2id / PBKDF2 + HKDF + AES-256-CBC-HMAC 本地加解密。密钥生命周期使用 zeroize 自动擦除，SQLite 不落盘任何明文。
+                完全兼容 Bitwarden / Vaultwarden 1.37+ 协议，采用 Argon2id / PBKDF2 + HKDF + AES-256-CBC-HMAC 本地加解密。密钥生命周期使用 zeroize 自动擦除，载荷与会话令牌全部加密后写入 SQLite。
               </p>
               <div class="bento-tags">
                 <span class="tag-chip">Vaultwarden</span>
@@ -218,7 +218,7 @@
               <div class="bento-icon" aria-hidden="true">⚡</div>
               <h3 data-i18n="adv.c2Title">Rust + Tauri v2 原生极速</h3>
               <p data-i18n="adv.c2Body">
-                安装包仅 ~10 MB，告别 Electron 内存占用。集成 macOS Touch ID 与 Windows Hello 无感解锁、Liquid Glass 毛玻璃视觉、防截屏保护与剪贴板自动倒计时清除。
+                安装包仅 ~10 MB，告别 Electron 内存占用。集成按需开启的 macOS Touch ID 与 Windows Hello 原生生物识别解锁、Liquid Glass 毛玻璃视觉、防截屏保护与剪贴板自动倒计时清除。
               </p>
               <div class="bento-tags">
                 <span class="tag-chip">Tauri v2</span>
@@ -513,7 +513,7 @@ ssh -T git@github.com</code></pre>
                 <span class="status-badge is-ready" data-i18n="plat.statusReady">已发布 · v0.1.4</span>
               </div>
               <p data-i18n="plat.macDesc">
-                支持 Apple Silicon (arm64) 与 Intel (x64)。原生 Touch ID 无感解锁、Liquid Glass 毛玻璃、屏幕二维码秒扫、全局快捷访问及 Homebrew Cask 一键升级。
+                支持 Apple Silicon (arm64) 与 Intel (x64)。支持按需开启的原生 Touch ID 解锁、Liquid Glass 毛玻璃、屏幕二维码秒扫、全局快捷访问及 Homebrew Cask 一键升级。
               </p>
             </article>
 
@@ -639,9 +639,9 @@ brew upgrade --cask chrisyer/keysmith/keysmith</code></pre>
 
               <div role="tabpanel" aria-labelledby="tab-script" hidden="until-found">
                 <div class="tab-panel-card">
-                  <h3 data-i18n="inst.p1Title">macOS 一键安装脚本（自动校验 SHA-256）</h3>
+                  <h3 data-i18n="inst.p1Title">macOS 一键安装脚本（v0.1.4）</h3>
                   <p data-i18n="inst.p1Desc">
-                    自动识别 Apple Silicon (arm64) 与 Intel (x64)，下载对应 DMG、校验 SHA-256 哈希并安装至 /Applications。
+                    自动识别 Apple Silicon (arm64) 与 Intel (x64) 并下载 DMG 安装至 /Applications。强制严格 SHA-256 校验与不自动移除隔离属性的加固脚本已合入 main，将在下一版本（v0.1.5+）同步启用。
                   </p>
                   <div class="terminal-card">
                     <div class="terminal-head">

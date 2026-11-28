@@ -43,20 +43,21 @@ export function AuthScreen() {
   const getFilter = useUiStore((s) => s.getFilter);
   const refreshAll = useVaultStore((s) => s.refreshAll);
 
+  const useDevPreviewDefaults = import.meta.env.DEV && !inTauri;
   const [tab, setTab] = useState<'login' | 'register'>('login');
   const [serverUrl, setServerUrl] = useState(
-    inTauri ? appSettings.lastServerUrl ?? '' : 'http://localhost:8080',
+    inTauri ? appSettings.lastServerUrl ?? '' : useDevPreviewDefaults ? 'http://localhost:8080' : '',
   );
   const [serverOk, setServerOk] = useState<'idle' | 'checking' | 'ok' | 'error'>(
-    inTauri ? 'idle' : 'ok',
+    useDevPreviewDefaults ? 'ok' : 'idle',
   );
   const [serverVersion, setServerVersion] = useState(
-    inTauri ? '' : 'Vaultwarden 1.32.5 (Local)',
+    useDevPreviewDefaults ? 'Vaultwarden 1.32.5 (Local)' : '',
   );
   const [registrationDisabled, setRegistrationDisabled] = useState(false);
-  const [email, setEmail] = useState(inTauri ? '' : 'cherry@example.com');
-  const [name, setName] = useState(inTauri ? '' : 'Cherry Wang');
-  const [masterPassword, setMasterPassword] = useState(inTauri ? '' : 'keysmith');
+  const [email, setEmail] = useState(useDevPreviewDefaults ? 'cherry@example.com' : '');
+  const [name, setName] = useState(useDevPreviewDefaults ? 'Cherry Wang' : '');
+  const [masterPassword, setMasterPassword] = useState(useDevPreviewDefaults ? 'keysmith' : '');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [twoFactorVisible, setTwoFactorVisible] = useState(false);
   const [twoFactorCode, setTwoFactorCode] = useState('');
@@ -64,7 +65,7 @@ export function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(false);
-  const [weakKdfIterations, setWeakKdfIterations] = useState<number | null>(null);
+  const [weakKdfMessage, setWeakKdfMessage] = useState<string | null>(null);
 
   const nonLoopbackHttp = isNonLoopbackHttpUrl(serverUrl);
 
@@ -115,6 +116,24 @@ export function AuthScreen() {
     [serverUrl, allowInsecureHttp],
   );
 
+  const evaluateWeakKdf = (cfg: {
+    kdf: number;
+    kdfIterations: number;
+    kdfMemory?: number | null;
+  }): string | null => {
+    if (cfg.kdf === 0 && cfg.kdfIterations < 600_000) {
+      return fmt(dict.auth.weakKdfWarning, { iterations: cfg.kdfIterations });
+    }
+    if (cfg.kdf === 1) {
+      const iters = cfg.kdfIterations ?? 0;
+      const mem = cfg.kdfMemory ?? 0;
+      if (iters < 3 || mem < 64) {
+        return fmt(dict.auth.weakArgon2Warning, { iterations: iters, memory: mem });
+      }
+    }
+    return null;
+  };
+
   const probePrelogin = async () => {
     const cleanServer = serverUrl.trim();
     const cleanEmail = email.trim();
@@ -122,7 +141,7 @@ export function AuthScreen() {
     if (isNonLoopbackHttpUrl(cleanServer) && !allowInsecureHttp) return;
     try {
       const cfg = await tauriClient.authPrelogin(cleanServer, cleanEmail, allowInsecureHttp);
-      setWeakKdfIterations(cfg.kdf === 0 && cfg.kdfIterations < 600_000 ? cfg.kdfIterations : null);
+      setWeakKdfMessage(evaluateWeakKdf(cfg));
     } catch {
       // Silent on blur; handleSubmit surfaces errors
     }
@@ -150,7 +169,7 @@ export function AuthScreen() {
     setLoading(true);
     try {
       const cfg = await tauriClient.authPrelogin(serverUrl, email, allowInsecureHttp);
-      setWeakKdfIterations(cfg.kdf === 0 && cfg.kdfIterations < 600_000 ? cfg.kdfIterations : null);
+      setWeakKdfMessage(evaluateWeakKdf(cfg));
       if (tab === 'login') {
         await login({
           serverUrl,
@@ -322,7 +341,7 @@ export function AuthScreen() {
                   setServerUrl(e.target.value);
                   setServerOk('idle');
                   setAllowInsecureHttp(false);
-                  setWeakKdfIterations(null);
+                  setWeakKdfMessage(null);
                 }}
                 onBlur={() => void checkServer()}
                 placeholder="https://vault.example.com"
@@ -358,10 +377,10 @@ export function AuthScreen() {
                 </label>
               </div>
             )}
-            {weakKdfIterations !== null && (
+            {weakKdfMessage !== null && (
               <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
                 <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-                <span>{fmt(dict.auth.weakKdfWarning, { iterations: weakKdfIterations })}</span>
+                <span>{weakKdfMessage}</span>
               </div>
             )}
           </div>

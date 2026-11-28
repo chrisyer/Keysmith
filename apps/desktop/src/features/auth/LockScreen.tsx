@@ -57,6 +57,8 @@ export function LockScreen() {
     }
   };
 
+  const isWindows = typeof navigator !== 'undefined' && /Win/i.test(navigator.platform || navigator.userAgent);
+
   const handleTouchId = useCallback(
     async (isAuto = false) => {
       setTouchScanning(true);
@@ -68,7 +70,7 @@ export function LockScreen() {
         if (isAuto) {
           setError(dict.lock.biometricFailedFallback);
         } else {
-          setError(err instanceof Error ? err.message : 'Touch ID failed');
+          setError(err instanceof Error ? err.message : 'Biometric authentication failed');
         }
         window.setTimeout(() => passwordInputRef.current?.focus(), 60);
       } finally {
@@ -189,7 +191,9 @@ export function LockScreen() {
             ) : (
               <Fingerprint size={17} />
             )}
-            {touchScanning ? dict.lock.touchIdVerifying : dict.lock.touchIdBtn}
+            {touchScanning
+              ? (isWindows ? dict.lock.windowsHelloVerifying : dict.lock.touchIdVerifying)
+              : (isWindows ? dict.lock.windowsHelloBtn : dict.lock.touchIdBtn)}
           </button>
         )}
 

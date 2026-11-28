@@ -48,14 +48,14 @@ const I18N = {
     },
     adv: {
       eyebrow: '为什么选择 Keysmith',
-      title: '1Password 的精致体验，Bitwarden / Vaultwarden 的完全自主',
+      title: '原生桌面级精致体验，Bitwarden / Vaultwarden 的完全自主',
       desc: '不再需要在闭源订阅付费和粗糙臃肿的开源客户端之间妥协。Keysmith 把企业级零知识密码学、极速原生交互与开发者生产力集成在同一个轻量客户端中。',
       c1Title: '端到端零知识 & 私有部署',
       c1Body:
-        '完全兼容 Bitwarden / Vaultwarden 1.37+ 协议，采用 Argon2id / PBKDF2 + HKDF + AES-256-CBC-HMAC 本地加解密。密钥生命周期使用 zeroize 自动擦除，SQLite 不落盘任何明文。',
+        '完全兼容 Bitwarden / Vaultwarden 1.37+ 协议，采用 Argon2id / PBKDF2 + HKDF + AES-256-CBC-HMAC 本地加解密。密钥生命周期使用 zeroize 自动擦除，载荷与会话令牌全部加密后写入 SQLite。',
       c2Title: 'Rust + Tauri v2 原生极速',
       c2Body:
-        '安装包仅 ~10 MB，告别 Electron 内存占用。集成 macOS Touch ID 与 Windows Hello 无感解锁、Liquid Glass 毛玻璃视觉、防截屏保护与剪贴板自动倒计时清除。',
+        '安装包仅 ~10 MB，告别 Electron 内存占用。集成按需开启的 macOS Touch ID 与 Windows Hello 原生生物识别解锁、Liquid Glass 毛玻璃视觉、防截屏保护与剪贴板自动倒计时清除。',
       c3Title: 'Passkey 通行密钥 & 屏幕扫码 2FA',
       c3Body:
         '浏览器扩展无缝接管 WebAuthn 注册与登录（支持 ES256、Ed25519 与 PRF 扩展），跨设备加密同步。添加一次性验证码支持全屏自动识别二维码或剪贴板导入。',
@@ -138,7 +138,7 @@ const I18N = {
       statusExt: '已发布 · v0.3.0',
       statusPlanned: '即将推出',
       macDesc:
-        '支持 Apple Silicon (arm64) 与 Intel (x64)。原生 Touch ID 无感解锁、Liquid Glass 毛玻璃、屏幕二维码秒扫、全局快捷访问及 Homebrew Cask 一键升级。',
+        '支持 Apple Silicon (arm64) 与 Intel (x64)。支持按需开启的原生 Touch ID 解锁、Liquid Glass 毛玻璃、屏幕二维码秒扫、全局快捷访问及 Homebrew Cask 一键升级。',
       winDesc:
         '支持 Windows 10 / 11 (x64)，提供 NSIS (.exe) 与 MSI 安装包。支持 Windows Hello、GDI 屏幕扫码、Win32 Auto-Type 及浏览器注册表自动配置。',
       extName: '浏览器扩展 (MV3)',
@@ -162,9 +162,9 @@ const I18N = {
       p0Title: 'macOS Homebrew Cask（推荐 · 支持一键升级）',
       p0Desc:
         '请务必携带完整的 tap 前缀 chrisyer/keysmith/keysmith，避免与 Homebrew 官方源中同名应用冲突。当前发布为本地 ad-hoc 签名，首次打开可在 macOS「隐私与安全性」中放行，或按提示手动执行 xattr -dr com.apple.quarantine /Applications/Keysmith.app。',
-      p1Title: 'macOS 一键安装脚本（自动校验 SHA-256）',
+      p1Title: 'macOS 一键安装脚本（v0.1.4）',
       p1Desc:
-        '自动识别 Apple Silicon (arm64) 与 Intel (x64)，下载对应 DMG、校验 SHA-256 哈希并安装至 /Applications。',
+        '自动识别 Apple Silicon (arm64) 与 Intel (x64) 并下载 DMG 安装至 /Applications。强制严格 SHA-256 校验与不自动移除隔离属性的加固脚本已合入 main，将在下一版本（v0.1.5+）同步启用。',
       p2Title: 'Windows 10 / 11 (x64) 安装包',
       p2Desc:
         '前往 GitHub Releases 下载 Keysmith_0.1.4_x64-setup.exe (NSIS) 或 Keysmith_0.1.4_x64_en-US.msi 双击安装即可。启动后会自动配置浏览器的 NativeMessagingHosts 注册表。',
@@ -227,11 +227,11 @@ const I18N = {
     },
     adv: {
       eyebrow: 'Why Keysmith',
-      title: '1Password polish meets full self-hosted Vaultwarden freedom',
+      title: 'Native desktop polish meets full self-hosted Vaultwarden freedom',
       desc: 'No need to choose between closed-source subscriptions and sluggish Electron wrappers. Keysmith unites zero-knowledge cryptography, native craft, and developer tooling in one lightweight app.',
       c1Title: 'End-to-End Zero-Knowledge & Self-Hosted',
       c1Body:
-        'Full Bitwarden / Vaultwarden 1.37+ sync compatibility with local Argon2id / PBKDF2 + HKDF + AES-256-CBC-HMAC encryption. Memory secrets are zeroized automatically with zero plaintext stored in SQLite.',
+        'Full Bitwarden / Vaultwarden 1.37+ sync compatibility with local Argon2id / PBKDF2 + HKDF + AES-256-CBC-HMAC encryption. Memory secrets are zeroized automatically, with vault payloads and session tokens encrypted at rest in SQLite.',
       c2Title: 'Rust + Tauri v2 Native Speed',
       c2Body:
         'Around 10 MB installer with instant launch and low memory footprint. Integrates Touch ID / Windows Hello unlock, Liquid Glass translucency, screen-capture protection, and auto-clearing concealed clipboards.',
@@ -341,9 +341,9 @@ const I18N = {
       p0Title: 'macOS Homebrew Cask (Recommended · Easy Upgrades)',
       p0Desc:
         'Always include the full chrisyer/keysmith/keysmith tap prefix to avoid colliding with Homebrew’s unrelated official keysmith cask. Builds are currently ad-hoc signed; approve via macOS Privacy & Security or manual xattr -dr com.apple.quarantine.',
-      p1Title: 'macOS One-Line Installer (Auto SHA-256 Verification)',
+      p1Title: 'macOS One-Line Installer (v0.1.4)',
       p1Desc:
-        'Detects Apple Silicon (arm64) or Intel (x64), verifies the release SHA-256 checksum, and installs Keysmith.app into /Applications.',
+        'Detects Apple Silicon (arm64) or Intel (x64) and installs Keysmith.app into /Applications. Strict SHA-256 verification and manual Gatekeeper approval are in main and will ship in v0.1.5+.',
       p2Title: 'Windows 10 / 11 (x64) Installers',
       p2Desc:
         'Download Keysmith_0.1.4_x64-setup.exe (NSIS) or Keysmith_0.1.4_x64_en-US.msi from GitHub Releases. NativeMessagingHosts registry keys are configured automatically on first run.',

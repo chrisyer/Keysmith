@@ -297,9 +297,7 @@ mod macos_impl {
     };
     use core_foundation_sys::number::kCFBooleanTrue;
     use core_foundation_sys::string::{kCFStringEncodingUTF8, CFStringCreateWithBytes, CFStringRef};
-    use security_framework::passwords::{
-        delete_generic_password, get_generic_password, set_generic_password,
-    };
+    use security_framework::passwords::delete_generic_password;
     use security_framework_sys::access_control::{
         kSecAccessControlBiometryCurrentSet, kSecAccessControlUserPresence,
         kSecAttrAccessibleWhenUnlockedThisDeviceOnly, SecAccessControlCreateWithFlags,
@@ -751,45 +749,51 @@ mod macos_impl {
                 )
             };
         }
-        if !acl.is_null() {
-            let _acl_guard = CfOwned(acl as *const c_void);
-            let cf_service = make_cf_string(KEYCHAIN_SERVICE)?;
-            let cf_account = make_cf_string(account_id)?;
-            let cf_data = CfOwned(unsafe {
-                CFDataCreate(kCFAllocatorDefault, key.as_ptr(), key.len() as isize)
-            } as *const c_void);
-            if !cf_data.0.is_null() {
-                let attrs = unsafe {
-                    make_cf_dict(&[
-                        (kSecClass as *const c_void, kSecClassGenericPassword as *const c_void),
-                        (kSecAttrService as *const c_void, cf_service.0),
-                        (kSecAttrAccount as *const c_void, cf_account.0),
-                        (kSecValueData as *const c_void, cf_data.0),
-                        (
-                            kSecUseDataProtectionKeychain as *const c_void,
-                            kCFBooleanTrue as *const c_void,
-                        ),
-                        (kSecAttrAccessControl as *const c_void, acl as *const c_void),
-                    ])?
-                };
-                let status = unsafe { SecItemAdd(attrs.0 as _, std::ptr::null_mut()) };
-                if status == ERR_SEC_SUCCESS {
-                    let _ = delete_generic_password(KEYCHAIN_SERVICE, account_id);
-                    return Ok(());
-                }
-                if status != ERR_SEC_MISSING_ENTITLEMENT {
-                    return Err(CoreError::Biometric(format!(
-                        "写入 macOS Data Protection Keychain 失败 (OSStatus={status})"
-                    )));
-                }
-                eprintln!(
-                    "[keysmith] Data Protection Keychain 不可用 (OSStatus=-34018，通常为 ad-hoc 签名)，已回退到 LAContext 保护的登录钥匙串"
-                );
-            }
+        if acl.is_null() {
+            return Err(CoreError::Biometric(
+                "Unable to create macOS SecAccessControl biometric ACL".to_string(),
+            ));
         }
 
-        set_generic_password(KEYCHAIN_SERVICE, account_id, key)
-            .map_err(|e| CoreError::Biometric(format!("写入 macOS Keychain 失败: {e}")))
+        let _acl_guard = CfOwned(acl as *const c_void);
+        let cf_service = make_cf_string(KEYCHAIN_SERVICE)?;
+        let cf_account = make_cf_string(account_id)?;
+        let cf_data = CfOwned(unsafe {
+            CFDataCreate(kCFAllocatorDefault, key.as_ptr(), key.len() as isize)
+        } as *const c_void);
+        if cf_data.0.is_null() {
+            return Err(CoreError::Biometric(
+                "Failed to allocate CFData for macOS Data Protection Keychain".to_string(),
+            ));
+        }
+
+        let attrs = unsafe {
+            make_cf_dict(&[
+                (kSecClass as *const c_void, kSecClassGenericPassword as *const c_void),
+                (kSecAttrService as *const c_void, cf_service.0),
+                (kSecAttrAccount as *const c_void, cf_account.0),
+                (kSecValueData as *const c_void, cf_data.0),
+                (
+                    kSecUseDataProtectionKeychain as *const c_void,
+                    kCFBooleanTrue as *const c_void,
+                ),
+                (kSecAttrAccessControl as *const c_void, acl as *const c_void),
+            ])?
+        };
+        let status = unsafe { SecItemAdd(attrs.0 as _, std::ptr::null_mut()) };
+        if status == ERR_SEC_SUCCESS {
+            let _ = delete_generic_password(KEYCHAIN_SERVICE, account_id);
+            return Ok(());
+        }
+        if status == ERR_SEC_MISSING_ENTITLEMENT {
+            return Err(CoreError::Biometric(
+                "macOS Data Protection Keychain ACL unavailable (OSStatus=-34018; ad-hoc or unsigned build). Biometric unlock requires a signed build with Keychain access-group entitlement."
+                    .to_string(),
+            ));
+        }
+        Err(CoreError::Biometric(format!(
+            "Failed to store key in macOS Data Protection Keychain (OSStatus={status})"
+        )))
     }
 
     pub fn keychain_load_with_reason(
@@ -823,25 +827,22 @@ mod macos_impl {
             let ptr = unsafe { CFDataGetBytePtr(data_ref) };
             if ptr.is_null() || len == 0 {
                 return Err(CoreError::Biometric(
-                    "macOS Keychain 返回了空的解锁密钥".to_string(),
+                    "macOS Keychain returned an empty unlock key".to_string(),
                 ));
             }
             let bytes = unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec();
             return Ok(Zeroizing::new(bytes));
         }
 
-        if status != ERR_SEC_MISSING_ENTITLEMENT && status != ERR_SEC_ITEM_NOT_FOUND {
-            return Err(CoreError::Biometric(format!(
-                "从 macOS Data Protection Keychain 读取解锁密钥失败 (OSStatus={status})"
-            )));
+        if status == ERR_SEC_MISSING_ENTITLEMENT {
+            return Err(CoreError::Biometric(
+                "macOS Data Protection Keychain ACL unavailable (OSStatus=-34018); unlock with your master password."
+                    .to_string(),
+            ));
         }
-
-        let bytes = get_generic_password(KEYCHAIN_SERVICE, account_id).map_err(|e| {
-            CoreError::Biometric(format!(
-                "未能从 macOS Keychain 读取解锁密钥（请先用主密码解锁一次以绑定）: {e}"
-            ))
-        })?;
-        Ok(Zeroizing::new(bytes))
+        Err(CoreError::Biometric(format!(
+            "Unable to load biometric key from macOS Data Protection Keychain (OSStatus={status}); unlock with your master password."
+        )))
     }
 
     pub fn keychain_delete(account_id: &str) -> Result<(), CoreError> {

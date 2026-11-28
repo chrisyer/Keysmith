@@ -556,19 +556,24 @@ export function SettingsModal() {
               </div>
             )}
 
-            {tab === 'security' && (
+            {tab === 'security' && (() => {
+              const isWindows = typeof navigator !== 'undefined' && /Win/i.test(navigator.platform || navigator.userAgent);
+              const bioTitle = isWindows ? dict.settings.windowsHello : dict.settings.touchId;
+              const bioDesc = isWindows ? dict.settings.windowsHelloDesc : dict.settings.touchIdDesc;
+              return (
               <div className="flex flex-col gap-2.5 text-[13px]">
                 <label className="flex items-center justify-between gap-4 p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] cursor-pointer">
                   <div>
-                    <div className="font-medium text-[var(--text-primary)]">{dict.settings.touchId}</div>
-                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{dict.settings.touchIdDesc}</div>
+                    <div className="font-medium text-[var(--text-primary)]">{bioTitle}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{bioDesc}</div>
+                    <div className="text-[11px] text-[var(--text-muted)] mt-1">{dict.settings.biometricBindingNote}</div>
                   </div>
                   <input
                     type="checkbox"
                     checked={biometricEnabled}
                     onChange={(e) => void updatePreferences({ biometricEnabled: e.target.checked })}
                     className="ks-checkbox"
-                    aria-label={dict.settings.touchId}
+                    aria-label={bioTitle}
                   />
                 </label>
 
@@ -810,7 +815,8 @@ export function SettingsModal() {
                   </button>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {tab === 'ssh' && (
               <div className="flex flex-col gap-3.5 text-[13px]">

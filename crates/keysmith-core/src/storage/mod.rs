@@ -500,7 +500,7 @@ impl Storage {
             "ALTER TABLE accounts ADD COLUMN last_master_password_unlock_at TEXT",
             "ALTER TABLE accounts ADD COLUMN travel_mode INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE accounts ADD COLUMN trash_auto_purge_days INTEGER NOT NULL DEFAULT 30",
-            "ALTER TABLE accounts ADD COLUMN ssh_biometric_confirm INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE accounts ADD COLUMN ssh_biometric_confirm INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE vaults ADD COLUMN is_organization INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE vaults ADD COLUMN organization_id TEXT",
         ];

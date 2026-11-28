@@ -505,10 +505,10 @@ async fn dispatch_rpc(
                 return Ok(json!({ "unlocked": true, "status": "Unlocked" }));
             }
             if st.status != AuthStatus::Locked {
-                return Err("请先登录 Keysmith 账号".to_string());
+                return Err("Please sign in to Keysmith first".to_string());
             }
             if !st.biometric_enabled {
-                return Err("未启用 Touch ID / 生物识别解锁".to_string());
+                return Err("Biometric unlock is not enabled".to_string());
             }
             {
                 let mut guard = LAST_IPC_BIOMETRIC_ATTEMPT
@@ -517,7 +517,7 @@ async fn dispatch_rpc(
                     .unwrap_or_else(|e| e.into_inner());
                 if let Some(prev) = *guard {
                     if prev.elapsed() < Duration::from_secs(5) {
-                        return Err("生物识别解锁请求过于频繁，请稍后重试".to_string());
+                        return Err("Biometric unlock requested too frequently; please try again shortly".to_string());
                     }
                 }
                 *guard = Some(Instant::now());
@@ -539,7 +539,7 @@ async fn dispatch_rpc(
                 .and_then(|v| v.as_str())
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
-                .ok_or_else(|| "缺少 itemId 参数".to_string())?
+                .ok_or_else(|| "Missing itemId parameter".to_string())?
                 .to_string();
             if let Some(win) = app.get_webview_window("quick-access") {
                 let _ = win.hide();
@@ -584,8 +584,8 @@ fn require_unlocked(core: &AppCore) -> Result<(), String> {
     let state = core.session_get_state();
     match state.status {
         AuthStatus::Unlocked => Ok(()),
-        AuthStatus::Locked => Err("Keysmith 保险库已锁定，请先解锁".to_string()),
-        AuthStatus::Unauthenticated => Err("请先登录 Keysmith 账号".to_string()),
+        AuthStatus::Locked => Err("Keysmith vault is locked; please unlock first".to_string()),
+        AuthStatus::Unauthenticated => Err("Please sign in to Keysmith first".to_string()),
     }
 }
 
@@ -688,11 +688,11 @@ fn rpc_clipboard_copy(core: &AppCore, params: &Value) -> Result<Value, String> {
     let value = params
         .get("value")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "缺少 value 参数".to_string())?;
+        .ok_or_else(|| "Missing value parameter".to_string())?;
     let label = params
         .get("label")
         .and_then(|v| v.as_str())
-        .unwrap_or("浏览器扩展内容");
+        .unwrap_or("Browser Extension");
     let sensitive = params
         .get("sensitive")
         .and_then(|v| v.as_bool())
@@ -705,7 +705,7 @@ fn rpc_clipboard_copy(core: &AppCore, params: &Value) -> Result<Value, String> {
 fn find_item_by_id_or_title(core: &AppCore, id_or_title: &str) -> Result<ItemDetail, String> {
     let needle = id_or_title.trim();
     if needle.is_empty() {
-        return Err("缺少条目标识或标题".to_string());
+        return Err("Missing item ID or title".to_string());
     }
     if let Some(exact) = core.item_get(needle).map_err(|e| e.to_string())? {
         return Ok(exact);
@@ -726,11 +726,11 @@ fn find_item_by_id_or_title(core: &AppCore, id_or_title: &str) -> Result<ItemDet
             list.iter()
                 .find(|s| s.title.to_lowercase().contains(&needle_lower))
         })
-        .ok_or_else(|| format!("未找到匹配条目: {needle}"))?;
+        .ok_or_else(|| format!("Matching item not found: {needle}"))?;
 
     core.item_get(&matched.id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "条目不存在".to_string())
+        .ok_or_else(|| "Item not found".to_string())
 }
 
 fn extract_credentials(item: &ItemDetail) -> (Option<String>, Option<String>, Option<String>) {
@@ -831,7 +831,7 @@ async fn rpc_get(core: &AppCore, role: ClientRole, params: &Value) -> Result<Val
         .get("idOrTitle")
         .or_else(|| params.get("itemId"))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "缺少 idOrTitle 参数".to_string())?;
+        .ok_or_else(|| "Missing idOrTitle parameter".to_string())?;
     let item = find_item_by_id_or_title(core, id_or_title)?;
     let reveal_cli = params
         .get("reveal")
@@ -920,7 +920,7 @@ async fn rpc_get(core: &AppCore, role: ClientRole, params: &Value) -> Result<Val
                 }
             }
         }
-        return Err(format!("条目「{}」中未找到字段「{}」", item.title, field_name));
+        return Err(format!("Field \"{field_name}\" not found in item \"{}\"", item.title));
     }
 
     let (username, password, totp) = extract_credentials(&item);
@@ -949,7 +949,7 @@ async fn rpc_totp(core: &AppCore, params: &Value) -> Result<Value, String> {
         .get("idOrTitle")
         .or_else(|| params.get("itemId"))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "缺少 idOrTitle 参数".to_string())?;
+        .ok_or_else(|| "Missing idOrTitle parameter".to_string())?;
     let item = find_item_by_id_or_title(core, id_or_title)?;
     if item.payload.reprompt {
         let verify_bio = params
@@ -965,7 +965,7 @@ async fn rpc_totp(core: &AppCore, params: &Value) -> Result<Value, String> {
         }
     }
     let (_, _, totp_opt) = extract_credentials(&item);
-    let secret = totp_opt.ok_or_else(|| format!("条目「{}」未配置 TOTP", item.title))?;
+    let secret = totp_opt.ok_or_else(|| format!("TOTP is not configured on item \"{}\"", item.title))?;
     let code = core.totp_compute(&secret).map_err(|e| e.to_string())?;
     serde_json::to_value(code).map_err(|e| e.to_string())
 }
@@ -1194,7 +1194,7 @@ fn rpc_url_match(core: &AppCore, params: &Value) -> Result<Value, String> {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 url 参数".to_string())?;
+        .ok_or_else(|| "Missing url parameter".to_string())?;
 
     let Some((target_url, target_host)) = parse_url_host(raw_url) else {
         return Ok(json!([]));
@@ -1394,7 +1394,7 @@ fn rpc_check_login_save(core: &AppCore, params: &Value) -> Result<Value, String>
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 url 参数".to_string())?;
+        .ok_or_else(|| "Missing url parameter".to_string())?;
     let username = params
         .get("username")
         .and_then(|v| v.as_str())
@@ -1536,7 +1536,7 @@ async fn rpc_save_or_update_login(
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 url 参数".to_string())?;
+        .ok_or_else(|| "Missing url parameter".to_string())?;
     let username = params
         .get("username")
         .and_then(|v| v.as_str())
@@ -1573,7 +1573,7 @@ async fn rpc_save_or_update_login(
         let existing = core
             .item_get(id)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("未找到条目: {id}"))?;
+            .ok_or_else(|| format!("Item not found: {id}"))?;
         let mut draft = existing.to_draft();
         if let Some(t) = title_param {
             draft.title = t;
@@ -1636,7 +1636,7 @@ async fn rpc_save_or_update_login(
     }
 
     if username.is_empty() && password.is_empty() {
-        return Err("用户名和密码不能同时为空".to_string());
+        return Err("Username and password cannot both be empty".to_string());
     }
 
     let title = title_param.unwrap_or_else(|| {
@@ -1726,13 +1726,13 @@ fn rpc_check_sso_save(core: &AppCore, params: &Value) -> Result<Value, String> {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 url 参数".to_string())?;
+        .ok_or_else(|| "Missing url parameter".to_string())?;
     let provider = params
         .get("provider")
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 provider 参数".to_string())?;
+        .ok_or_else(|| "Missing provider parameter".to_string())?;
 
     let Some((target_url, target_host)) = parse_url_host(raw_url) else {
         return Ok(json!({ "shouldPrompt": false, "reason": "invalid_url" }));
@@ -1817,13 +1817,13 @@ async fn rpc_save_sso_login(
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 url 参数".to_string())?;
+        .ok_or_else(|| "Missing url parameter".to_string())?;
     let provider = params
         .get("provider")
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 provider 参数".to_string())?
+        .ok_or_else(|| "Missing provider parameter".to_string())?
         .to_string();
     let username = params
         .get("username")
@@ -1856,7 +1856,7 @@ async fn rpc_save_sso_login(
         let existing = core
             .item_get(id)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("未找到条目: {id}"))?;
+            .ok_or_else(|| format!("Item not found: {id}"))?;
         let mut draft = existing.to_draft();
         draft.sso_provider = Some(provider.clone());
         if let Some(t) = title_param {
@@ -2045,7 +2045,7 @@ fn rpc_passkey_list_for_rp(core: &AppCore, params: &Value) -> Result<Value, Stri
         .unwrap_or_default();
 
     if !origin.is_empty() && !rp_id_matches_origin_ext(&resolved_rp_id, origin, &custom_equiv) {
-        return Err(format!("Passkey RP ID ({resolved_rp_id}) 与来源 ({origin}) 不合法或域名不匹配"));
+        return Err(format!("Passkey RP ID ({resolved_rp_id}) does not match origin ({origin})"));
     }
 
     let allow_ids = extract_str_array(params.get("allowCredentials"));
@@ -2151,9 +2151,9 @@ fn validate_passkey_origin_and_tab(
     cross_origin: bool,
 ) -> Result<(), String> {
     let parsed_orig = Url::parse(origin)
-        .map_err(|_| format!("非法的 Passkey 来源 origin: {origin}"))?;
+        .map_err(|_| format!("Invalid Passkey origin: {origin}"))?;
     if !matches!(parsed_orig.scheme(), "http" | "https") {
-        return Err(format!("不支持的 Passkey origin 协议: {origin}"));
+        return Err(format!("Unsupported Passkey origin scheme: {origin}"));
     }
     if !cross_origin && !tab_url.is_empty() {
         if let Ok(parsed_tab) = Url::parse(tab_url) {
@@ -2162,7 +2162,7 @@ fn validate_passkey_origin_and_tab(
                     != parsed_orig.origin().ascii_serialization()
             {
                 return Err(format!(
-                    "非跨源 Passkey 请求的标签页来源 ({}) 与 frame origin ({origin}) 不一致",
+                    "Non-cross-origin Passkey tab origin ({}) does not match frame origin ({origin})",
                     parsed_tab.origin().ascii_serialization()
                 ));
             }
@@ -2183,7 +2183,7 @@ async fn rpc_passkey_create(
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 origin 参数".to_string())?
+        .ok_or_else(|| "Missing origin parameter".to_string())?
         .to_string();
     let tab_url = params
         .get("tabUrl")
@@ -2192,7 +2192,7 @@ async fn rpc_passkey_create(
         .unwrap_or("");
     let options = params
         .get("options")
-        .ok_or_else(|| "缺少 WebAuthn options 参数".to_string())?;
+        .ok_or_else(|| "Missing WebAuthn options parameter".to_string())?;
     let cross_origin_flag = params
         .get("crossOrigin")
         .and_then(|v| v.as_bool())
@@ -2207,7 +2207,7 @@ async fn rpc_passkey_create(
         .map(normalize_rp_id)
         .filter(|s| !s.is_empty())
         .or_else(|| parse_url_host(&origin).map(|(_, h)| normalize_rp_id(&h)))
-        .ok_or_else(|| "无法解析 WebAuthn RP ID".to_string())?;
+        .ok_or_else(|| "Unable to resolve WebAuthn RP ID".to_string())?;
     eprintln!(
         "[audit] passkey_create rp_id={} origin={} tab_url={}",
         rp_id, origin, tab_url
@@ -2219,7 +2219,7 @@ async fn rpc_passkey_create(
         .unwrap_or_default();
 
     if !rp_id_matches_origin_ext(&rp_id, &origin, &custom_equiv) {
-        return Err(format!("Passkey RP ID ({rp_id}) 与来源 ({origin}) 不匹配"));
+        return Err(format!("Passkey RP ID ({rp_id}) does not match origin ({origin})"));
     }
 
     let exclude_ids = extract_str_array(options.get("excludeCredentials"));
@@ -2241,7 +2241,7 @@ async fn rpc_passkey_create(
                     return Ok(json!({
                         "handled": true,
                         "errorName": "InvalidStateError",
-                        "error": "此账号已在 Keysmith 中注册过通行密钥",
+                        "error": "A passkey for this account is already registered in Keysmith",
                     }));
                 }
             }
@@ -2256,7 +2256,7 @@ async fn rpc_passkey_create(
         .to_string();
     let user = options
         .get("user")
-        .ok_or_else(|| "缺少 WebAuthn user 字段".to_string())?;
+        .ok_or_else(|| "Missing WebAuthn user field".to_string())?;
     let user_id_b64u = user
         .get("id")
         .and_then(|v| v.as_str())
@@ -2280,7 +2280,7 @@ async fn rpc_passkey_create(
     let challenge_b64u = options
         .get("challenge")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "缺少 WebAuthn challenge".to_string())?
+        .ok_or_else(|| "Missing WebAuthn challenge".to_string())?
         .to_string();
 
     let pub_key_cred_params: Vec<i32> = options
@@ -2358,7 +2358,7 @@ async fn rpc_passkey_create(
         let existing = core
             .item_get(item_id)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("未找到要绑定的条目: {item_id}"))?;
+            .ok_or_else(|| format!("Target item not found: {item_id}"))?;
         let mut draft = existing.to_draft();
         draft.passkeys.push(created.credential);
         if let Some((orig_url, orig_host)) = parse_url_host(&origin) {
@@ -2462,7 +2462,7 @@ async fn rpc_passkey_assert(
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 origin 参数".to_string())?
+        .ok_or_else(|| "Missing origin parameter".to_string())?
         .to_string();
     let tab_url = params
         .get("tabUrl")
@@ -2474,26 +2474,26 @@ async fn rpc_passkey_assert(
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 itemId 参数".to_string())?;
+        .ok_or_else(|| "Missing itemId parameter".to_string())?;
     let credential_id = params
         .get("credentialId")
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 credentialId 参数".to_string())?;
+        .ok_or_else(|| "Missing credentialId parameter".to_string())?;
     let options = params
         .get("options")
-        .ok_or_else(|| "缺少 WebAuthn options 参数".to_string())?;
+        .ok_or_else(|| "Missing WebAuthn options parameter".to_string())?;
     let challenge_b64u = options
         .get("challenge")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "缺少 WebAuthn challenge".to_string())?
+        .ok_or_else(|| "Missing WebAuthn challenge".to_string())?
         .to_string();
 
     let item = core
         .item_get(item_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("未找到条目: {item_id}"))?;
+        .ok_or_else(|| format!("Item not found: {item_id}"))?;
 
     if item.payload.reprompt {
         let verify_bio = params
@@ -2517,7 +2517,7 @@ async fn rpc_passkey_assert(
             pk.credential_id == credential_id
                 || passkey_matches_credential_list(pk, &[credential_id.to_string()])
         })
-        .ok_or_else(|| "未找到匹配的 Passkey 凭据".to_string())?;
+        .ok_or_else(|| "Matching passkey credential not found".to_string())?;
 
     let pk = &item.payload.passkeys[pk_idx];
     let rp_id_explicit = options
@@ -2617,25 +2617,25 @@ async fn rpc_ssh_sign_ed25519(core: &Arc<AppCore>, params: &Value) -> Result<Val
         .map(|s| s.ssh_agent_enabled)
         .unwrap_or(false)
     {
-        return Err("Keysmith SSH Agent 已在设置中关闭".to_string());
+        return Err("Keysmith SSH Agent is disabled in Settings".to_string());
     }
     let session = core.session_get_state();
     if session.status != AuthStatus::Unlocked {
-        return Err("Keysmith 保险库已锁定，请先解锁".to_string());
+        return Err("Keysmith vault is locked; please unlock first".to_string());
     }
     let target_blob = params
         .get("publicKeyBlob")
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 publicKeyBlob 参数".to_string())?;
+        .ok_or_else(|| "Missing publicKeyBlob parameter".to_string())?;
     let data_b64 = params
         .get("data")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "缺少 data 参数".to_string())?;
+        .ok_or_else(|| "Missing data parameter".to_string())?;
     let raw_data = B64
         .decode(data_b64.trim())
-        .map_err(|e| format!("data Base64 解码失败: {e}"))?;
+        .map_err(|e| format!("Failed to decode base64 data: {e}"))?;
 
     let ssh_items = core
         .item_list(ItemFilter {
@@ -2673,7 +2673,7 @@ async fn rpc_ssh_sign_ed25519(core: &Arc<AppCore>, params: &Value) -> Result<Val
             .iter()
             .find(|f| f.field_type == FieldType::SshPrivateKey && !f.value.trim().is_empty())
             .map(|f| f.value.clone())
-            .ok_or_else(|| format!("SSH 密钥「{}」缺少私钥内容", item.title))?;
+            .ok_or_else(|| format!("SSH key \"{}\" is missing private key material", item.title))?;
 
         let needs_confirm = session.ssh_biometric_confirm || item.payload.reprompt;
         if needs_confirm {
@@ -2710,7 +2710,7 @@ async fn rpc_ssh_sign_ed25519(core: &Arc<AppCore>, params: &Value) -> Result<Val
         return Ok(json!({ "signature": B64.encode(&sig) }));
     }
 
-    Err("未在已解锁保险库中找到匹配的 Ed25519 私钥".to_string())
+    Err("No matching Ed25519 private key found in unlocked vault".to_string())
 }
 
 #[cfg(unix)]
